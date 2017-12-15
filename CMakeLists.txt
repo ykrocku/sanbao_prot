@@ -39,13 +39,13 @@ include_directories("${PROJECT_ROOT_PATH}/thirdparty/msgpackc/include")
 
 #root
 INCLUDE_DIRECTORIES("${PROJECT_ROOT_PATH}")
-IF ( "${CMAKE_SIZEOF_VOID_P}" EQUAL "4") 
+IF ( "${CMAKE_SIZEOF_VOID_P}" EQUAL "4")
     MESSAGE(STATUS "x32 platform")
     SET(PLATFORM x86)
-ELSEIF( "${CMAKE_SIZEOF_VOID_P}" EQUAL "8") 
+ELSEIF( "${CMAKE_SIZEOF_VOID_P}" EQUAL "8")
     MESSAGE(STATUS "x64 platform")
     SET(PLATFORM x64)
-ENDIF()  
+ENDIF()
 
 # opencv package required
 
@@ -104,7 +104,7 @@ ENDIF()
 #link library
 IF (WIN32)
 ELSEIF(ANDROID_ABI)
-    ADD_EXECUTABLE(test-client ./test-client.c ./sample.c lfq.c)
+    ADD_EXECUTABLE(websocket_client ./websocket_client.c ./sample.c lfq.c)
 #    ADD_DEPENDENCIES(data_collector MINIEYE_VERSION)
 #    TARGET_LINK_LIBRARIES(msgpackc websockets
  #       halio concurrency

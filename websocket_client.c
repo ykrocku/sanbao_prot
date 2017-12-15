@@ -37,13 +37,9 @@
 #endif
 
 #include <libwebsockets.h>
-
 #include <msgpack.h>
-#include <stdio.h>
-
 
 #include "lfq.h"
-
 #include "sample.h"
 
 
@@ -57,8 +53,6 @@ Value *lwscan;
 Queue *queue;
 
 
-
-
 unsigned char msg_unpack_data[] = {
 		0x84,0xa4,0x64,0x61,0x74,0x61,0xa8,0x00,0x20,0x00,0x01,0x01,0x00,0x00,0x00,0xa6,	
 		0x73,0x6f,0x75,0x72,
@@ -70,8 +64,6 @@ unsigned char msg_unpack_data[] = {
 };
 
 
-uint8_t datacmd[100];
-int sendflag=1;
 
 #if 0
 "source": "client-name",
@@ -323,6 +315,8 @@ int msgunpack(uint8_t *data, int size)
     /* print the deserialized object. */
 	msgpack_object_get(stdout, deserialized, &can);
 
+    msgpack_zone_destroy(&mempool);
+
 #if 0    
 	printf("-----unpack debug--------\n");
 	printbuf(can.warning, sizeof(can.warning));
@@ -333,14 +327,17 @@ int msgunpack(uint8_t *data, int size)
 	printf("-----unpack over--------\n");
 #endif
 
+#if 0
 //    sprintf(lwscan[i].data,"test %d.",i);
 	can_queue_index = can_queue_index%CAN_QUEUE_SIZE;
 	memcpy(lwscan[can_queue_index].data, &can, sizeof(can));
 	((char *)lwscan[can_queue_index].data)[sizeof(can)] = '\0';
     qpush(queue,&lwscan[can_queue_index]);
 	can_queue_index++;
+#endif
 
-    msgpack_zone_destroy(&mempool);
+
+    can_message_send(&can);
 
     return 0;
 }
@@ -448,6 +445,8 @@ callback_dumb_increment(struct lws *wsi, enum lws_callback_reasons reason,
 	const char *which = "http";
 	char which_wsi[10], buf[50 + LWS_PRE];
 	int n, msgpacklen;
+    uint8_t datacmd[100];
+    static int sendflag=1;
 
 	
 //	printf("reason: %d\n", reason);
@@ -857,6 +856,7 @@ void can_queue_destory()
 
 }
 
+
 void *send_to_host(void *send)
 {
 	
@@ -907,7 +907,8 @@ int main(int argc, char **argv)
 
 		pthread_t pth[10];
 
-		can_queue_init();
+//		can_queue_init();
+
 		cir_buf_init();
 		signal(SIGINT, sighandler);
 
@@ -915,7 +916,7 @@ int main(int argc, char **argv)
 		msgunpack(msg_unpack_data, sizeof(msg_unpack_data));
 
 		pthread_create(&pth[0], NULL, recv_from_host, NULL);
-		pthread_create(&pth[1], NULL, send_to_host, NULL);
+//		pthread_create(&pth[1], NULL, send_to_host, NULL);
 		pthread_create(&pth[2], NULL, pthread_websocket, NULL);
 		pthread_create(&pth[3], NULL, deal_host_cmd, NULL);
 

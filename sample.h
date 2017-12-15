@@ -37,6 +37,8 @@
 #define SAMPLE_CMD_GET_PARAM        (0x34)
 #define SAMPLE_CMD_SET_PARAM        (0x35)
 #define SAMPLE_CMD_WARNING_REPORT   (0x36)
+#define SAMPLE_CMD_REQ_STATUS       (0x37)
+#define SAMPLE_CMD_UPLOAD_STATUS    (0x38)
 #define SAMPLE_CMD_REQ_MM_DATA      (0x50)
 #define SAMPLE_CMD_UPLOAD_MM_DATA   (0x51)
 
@@ -150,7 +152,8 @@ typedef struct __MECANWarningMessage {
     uint8_t     headway_warning_level:2;
 #else /*Little Endian*/
     uint8_t     sound_type:3;
-    uint8_t     byte0_resv:5;
+    uint8_t     time_indicator:2;
+    uint8_t     byte0_resv:3;
 
     uint8_t     byte1_resv1:5;
     uint8_t     zero_speed:1;
@@ -160,19 +163,30 @@ typedef struct __MECANWarningMessage {
     uint8_t     headway_measurement:7;
 
     uint8_t     error:1;
-    uint8_t     byte3_resv:7;
+    uint8_t     error_code:7;
 
     uint8_t     ldw_off:1;
     uint8_t     left_ldw:1;
     uint8_t     right_ldw:1;
     uint8_t     fcw_on:1;
-    uint8_t     byte4_resv:4;
+    uint8_t     byte4_resv:2;
+    uint8_t     maintenanc:1;
+    uint8_t     failsafe:1;
 
-    uint8_t     byte5_resv;
-    uint8_t     byte6_resv;
+    uint8_t     byte5_resv0:1;
+    uint8_t     peds_fcw:1;
+    uint8_t     peds_in_dz:1;
+    uint8_t     byte5_resv1:2;
+    uint8_t     tamper_alert:1;
+    uint8_t     byte5_resv2:1;
+    uint8_t     tsr_enable:1;
+
+    uint8_t     tsr_warning_level:3;
+    uint8_t     byte6_resv:5;
 
     uint8_t     headway_warning_level:2;
-    uint8_t     byte7_resv:6;
+    uint8_t     hw_repeatable_enable:1;
+    uint8_t     byte7_resv:5;
 #endif
 } __attribute__((packed)) MECANWarningMessage;
 
