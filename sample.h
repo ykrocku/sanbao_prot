@@ -137,7 +137,7 @@ typedef struct __MECANWarningMessage {
     uint8_t     headway_valid:1;
 
     uint8_t     byte3_resv:7;
-    uint8_t     error:1;
+    uint8_t     no_error:1;
 
     uint8_t     byte4_resv:4;
     uint8_t     fcw_on:1;
@@ -162,7 +162,7 @@ typedef struct __MECANWarningMessage {
     uint8_t     headway_valid:1;
     uint8_t     headway_measurement:7;
 
-    uint8_t     error:1;
+    uint8_t     no_error:1;
     uint8_t     error_code:7;
 
     uint8_t     ldw_off:1;
@@ -203,15 +203,15 @@ typedef struct __car_status {
     uint16_t     byte_resv:10;
 
 
-} __attribute__((packed)) car_status;
+} __attribute__((packed)) car_status_s;
 
 typedef struct __warningtext {
 
 	uint32_t	warning_id;
 	uint8_t		start_flag;
 	uint8_t		sound_type;
-	uint8_t		forward_speed;
-	uint8_t		forward_Distance;
+	uint8_t		forward_car_speed;
+	uint8_t		forward_car_Distance;
 	uint8_t		ldw_type;
 	uint8_t		load_type;
 	uint8_t		load_data;
@@ -221,7 +221,7 @@ typedef struct __warningtext {
 	uint32_t	longitude;
 	uint8_t		time[6];
 	uint8_t		mm_num;
-	car_status	status;	
+	car_status_s	car_status;	
 	sample_mm_info mm;
 
 
@@ -279,18 +279,14 @@ typedef struct __car_info {
 
 typedef struct _can_struct{
 	uint8_t warning[8];
-	int8_t source[20];
-	int8_t time[20];
-	int8_t topic[20];
+	char source[20];
+	char time[20];
+	char topic[20];
 }can_algo;
 
 typedef struct _can_warning{
 
 }can_warning;
-
-
-
-
 
 #define HW_LEVEL_NO_CAR     (0)
 #define HW_LEVEL_WHITE_CAR  (1)
@@ -304,24 +300,15 @@ typedef struct _can_warning{
 #define SOUND_TYPE_VB       (5)
 #define SOUND_TYPE_FCW_PCW  (6)
 
-
-
-
-
-
-
-
 #define MINIEYE_WARNING_CAN_ID  (0x700)
 #define MINIEYE_CAR_INFO_CAN_ID (0x760)
 
 void printbuf(uint8_t *buf, int len);
 void *recv_from_host(void *para);
-void *deal_host_cmd(void *para);
+void *parse_host_cmd(void *para);
 int can_message_send(can_algo *sourcecan);
-
-int cir_buf_init();
-
-
+int qpop_unescaple_msg(uint8_t *msg, int msglen, int timeout);
+int msg_queue_init();
 
 #define DEBUG_BUF
 
@@ -332,10 +319,6 @@ int cir_buf_init();
 #else
 #define NB_DEBUG(format,...)
 #endif
-
-
-//use to test msgunpack
-
 
 
 

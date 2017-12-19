@@ -28,11 +28,12 @@ MESSAGE(STATUS ${PROJECT_ROOT_PATH})
 
 LINK_DIRECTORIES("${PROJECT_ROOT_PATH}/thirdparty/websocket/linux/arm64-v8a")
 LINK_DIRECTORIES("${PROJECT_ROOT_PATH}/thirdparty/msgpackc/linux/arm64-v8a")
-LINK_LIBRARIES( msgpackc libmsgpackc.a websockets libwebsockets.a)
+#LINK_LIBRARIES( msgpackc libmsgpackc.a websockets libwebsockets.a)
+#LINK_LIBRARIES( msgpackc websockets )
+LINK_LIBRARIES( libmsgpackc.a libwebsockets.a)
 
 include_directories("${PROJECT_ROOT_PATH}/thirdparty/websocket/include")
 include_directories("${PROJECT_ROOT_PATH}/thirdparty/msgpackc/include")
-
 
 
 
@@ -104,7 +105,8 @@ ENDIF()
 #link library
 IF (WIN32)
 ELSEIF(ANDROID_ABI)
-    ADD_EXECUTABLE(websocket_client ./websocket_client.c ./sample.c lfq.c)
+    ADD_EXECUTABLE(websocket_client ./websocket_client.cpp ./sample.cpp )
+    TARGET_LINK_LIBRARIES(websocket_client -ldl)
 #    ADD_DEPENDENCIES(data_collector MINIEYE_VERSION)
 #    TARGET_LINK_LIBRARIES(msgpackc websockets
  #       halio concurrency
