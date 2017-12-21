@@ -28,45 +28,43 @@
 #include <queue>
 using namespace std;
 
-typedef struct _sqbuf{
+typedef struct _g_ptr_databuf{
     int32_t len;
     uint8_t *buf;
-}msgbuf;
+} __attribute__((packed)) msgbuf;
 
-typedef struct _sq_queue{
+typedef struct _for_ptr_queue{
 #define QUEUE_BUF_SIZE   (1024 + 64)
 #define QUEUE_BUF_CNT    (16)
 #define nextIndex(n) ((n + 1) % (QUEUE_BUF_CNT))
-    sem_t sem;
     pthread_mutex_t lock;
     msgbuf *msg;
     uint32_t cnt;
-}data_to_ptr_queue;
+} __attribute__((packed)) queue_point_data;
 
-queue<void *> ptr_queue;
+queue<void *> g_ptr_queue;
+static queue_point_data g_ptr_data;
 
-queue<uint8_t> char_queue;
-#define CHAR_QUEUE_SIZE    (2048)
+queue<uint8_t> g_uchar_queue;
+#define uchar_queue_SIZE    (2048)
 
-static data_to_ptr_queue sq;
-
-int msg_queue_init()
+int ptr_queue_init()
 {
     int i=0;
 
-    pthread_mutex_init(&sq.lock, NULL);
-    memset(&sq, 0, sizeof(sq));
+    pthread_mutex_init(&g_ptr_data.lock, NULL);
+    memset(&g_ptr_data, 0, sizeof(g_ptr_data));
 
-    sq.msg = (msgbuf *)malloc(QUEUE_BUF_CNT * sizeof(msgbuf));
-    if(!sq.msg)
+    g_ptr_data.msg = (msgbuf *)malloc(QUEUE_BUF_CNT * sizeof(msgbuf));
+    if(!g_ptr_data.msg)
     {
         perror("malloc:");
         return -1;
     }
     for(i=0; i<QUEUE_BUF_CNT; i++)
     {
-        sq.msg[i].buf = (uint8_t *)malloc(QUEUE_BUF_SIZE);
-        if(!sq.msg[i].buf)
+        g_ptr_data.msg[i].buf = (uint8_t *)malloc(QUEUE_BUF_SIZE);
+        if(!g_ptr_data.msg[i].buf)
         {
             perror("malloc:");
             return -1;
@@ -75,75 +73,86 @@ int msg_queue_init()
     return 0;
 }
 
-int sq_queue_destory()
+int ptr_queue_destory()
 {
     int i=0;
 
     for(i=0; i<QUEUE_BUF_CNT; i++)
     {
-        free(sq.msg[i].buf);
+        free(g_ptr_data.msg[i].buf);
     }
-    free(sq.msg);
+    free(g_ptr_data.msg);
+    g_ptr_data.msg == NULL;
 
-    sem_destroy(&sq.sem);
-    pthread_mutex_destroy(&sq.lock);
+    pthread_mutex_destroy(&g_ptr_data.lock);
 
     return 0;
 }
 
-int ptr_queue_push(uint8_t *msgbuf, int len)
+static int ptr_queue_push(uint8_t *msgbuf, int len)
 {
     void *addr;
 
     if((msgbuf == NULL) || (len < 0))
         return -1;
 
-    pthread_mutex_lock(&sq.lock);
+    pthread_mutex_lock(&g_ptr_data.lock);
 
-    if((int)ptr_queue.size() == QUEUE_BUF_CNT)
+    if((int)g_ptr_queue.size() == QUEUE_BUF_CNT)
     {
-        pthread_mutex_unlock(&sq.lock);
+        pthread_mutex_unlock(&g_ptr_data.lock);
         return -1;
     }
 
-    sq.msg[sq.cnt].len = (len > QUEUE_BUF_SIZE ? QUEUE_BUF_SIZE : len);
-    memcpy(sq.msg[sq.cnt].buf, msgbuf, sq.msg[sq.cnt].len);
-    printf("queue msg wr = %d\n", sq.cnt);
-    printf("queue msg len = %d\n", sq.msg[sq.cnt].len);
+    g_ptr_data.msg[g_ptr_data.cnt].len = (len > QUEUE_BUF_SIZE ? QUEUE_BUF_SIZE : len);
+    memcpy(g_ptr_data.msg[g_ptr_data.cnt].buf, msgbuf, g_ptr_data.msg[g_ptr_data.cnt].len);
+//    printf("queue msg cnt = %d\n", g_ptr_data.cnt);
+//    printf("queue msg len = %d\n", g_ptr_data.msg[g_ptr_data.cnt].len);
 
-    addr = (void *)&sq.msg[sq.cnt];
-    ptr_queue.push(addr);
+    addr = (void *)&g_ptr_data.msg[g_ptr_data.cnt];
+    g_ptr_queue.push(addr);
 
-    sq.cnt = nextIndex(sq.cnt);
+    g_ptr_data.cnt = nextIndex(g_ptr_data.cnt);
 
-    pthread_mutex_unlock(&sq.lock);
+    pthread_mutex_unlock(&g_ptr_data.lock);
 
     return 0;
 }
 
-
-int ptr_queue_pop(uint8_t *buf)
+static int ptr_queue_pop(uint8_t *buf, int buflen)
 {
     void *addr = NULL;
     msgbuf *msg = NULL;
     int32_t len = 0;
 
-    if(!ptr_queue.empty())
+    pthread_mutex_lock(&g_ptr_data.lock);
+    if(!g_ptr_queue.empty())
     {
-        addr = ptr_queue.front();
-        ptr_queue.pop();
+
+        addr = g_ptr_queue.front();
+        g_ptr_queue.pop();
 
         msg = (msgbuf *)addr;
-        memcpy(buf, msg->buf, msg->len);
-        len = msg->len;
+
+        if(msg->len > QUEUE_BUF_SIZE)
+        {
+            printf("queue msg.len eror\n");
+            pthread_mutex_unlock(&g_ptr_data.lock);
+            return -1;
+        }
+        printf("pop!\n");
+        len = buflen > msg->len ? msg->len : buflen;
+        memcpy(buf, msg->buf, len);
 
         memset(msg->buf, 0, len);
         msg->len  = 0;
+
     }
-    return len;
+    pthread_mutex_unlock(&g_ptr_data.lock);
+        return len;
 }
 
-int char_queue_push(uint8_t *buf, int len)
+static int uchar_queue_push(uint8_t *buf, int len)
 {
     int i=0;
 
@@ -152,28 +161,27 @@ int char_queue_push(uint8_t *buf, int len)
 
     for(i=0; i<len; i++)
     {
-        if((int)ptr_queue.size() == CHAR_QUEUE_SIZE)
+        if((int)g_ptr_queue.size() == uchar_queue_SIZE)
         {
+            printf("g_uchar_queue full flow\n");
             return -1;
         }
-        char_queue.push(buf[i]);
+        g_uchar_queue.push(buf[i]);
     }
     return 0;
 }
-int8_t char_queue_pop(uint8_t *ch)
+static int8_t uchar_queue_pop(uint8_t *ch)
 {
-
-    if(!char_queue.empty())
+    if(!g_uchar_queue.empty())
     {
-        *ch = char_queue.front();
-        char_queue.pop();
+        *ch = g_uchar_queue.front();
+        g_uchar_queue.pop();
         return 0;
     }
-    
         return -1;
 }
 
-uint8_t sample_calc_crc(sample_prot_header *pHeader, int32_t msg_len)
+static uint8_t sample_calc_sum(sample_prot_header *pHeader, int32_t msg_len)
 {
     int32_t i = 0;
     uint32_t chksum = 0;
@@ -186,12 +194,12 @@ uint8_t sample_calc_crc(sample_prot_header *pHeader, int32_t msg_len)
     for (i = 0; i < msg_len - NON_CRC_LEN; i++) {
         chksum += start[i];
 
-        //   NB_DEBUG("#%04d 0x%02hhx = 0x%08x\n", i, start[i], chksum);
+        //   MY_DEBUG("#%04d 0x%02hhx = 0x%08x\n", i, start[i], chksum);
     }
     return (uint8_t) (chksum & 0xFF);
 }
 
-int32_t sample_escaple_msg(sample_prot_header *pHeader, int32_t msg_len)
+static int32_t sample_escaple_msg(sample_prot_header *pHeader, int32_t msg_len)
 {
     int32_t i = 0;
     int32_t escaped_len = msg_len;
@@ -216,7 +224,7 @@ int32_t sample_escaple_msg(sample_prot_header *pHeader, int32_t msg_len)
     return escaped_len;
 }
 
-int32_t sample_unescaple_msg(sample_prot_header *pHeader, int32_t escaped_len)
+static int32_t sample_unescaple_msg(sample_prot_header *pHeader, int32_t escaped_len)
 {
     int32_t i = 0;
     int32_t msg_len = escaped_len;
@@ -237,7 +245,7 @@ int32_t sample_unescaple_msg(sample_prot_header *pHeader, int32_t escaped_len)
     return msg_len;
 }
 
-int32_t sample_assemble_msg(sample_prot_header *pHeader, uint8_t cmd,
+static int32_t sample_assemble_msg(sample_prot_header *pHeader, uint8_t cmd,
         uint8_t *payload, int32_t payload_len)
 {
     int32_t msg_len = sizeof(*pHeader) + 1 + payload_len;
@@ -256,14 +264,14 @@ int32_t sample_assemble_msg(sample_prot_header *pHeader, uint8_t cmd,
     }
     tail[0] = SAMPLE_PROT_MAGIC;
 
-    pHeader->checksum = sample_calc_crc(pHeader, msg_len);
+    pHeader->checksum = sample_calc_sum(pHeader, msg_len);
 
     msg_len = sample_escaple_msg(pHeader, msg_len);
 
     return msg_len;
 }
 
-uint32_t get_media_id()
+static uint32_t get_media_id()
 {
     long int val;
     static char s = 1;
@@ -293,7 +301,6 @@ int can_message_send(can_algo *sourcecan)
     uint8_t txbuf[512];
     size_t msg_len = 0;
     char warn_event = 0;
-    static uint8_t image_cnt = 0;
     char image_name[50];
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
 
@@ -307,31 +314,9 @@ int can_message_send(can_algo *sourcecan)
     uint8_t all_warning_data[sizeof(MECANWarningMessage)] = {0};
     uint8_t trigger_data[sizeof(MECANWarningMessage)] = {0};
 
-
-#if 0
-    printf("type:%d\n", can.sound_type);
-    //    printf("%d\n", can.byte0_resv);
-    //    printf("%d\n", can.byte1_resv1);
-    printf("zero:%d\n", can.zero_speed);
-    //    printf("%d\n", can.byte1_resv0);
-    printf("headway valid:%d\n", can.headway_valid);
-    printf("headway mea:%d\n", can.headway_measurement);
-    printf("no_error:%d\n", can.no_error);
-    //    printf("%d\n", can.byte3_resv);
-    printf("ldwoff:%d\n", can.ldw_off);
-    printf("left_ldw:%d\n", can.left_ldw);
-    printf("right_ldw:%d\n", can.right_ldw);
-    printf("fcwon:%d\n", can.fcw_on);
-    //    printf("%d\n", can.byte4_resv);
-    //    printf("%d\n", can.byte5_resv);
-    //    printf("%d\n", can.byte6_resv);
-    printf("level:%d\n", can.headway_warning_level);
-    //    printf("%d\n", can.byte7_resv);
-#endif
-
     if(!memcmp(sourcecan->topic, MESSAGE_CAN700, strlen(MESSAGE_CAN700)))
     {
-        printf("recv can 700 data!\n");
+   //     printf("recv can 700 data!\n");
    //     printbuf(sourcecan->warning, 8);
 
         memcpy(&can, sourcecan->warning, sizeof(sourcecan->warning));
@@ -346,44 +331,41 @@ int can_message_send(can_algo *sourcecan)
         if (0 == memcmp(all_warning_data, &g_last_warning_data, sizeof(g_last_warning_data))) {
             return 0;
         }
-        printf("warning happened........\n");
-        printf("headway mea:%d\n", can.headway_measurement);
-        memset(&uploadmsg, 0, sizeof(uploadmsg));
 
-        printf("time:%s\n", sourcecan->time);
-        timep = strtoul(sourcecan->time, NULL, 10);
-        timep = timep/1000000;
-        p = localtime(&timep);
-        uploadmsg.time[0] = p->tm_year;
-        uploadmsg.time[1] = p->tm_mon+1;
-        uploadmsg.time[2] = p->tm_mday;
-        uploadmsg.time[3] = p->tm_hour;
-        uploadmsg.time[4] = p->tm_min;
-        uploadmsg.time[5] = p->tm_sec;
+        if(all_warning_data[2] != 0 || all_warning_data[4] != 0 || all_warning_data[7] != 0)
+        {
+            printf("warning happened........\n");
+            printf("headway_warning_level:%d\n", can.headway_warning_level);
+            printf("headway_measurement:%d\n", can.headway_measurement);
+            memset(&uploadmsg, 0, sizeof(uploadmsg));
 
-        printf("%d-%d-%d %d:%d:%d\n", (1900 + p->tm_year), ( 1 + p->tm_mon), p->tm_mday,(p->tm_hour), p->tm_min, p->tm_sec); 
+            printf("time:%s\n", sourcecan->time);
+            timep = strtoul(sourcecan->time, NULL, 10);
+            timep = timep/1000000;
+            p = localtime(&timep);
+            uploadmsg.time[0] = p->tm_year;
+            uploadmsg.time[1] = p->tm_mon+1;
+            uploadmsg.time[2] = p->tm_mday;
+            uploadmsg.time[3] = p->tm_hour;
+            uploadmsg.time[4] = p->tm_min;
+            uploadmsg.time[5] = p->tm_sec;
 
+            printf("%d-%d-%d %d:%d:%d\n", (1900 + p->tm_year), ( 1 + p->tm_mon), p->tm_mday,(p->tm_hour), p->tm_min, p->tm_sec); 
 
-
-#if 1       
-    uploadmsg.warning_id = htons(warning_id & 0xFFFFFFFF);
-    warning_id++ ;
-    uploadmsg.start_flag = 0;
-    if(!system("/system/bin/rbget"))//get image success
-    {
-        uploadmsg.mm.id = uploadmsg.warning_id;
-        sprintf(image_name, "/mnt/obb/rb_last_frame%d.jpg", image_cnt%10);
-        rename("/mnt/obb/rb_last_frame.jpg", image_name);
-        uploadmsg.mm_num = image_cnt;
-        uploadmsg.mm.type = MM_PHOTO;
-        //   uploadmsg.mm.id = htons(get_media_id());
-        image_cnt++;
+            uploadmsg.warning_id = htons(warning_id & 0xFFFFFFFF);
+            uploadmsg.start_flag = 0;
+            if(!system("/system/bin/rbget >/dev/null"))//get image success
+            {
+                uploadmsg.mm.id = uploadmsg.warning_id;
+                sprintf(image_name, "/mnt/obb/rb_last_frame%d.jpg", warning_id % IMAGE_CACHE_NUM);
+                rename("/mnt/obb/rb_last_frame.jpg", image_name);
+                uploadmsg.mm_num = uploadmsg.mm.id;
+                uploadmsg.mm.type = MM_PHOTO;
+                //   uploadmsg.mm.id = htons(get_media_id());
+            }
+            warning_id++ ;
+        }
     }
-#endif
-
-
-    }
-
     //LDW and FCW event
     if (0 != memcmp(trigger_data, &g_last_trigger_warning, sizeof(g_last_trigger_warning)) && 0 != trigger_data[4]) {
         printf("------LDW/FCW event-----------\n");
@@ -447,14 +429,12 @@ int can_message_send(can_algo *sourcecan)
         uploadmsg.car_status.brakes = carinfo.brakes;
         //			uploadmsg.car_status.insert = 
     }
-
 #endif
-
 
     return 0;
 }
 
-int32_t sample_send_image(sample_prot_header *pHeader, int32_t len)
+static int32_t sample_send_image(sample_prot_header *pHeader, int32_t len)
 {
 #define IMAGE_SIZE_PER_PACKET   (512)
     uint8_t data[IMAGE_SIZE_PER_PACKET + \
@@ -485,7 +465,7 @@ int32_t sample_send_image(sample_prot_header *pHeader, int32_t len)
     {
         memcpy(&mmack, pHeader+1, sizeof(mmack));
 
-        //        NB_DEBUG("mmack:\n");
+        //        MY_DEBUG("mmack:\n");
         //        printbuf((uint8_t *)&mmack, sizeof(mmack));
         //        printf("ack = %d\n", mmack.ack);
         //        mmack.packet_idx = ntohs(mmack.packet_idx);
@@ -496,7 +476,6 @@ int32_t sample_send_image(sample_prot_header *pHeader, int32_t len)
             printf("recv no ack!\n");
             return 0;
         }
-
     }
     else if(pHeader->cmd == SAMPLE_CMD_REQ_MM_DATA)//recv req
     {
@@ -516,7 +495,8 @@ int32_t sample_send_image(sample_prot_header *pHeader, int32_t len)
 
         //pHeader->cmd = SAMPLE_CMD_UPLOAD_MM_DATA;
 
-        sprintf(image_name, "/mnt/obb/%d.jpg", MMID);
+        sprintf(image_name, "/mnt/obb/rb_last_frame%d.jpg", MMID % IMAGE_CACHE_NUM);
+       // sprintf(image_name, "/mnt/obb/rb_last_frame0.jpg");
         printf("try find filename: %s\n", image_name);
         fp = fopen(image_name, "r");
         if(fp ==NULL)
@@ -564,7 +544,7 @@ int32_t sample_send_image(sample_prot_header *pHeader, int32_t len)
     to_send = fread(data+ sizeof(mm), 1, IMAGE_SIZE_PER_PACKET, fp);
     if(to_send >0)
     {
-        msg_len = sample_assemble_msg(pSend, SAMPLE_CMD_UPLOAD_MM_DATA, data, sizeof(mm) + to_send);
+        msg_len = sample_assemble_msg(pSend, SAMPLE_CMD_UPLOAD_MM_DATA, data, (sizeof(mm) + to_send));
         ret = ptr_queue_push((uint8_t *)pSend, msg_len);//send
         if(ret < 0)
         {
@@ -572,13 +552,12 @@ int32_t sample_send_image(sample_prot_header *pHeader, int32_t len)
         }
 
         sent += to_send;
-        printf("i==%d, tosend = %d, sent = %d\n", i, to_send, sent);
+        printf("i==%d/%d, tosend = %d, sent = %d\n", i, total, to_send, sent);
         i++;
     }
     else//end and clear
     {
         printf("transmit over!\n");
-        printf("i==%d, tosend = %d, sent = %d\n", i, to_send, sent);
         i = 0;
         to_send = 0;
         sent = 0;
@@ -590,9 +569,8 @@ int32_t sample_send_image(sample_prot_header *pHeader, int32_t len)
     return 0;
 }
 
-int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
+static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
 {
-
     sample_dev_info dev_info = {
         15, "MINIEYE",
         15, "M3",
@@ -610,7 +588,7 @@ int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
         return 0;
     }
 
-    NB_DEBUG("cmd = 0x%x\n", pHeader->cmd);
+    MY_DEBUG("cmd = 0x%x\n", pHeader->cmd);
     switch (pHeader->cmd)
     {
         case SAMPLE_CMD_QUERY:
@@ -662,21 +640,20 @@ int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
     return 0;
 }
 
-int try_connect()
+static int try_connect()
 {
 #define HOST_SERVER_PORT (8888)
 
     int sock;
     int32_t ret = 0;
     int enable = 1;
-    //    const char *server_ip = "127.0.0.1";
     const char *server_ip = "192.168.100.100";
     struct sockaddr_in minit_serv_addr;
 
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         printf("Create socket failed %s\n", strerror(errno));
-        exit(1);
+        return -2;
     }
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable));
 
@@ -687,7 +664,7 @@ int try_connect()
     ret = inet_aton(server_ip, &minit_serv_addr.sin_addr);
     if (0 == ret) {
         printf("inet_aton failed %d %s\n", ret, strerror(errno));
-        exit(1);
+        return -2;
     }
 
     while(1)
@@ -703,12 +680,10 @@ int try_connect()
             sleep(1);
             printf("try connect!\n");
         }
-
     }
-
 }
 
-void *recv_from_host(void *para)
+void *communicate_with_host(void *para)
 {
     uint8_t readbuf[1024];
     uint8_t sendbuf[QUEUE_BUF_SIZE];
@@ -749,21 +724,27 @@ void *recv_from_host(void *para)
                 }
                 else//write to buf
                 {
-                    NB_DEBUG("recv raw cmd:\n");
+                    MY_DEBUG("recv raw cmd:\n");
                     printbuf(readbuf, ret);
-                    char_queue_push(readbuf, ret);
+                    if(uchar_queue_push(readbuf, ret))
+                    {
+                        printf("uchar_queue_push flow!\n");
+                    }
                 }
             }
             if(FD_ISSET(hostsock, &wfds))
             {
-                ret = ptr_queue_pop(sendbuf);
+                ret = ptr_queue_pop(sendbuf, sizeof(sendbuf));
                 if(ret > 0)
                 {
+                printf("start write!\n");
                     ret = write(hostsock, sendbuf, ret);
                     if(ret < 0)
                     {
                         perror("tcp send error");
                     }
+                    
+                printf("write over ret = %d!\n", ret);
                 }
             }
         }
@@ -778,38 +759,38 @@ void *recv_from_host(void *para)
 void *parse_host_cmd(void *para)
 {
     int8_t ret = 0;
-    uint8_t crc = 0;
-    uint8_t sec = 2;
+    uint8_t sum = 0;
+    uint8_t time_sec = 2;
     uint32_t framelen;
     unsigned char msgbuf[512];
     sample_prot_header *pHeader = (sample_prot_header *) msgbuf;
+
     while(1)
     {
-        ret = qpop_unescaple_msg(msgbuf, sizeof(msgbuf), sec);
+        ret = unescaple_msg(msgbuf, sizeof(msgbuf), time_sec);
         if(ret>0){
             framelen = ret;
-            NB_DEBUG("get a framelen = %d\n", framelen);
+            MY_DEBUG("get a framelen = %d\n", framelen);
             printbuf(msgbuf, framelen);
 
-            crc = sample_calc_crc(pHeader, framelen);
-            if (crc != pHeader->checksum) {
+            sum = sample_calc_sum(pHeader, framelen);
+            if (sum != pHeader->checksum) {
                 printf("Checksum missmatch calcated: 0x%02hhx != 0x%2hhx\n",
-                        crc, pHeader->checksum);
+                        sum, pHeader->checksum);
             }
             else
             {
                 printf("frame checksum match!\n");
                 sample_on_cmd(pHeader, framelen);
             }
-
         }
         else if(ret == -1)
         {
-
+            //error
         }
         else if(ret == -2)
         {
-
+            //timeout
         }
         else
             ;
@@ -817,19 +798,17 @@ void *parse_host_cmd(void *para)
 }
 
 
-int qpop_unescaple_msg(uint8_t *msg, int msglen, int timeout)
+static int unescaple_msg(uint8_t *msg, int msglen, int timeout)
 {
-    uint8_t ch;
+    uint8_t ch = 0;
     char start = 0;
-    char flag = 0;
-    int cnt=0;
-    int framelen = 0;
+    char got_esc_char = 0;
+    int cnt = 0;
     int time_start_s = 0;
     int time_start_us = 0;
     struct timeval tv;
 
     gettimeofday(&tv, NULL);
-
     time_start_s = tv.tv_sec;
     time_start_us = tv.tv_usec;
 
@@ -847,7 +826,7 @@ int qpop_unescaple_msg(uint8_t *msg, int msglen, int timeout)
             printf("error: msg too long\n");
             return -1;
         }
-        if(!char_queue_pop(&ch))
+        if(!uchar_queue_pop(&ch))
         {
             if(!start)
             {
@@ -865,7 +844,7 @@ int qpop_unescaple_msg(uint8_t *msg, int msglen, int timeout)
             {
                 if((ch == SAMPLE_PROT_MAGIC) && (cnt > 0))//get tail
                 {
-                    if(cnt < 6)//maybe error frame, as head, restart
+                    if(cnt < 6)//maybe error frame, as header, restart
                     {
                         cnt = 0;
                         msg[cnt] = SAMPLE_PROT_MAGIC;
@@ -873,44 +852,37 @@ int qpop_unescaple_msg(uint8_t *msg, int msglen, int timeout)
                         start = 1;
                         continue;
                     }
-
-                    //get tail
-                    msg[cnt] = SAMPLE_PROT_MAGIC;
-                    start = 0;//over
-                    cnt++;
-                    //cnt = 0;
-
-                    return cnt;
-
+                    else
+                    {
+                        msg[cnt] = SAMPLE_PROT_MAGIC;
+                        start = 0;//over
+                        cnt++;
+                        return cnt;
+                    }
                 }
                 else//get text
                 {
-                    if((ch == SAMPLE_PROT_ESC_CHAR) && !flag)//need deal
+                    if((ch == SAMPLE_PROT_ESC_CHAR) && !got_esc_char)//need deal
                     {
-                        flag = 1;
+                        got_esc_char = 1;
                         msg[cnt] = ch;
                         cnt++;
                     }
-                    else if(flag && (ch == 0x02))
+                    else if(got_esc_char && (ch == 0x02))
                     {
                         msg[cnt-1] = SAMPLE_PROT_MAGIC;
-                        flag = 0;
+                        got_esc_char = 0;
                     }
-                    else if(flag && (ch == 0x01))
+                    else if(got_esc_char && (ch == 0x01))
                     {
                         msg[cnt-1] = SAMPLE_PROT_ESC_CHAR;
-                        flag = 0;
-                    }
-                    else if(flag && (ch != 0x01) && (ch != 0x02))
-                    {
-                        msg[cnt] = ch;
-                        cnt++;
-                        flag = 0;
+                        got_esc_char = 0;
                     }
                     else
                     {
                         msg[cnt] = ch;
                         cnt++;
+                        got_esc_char = 0;
                     }
                 }
             }

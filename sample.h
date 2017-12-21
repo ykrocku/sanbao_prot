@@ -5,22 +5,20 @@
 
 
 
-
 #define SANBAO_VERSION 0x01
 #define VENDOR_ID 0x1234
 
 #define MM_ID 0x911
 
-
 #define MM_PHOTO 0
 #define MM_AUDIO 1
 #define MM_VEDIO 2
 
+#define IMAGE_CACHE_NUM     1
+
 
 #define MESSAGE_CAN700	"output.can.0x700"
 #define MESSAGE_CAN760	"output.can.0x760"
-
-
 
 
 #define SAMPLE_DEVICE_ID_BRDCST (0x0)
@@ -202,7 +200,6 @@ typedef struct __car_status {
 
     uint16_t     byte_resv:10;
 
-
 } __attribute__((packed)) car_status_s;
 
 typedef struct __warningtext {
@@ -226,7 +223,6 @@ typedef struct __warningtext {
 
 
 } __attribute__((packed)) warningtext;
-
 
 
 typedef struct __car_info {
@@ -303,21 +299,53 @@ typedef struct _can_warning{
 #define MINIEYE_WARNING_CAN_ID  (0x700)
 #define MINIEYE_CAR_INFO_CAN_ID (0x760)
 
+
+
+
+
+
+/*************set para*********************/
+
+typedef struct __CAN_PARA {
+//#ifdef BIG_ENDIAN
+#if 0
+
+#else /*Little Endian*/   //a:0 a:1 ...
+    uint8_t     voice;
+    uint8_t     auto_photograph;
+    uint16_t    auto_photograph_time_gap;
+    uint16_t    auto_photograph_distance_gap;
+    uint8_t     sigle_photograph_num;
+    uint8_t     sigle_photograph_time_gap;
+
+    uint8_t     photo_resolution;
+    uint8_t     vedio_resolution;
+    uint32_t    warning_enable;
+    uint32_t    event_enable;
+    uint8_t     resv0;
+    uint8_t     threshold;
+#endif
+
+} __attribute__((packed)) can_para;
+
+
+
 void printbuf(uint8_t *buf, int len);
-void *recv_from_host(void *para);
+void *communicate_with_host(void *para);
 void *parse_host_cmd(void *para);
 int can_message_send(can_algo *sourcecan);
-int qpop_unescaple_msg(uint8_t *msg, int msglen, int timeout);
-int msg_queue_init();
+static int unescaple_msg(uint8_t *msg, int msglen, int timeout);
+int ptr_queue_init();
+int ptr_queue_destory();
 
 #define DEBUG_BUF
 
 #define DEBUG_G
 #ifdef DEBUG_G 
-//#define NB_DEBUG(format,...) printf("File: "__FILE__", Line: %05d:\n", __LINE__, ##__VA_ARGS__)
-#define NB_DEBUG(format,...) printf(format, ##__VA_ARGS__)
+//#define MY_DEBUG(format,...) printf("File: "__FILE__", Line: %05d:\n", __LINE__, ##__VA_ARGS__)
+#define MY_DEBUG(format,...) printf(format, ##__VA_ARGS__)
 #else
-#define NB_DEBUG(format,...)
+#define MY_DEBUG(format,...)
 #endif
 
 
