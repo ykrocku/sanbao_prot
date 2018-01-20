@@ -16,10 +16,20 @@
 #include <queue>
 using namespace std;
 
-int req_can_cmd_pack(uint8_t *data, uint32_t len)
+
+#define PACK_MAP_MSG(type, type_len, content, content_len)\
+    msgpack_pack_str(&pk, type_len);\
+    msgpack_pack_str_body(&pk, type, type_len);\
+    msgpack_pack_str(&pk, content_len);\
+    msgpack_pack_str_body(&pk, content, content_len);
+
+int pack_req_can_cmd(uint8_t *data, uint32_t len)
 {
     unsigned int map_size = 3;
-    uint32_t minlen;
+    uint32_t minlen = 0;
+
+    if(!data || len < 0)
+        return -1;
 
     msgpack_sbuffer sbuf;
     msgpack_sbuffer_init(&sbuf);
@@ -27,22 +37,10 @@ int req_can_cmd_pack(uint8_t *data, uint32_t len)
     msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
     msgpack_pack_map(&pk, map_size);
 
-    msgpack_pack_str(&pk, 6);
-    msgpack_pack_str_body(&pk, "source", 6);
-    msgpack_pack_str(&pk, 11);
-    msgpack_pack_str_body(&pk, "client-name", 11);
-
-    msgpack_pack_str(&pk, 5);
-    msgpack_pack_str_body(&pk, "topic", 5);
-    msgpack_pack_str(&pk, 9);
-    msgpack_pack_str_body(&pk, "subscribe", 9);
-
-    msgpack_pack_str(&pk, 4);
-    msgpack_pack_str_body(&pk, "data", 4);
-    msgpack_pack_str(&pk, 16);
-    //  msgpack_pack_str_body(&pk, "output.can.0x760", 16);
-    msgpack_pack_str_body(&pk, "output.can.0x700", 16);
-
+    PACK_MAP_MSG("source", strlen("source"), "client-name", strlen("client-name"));
+    PACK_MAP_MSG("topic", strlen("topic"), "subscribe", strlen("subscribe"));
+    PACK_MAP_MSG("data", strlen("data"), "output.can.0x700", strlen("output.can.0x700"));
+    //    PACK_MAP_MSG("data", strlen("data"), "output.can.0x760", strlen("output.can.0x700"));
     minlen = (sbuf.size<len) ? sbuf.size : len;
     memcpy(data, sbuf.data, minlen);
 
@@ -50,184 +48,110 @@ int req_can_cmd_pack(uint8_t *data, uint32_t len)
 
     return minlen;
 }
-
-void msgpack_object_get(FILE* out, msgpack_object o, can_algo *can)
+void msgpack_object_get(FILE* out, msgpack_object o, can_data_type *can)
 {
-#define CAN_DATA	1
-#define CAN_SOURCE	2
-#define CAN_TIME	3
-#define CAN_TOPIC	4
+    enum MSG_DATA_TYPE{
+        CAN_DATA=1,
+        CAN_SOURCE,
+        CAN_TIME,
+        CAN_TOPIC,
+    };
     static char data_type = 0;
 
     switch(o.type) {
         case MSGPACK_OBJECT_NIL:
-            fprintf(out, "nil");
-            break;
-
         case MSGPACK_OBJECT_BOOLEAN:
-            fprintf(out, (o.via.boolean ? "true" : "false"));
-            break;
-
         case MSGPACK_OBJECT_POSITIVE_INTEGER:
-#if defined(PRIu64)
-            fprintf(out, "%" PRIu64, o.via.u64);
-#else
-            if (o.via.u64 > ULONG_MAX)
-                fprintf(out, "over 4294967295");
-            else
-                fprintf(out, "%lu", (unsigned long)o.via.u64);
-#endif
-            break;
-
         case MSGPACK_OBJECT_NEGATIVE_INTEGER:
-#if defined(PRIi64)
-            fprintf(out, "%" PRIi64, o.via.i64);
-#else
-            if (o.via.i64 > LONG_MAX)
-                fprintf(out, "over +2147483647");
-            else if (o.via.i64 < LONG_MIN)
-                fprintf(out, "under -2147483648");
-            else
-                fprintf(out, "%ld", (signed long)o.via.i64);
-#endif
-            break;
-
         case MSGPACK_OBJECT_FLOAT32:
         case MSGPACK_OBJECT_FLOAT64:
-            fprintf(out, "%f", o.via.f64);
+        case MSGPACK_OBJECT_BIN:
+        case MSGPACK_OBJECT_EXT:
+        case MSGPACK_OBJECT_ARRAY:
             break;
 
         case MSGPACK_OBJECT_STR:
-#if 1
-            if(!strncmp(o.via.str.ptr, "data", strlen("data")))
-            {
-                data_type = CAN_DATA;
-                break;
-            }
-            if(!strncmp(o.via.str.ptr, "source", strlen("source")))
-            {
-                data_type = CAN_SOURCE;
-                break;
-            }
-            if(!strncmp(o.via.str.ptr, "time", strlen("time")))
-            {
-                data_type = CAN_TIME;
-                break;
-            }
-            if(!strncmp(o.via.str.ptr, "topic", strlen("topic")))
-            {
-                data_type = CAN_TOPIC;
-                break;
-            }
-#endif
-#if 1
+
             if(data_type == CAN_DATA)
             {	
                 data_type = 0;
-                //   	fwrite(o.via.str.ptr, o.via.str.size, 1, out);
                 memcpy(can->warning, o.via.str.ptr, (o.via.str.size > sizeof(can->warning) ? sizeof(can->warning) : o.via.str.size));
-
                 break;
             }
             else if(data_type == CAN_SOURCE)
             {
                 data_type = 0;
-                //  	fwrite(o.via.str.ptr, o.via.str.size, 1, out);
                 memcpy(can->source, o.via.str.ptr, (o.via.str.size > sizeof(can->source) ? sizeof(can->source) : o.via.str.size));
                 break;
             }
             else if(data_type == CAN_TIME)
             {
                 data_type = 0;
-                //  	fwrite(o.via.str.ptr, o.via.str.size, 1, out);
                 memcpy(can->time, o.via.str.ptr, (o.via.str.size > sizeof(can->time) ? sizeof(can->time) : o.via.str.size));
                 break;
             }
             else if(data_type == CAN_TOPIC)
             {
                 data_type = 0;
-                //	fwrite(o.via.str.ptr, o.via.str.size, 1, out);
                 memcpy(can->topic, o.via.str.ptr, (o.via.str.size > sizeof(can->topic) ? sizeof(can->topic) : o.via.str.size));
                 break;
             }
             else
             {
-                break;
-            }
-
-#endif
-            break;
-
-        case MSGPACK_OBJECT_BIN:
-            fprintf(out, "\"");
-            //        msgpack_object_bin_print(out, o.via.bin.ptr, o.via.bin.size);
-            fprintf(out, "\"");
-            break;
-
-        case MSGPACK_OBJECT_EXT:
-#if defined(PRIi8)
-            fprintf(out, "(ext: %" PRIi8 ")", o.via.ext.type);
-#else
-            fprintf(out, "(ext: %d)", (int)o.via.ext.type);
-#endif
-            fprintf(out, "\"");
-            //        msgpack_object_bin_print(out, o.via.ext.ptr, o.via.ext.size);
-            fprintf(out, "\"");
-            break;
-
-        case MSGPACK_OBJECT_ARRAY:
-            fprintf(out, "[");
-            if(o.via.array.size != 0) {
-                msgpack_object* p = o.via.array.ptr;
-                msgpack_object* const pend = o.via.array.ptr + o.via.array.size;
-                msgpack_object_get(out, *p, NULL);
-                ++p;
-                for(; p < pend; ++p) {
-                    fprintf(out, ", ");
-                    msgpack_object_get(out, *p, NULL);
+                if(!strncmp(o.via.str.ptr, "data", strlen("data")))
+                {
+                    data_type = CAN_DATA;
+                    break;
+                }
+                if(!strncmp(o.via.str.ptr, "source", strlen("source")))
+                {
+                    data_type = CAN_SOURCE;
+                    break;
+                }
+                if(!strncmp(o.via.str.ptr, "time", strlen("time")))
+                {
+                    data_type = CAN_TIME;
+                    break;
+                }
+                if(!strncmp(o.via.str.ptr, "topic", strlen("topic")))
+                {
+                    data_type = CAN_TOPIC;
+                    break;
                 }
             }
-            fprintf(out, "]");
             break;
 
         case MSGPACK_OBJECT_MAP:
-            //        fprintf(out, "{");
             if(o.via.map.size != 0) {
                 msgpack_object_kv* p = o.via.map.ptr;
                 msgpack_object_kv* const pend = o.via.map.ptr + o.via.map.size;
                 msgpack_object_get(out, p->key, NULL);
-                //   fprintf(out, "=>");
                 msgpack_object_get(out, p->val, can);
                 ++p;
                 for(; p < pend; ++p) {
-                    //  fprintf(out, ", ");
                     msgpack_object_get(out, p->key, NULL);
-                    //    fprintf(out, "=>");
                     msgpack_object_get(out, p->val, can);
                 }
             }
-            //   fprintf(out, "}");
             break;
 
         default:
-            // FIXME
-#if defined(PRIu64)
-            fprintf(out, "#<UNKNOWN %i %" PRIu64 ">", o.type, o.via.u64);
-#else
             if (o.via.u64 > ULONG_MAX)
                 fprintf(out, "#<UNKNOWN %i over 4294967295>", o.type);
             else
                 fprintf(out, "#<UNKNOWN %i %lu>", o.type, (unsigned long)o.via.u64);
-#endif
-
     }
+    return;
 }
 
-int recv_can_msg_unpack(uint8_t *data, int size)
+int unpack_recv_can_msg(uint8_t *data, int size)
 {
     msgpack_zone mempool;
     msgpack_object deserialized;
-    can_algo can;
+    can_data_type can;
+
+ //   if(!data || size < 0)
+ //       return -1;
 
     msgpack_zone_init(&mempool, 2048);
 
@@ -247,9 +171,7 @@ int recv_can_msg_unpack(uint8_t *data, int size)
 static volatile int force_exit;
 static struct lws *wsi_dumb;
 enum demo_protocols {
-
-    PROTOCOL_DUMB_INCREMENT,
-    PROTOCOL_LWS_MIRROR,
+    PROTOCOL_LWS_TO_CAN,
 
     /* always last */
     DEMO_PROTOCOL_COUNT
@@ -270,15 +192,14 @@ void printbuf(uint8_t *buf, int len)
 #endif   
 }
 
-static int callback_dumb_increment(struct lws *wsi, enum lws_callback_reasons reason,
+static int callback_lws_communicate(struct lws *wsi, enum lws_callback_reasons reason,
         void *user, void *in, size_t len)
 {
-    unsigned int opts;
-
+#define LWS_WRITE_BUF_LEN   512
     const char *which = "http";
-    char which_wsi[10], buf[50 + LWS_PRE];
-    int n, msgpacklen;
-    uint8_t datacmd[100];
+    char buf[LWS_WRITE_BUF_LEN + LWS_PRE];
+    int n=0, msgpacklen=0;
+    uint8_t datacmd[512];
     static int sendflag=1;
 
     //	printf("reason: %d\n", reason);
@@ -299,10 +220,7 @@ static int callback_dumb_increment(struct lws *wsi, enum lws_callback_reasons re
         case LWS_CALLBACK_CLIENT_RECEIVE:
             //		printf("receive:\n");
             //		printbuf((uint8_t *)in, (int)len);
-            recv_can_msg_unpack((uint8_t *)in, (int)len);
-
-            //		((char *)in)[len] = '\0';
-            //		lwsl_info("rx %d '%s'\n", (int)len, (char *)in);
+            unpack_recv_can_msg((uint8_t *)in, (int)len);
             break;
 
         case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
@@ -344,19 +262,23 @@ static int callback_dumb_increment(struct lws *wsi, enum lws_callback_reasons re
             break;
 
         case LWS_CALLBACK_CLIENT_WRITEABLE:
-            	printf("LWS_CALLBACK_CLIENT_WRITEABLE\n");
+            printf("LWS_CALLBACK_CLIENT_WRITEABLE\n");
             if(sendflag == 1)
             {
                 sendflag = 0;
-                printf("client send request!\n");
-                msgpacklen = req_can_cmd_pack(datacmd, sizeof(datacmd));
-                memcpy(buf + LWS_PRE, datacmd, msgpacklen);
-
-                //		n = lws_write(wsi, (unsigned char *)&buf[LWS_PRE], msgpacklen, opts | LWS_WRITE_BINARY);
-                n = lws_write(wsi, (unsigned char *)&buf[LWS_PRE], msgpacklen, LWS_WRITE_BINARY);
-
+                msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd));
+                printf("client send request, ret = %d!\n", msgpacklen);
+                if(msgpacklen < LWS_WRITE_BUF_LEN && msgpacklen >0)
+                {
+                    memcpy(buf + LWS_PRE, datacmd, msgpacklen);
+                    n = lws_write(wsi, (unsigned char *)&buf[LWS_PRE], msgpacklen, LWS_WRITE_BINARY);
+                    if(n<=0)
+                    {
+                        printf("lws write ret = %d\n", n);
+                    }
+                }
                 lwsl_info("Client wsi %p writable\n", wsi);
-                
+
                 lws_callback_on_writable(wsi);
             }
             break;
@@ -369,7 +291,7 @@ static int callback_dumb_increment(struct lws *wsi, enum lws_callback_reasons re
             break;
 
         case LWS_CALLBACK_COMPLETED_CLIENT_HTTP:
-         //   force_exit = 1;
+            //   force_exit = 1;
             break;
 
         case LWS_CALLBACK_PROTOCOL_DESTROY:
@@ -392,14 +314,13 @@ static int callback_dumb_increment(struct lws *wsi, enum lws_callback_reasons re
 /* list of supported protocols and callbacks */
 static const struct lws_protocols protocols[] = {
     {
-        "-increment-protocol",
-        callback_dumb_increment,
+        "lws-to-can-protocol",
+        callback_lws_communicate,
         0,
         200,
     },
     { NULL, NULL, 0, 0 } /* end */
 };
-
 
 void sighandler(int sig)
 {
@@ -440,7 +361,7 @@ void *websocket_client(void *para)
     info.gid = -1;
     info.uid = -1;
     info.ws_ping_pong_interval = pp_secs;
- //   info.extensions = exts;
+    //   info.extensions = exts;
 
     context = lws_create_context(&info);
     if (context == NULL) {
@@ -455,60 +376,49 @@ void *websocket_client(void *para)
     i.ietf_version_or_minus_one = ietf_version;
 
     while (!force_exit) {
-#if 1
         if(!wsi_dumb && ratelimit_connects(&rl_dumb, 2u))
         {
             i.pwsi = &wsi_dumb;
-            i.protocol = protocols[PROTOCOL_DUMB_INCREMENT].name;
+            i.protocol = protocols[PROTOCOL_LWS_TO_CAN].name;
             lws_client_connect_via_info(&i);
             printf("connecting to websocket!\n");
         }
-#endif
         lws_service(context, 200);
     }
-
     lwsl_err("Exiting\n");
     lws_context_destroy(context);
+
+    return NULL;
 }
 
 int main(int argc, char **argv)
 {
     pthread_t pth[10];
 
-    if(ptr_queue_init())
+    signal(SIGINT, sighandler);
+
+    if(pthread_create(&pth[0], NULL, communicate_with_host, NULL))
     {
-        printf("ptr_queue_init fail!\n");
+        printf("pthread_create fail!\n");
+        return -1;
+    }
+    if(pthread_create(&pth[1], NULL, websocket_client, NULL))
+    {
+        printf("pthread_create fail!\n");
+        return -1;
+    }
+    if(pthread_create(&pth[2], NULL, parse_host_cmd, NULL))
+    {
+        printf("pthread_create fail!\n");
         return -1;
     }
 
-    signal(SIGINT, sighandler);
-
-   if(pthread_create(&pth[0], NULL, communicate_with_host, NULL))
-   {
-        printf("pthread_create fail!\n");
-        return -1;
-   }
-    if(pthread_create(&pth[1], NULL, websocket_client, NULL))
-   {
-        printf("pthread_create fail!\n");
-        return -1;
-   }
-    if(pthread_create(&pth[2], NULL, parse_host_cmd, NULL))
-   {
-        printf("pthread_create fail!\n");
-        return -1;
-   }
-
-
     pthread_join(pth[1], NULL);
     printf("join pthread 1\n");
-    //pthread_join(pth[0], NULL);
-    //printf("join pthread 0\n");
-    //pthread_join(pth[1], NULL);
-    //printf("join pthread 1\n");
-
-
-    ptr_queue_destory();
+//    pthread_join(pth[1], NULL);
+//    printf("join pthread 2\n");
+//    pthread_join(pth[2], NULL);
+//    printf("join pthread 3\n");
 
     return 0;
 }

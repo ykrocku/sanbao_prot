@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdint.h>
 
+#include <queue>
 
 
 #define SANBAO_VERSION 0x01
@@ -21,32 +22,34 @@
 #define MESSAGE_CAN760	"output.can.0x760"
 
 
-#define SAMPLE_DEVICE_ID_BRDCST (0x0)
-#define SAMPLE_DEVICE_ID_ADAS   (0x64)
-#define SAMPLE_DEVICE_ID_DSM    (0x65)
-#define SAMPLE_DEVICE_ID_TPMS   (0x66)
-#define SAMPLE_DEVICE_ID_BSD    (0x67)
+#define SAMPLE_DEVICE_ID_BRDCST         (0x0)
+#define SAMPLE_DEVICE_ID_ADAS           (0x64)
+#define SAMPLE_DEVICE_ID_DSM            (0x65)
+#define SAMPLE_DEVICE_ID_TPMS           (0x66)
+#define SAMPLE_DEVICE_ID_BSD            (0x67)
 
-#define SAMPLE_CMD_QUERY            (0x2F)
-#define SAMPLE_CMD_FACTORY_RESET    (0x30)
-#define SAMPLE_CMD_SPEED_INFO       (0x31)
-#define SAMPLE_CMD_DEVICE_INFO      (0x32)
-#define SAMPLE_CMD_UPGRADE          (0x33)
-#define SAMPLE_CMD_GET_PARAM        (0x34)
-#define SAMPLE_CMD_SET_PARAM        (0x35)
-#define SAMPLE_CMD_WARNING_REPORT   (0x36)
-#define SAMPLE_CMD_REQ_STATUS       (0x37)
-#define SAMPLE_CMD_UPLOAD_STATUS    (0x38)
-#define SAMPLE_CMD_REQ_MM_DATA      (0x50)
-#define SAMPLE_CMD_UPLOAD_MM_DATA   (0x51)
+#define SAMPLE_CMD_QUERY                (0x2F)
+#define SAMPLE_CMD_FACTORY_RESET        (0x30)
+#define SAMPLE_CMD_SPEED_INFO           (0x31)
+#define SAMPLE_CMD_DEVICE_INFO          (0x32)
+#define SAMPLE_CMD_UPGRADE              (0x33)
+#define SAMPLE_CMD_GET_PARAM            (0x34)
+#define SAMPLE_CMD_SET_PARAM            (0x35)
+#define SAMPLE_CMD_WARNING_REPORT       (0x36)
+#define SAMPLE_CMD_REQ_STATUS           (0x37)
+#define SAMPLE_CMD_UPLOAD_STATUS        (0x38)
+#define SAMPLE_CMD_REQ_MM_DATA          (0x50)
+#define SAMPLE_CMD_UPLOAD_MM_DATA       (0x51)
+#define SAMPLE_CMD_UPLOAD_MM_DATA_ACK   (0x51)
 
-#define SAMPLE_PROT_MAGIC       (0x7E)
-#define SAMPLE_PROT_ESC_CHAR    (0x7D)
-typedef struct _sample_prot_header
+#define SAMPLE_PROT_MAGIC               (0x7E)
+#define SAMPLE_PROT_ESC_CHAR            (0x7D)
+typedef struct _sample_prot_heade
 {
     uint8_t     magic;
     uint8_t     checksum;
-    uint16_t    version;
+//    uint16_t    version;//modify
+    uint16_t    serial_num;
     uint16_t    vendor_id;
     uint8_t     device_id;
     uint8_t     cmd;
@@ -107,8 +110,8 @@ typedef struct _sample_mm
 {
     uint8_t     req_type;
     uint32_t    mm_id;
-    uint16_t    packet_num;
-    uint16_t    packet_idx;
+    uint16_t    packet_total_num;
+    uint16_t    packet_index;
 } __attribute__((packed)) sample_mm;
 
 
@@ -116,13 +119,13 @@ typedef struct _sample_mm_ack
 {
     uint8_t     req_type;
     uint32_t    mm_id;
-    uint16_t    packet_num;
-    uint16_t    packet_idx;
+    uint16_t    packet_total_num;
+    uint16_t    packet_index;
     uint8_t     ack;
 } __attribute__((packed)) sample_mm_ack;
 
 typedef struct __MECANWarningMessage {
-//#ifdef BIG_ENDIAN
+    //#ifdef BIG_ENDIAN
 #if 0
     uint8_t     byte0_resv:5;
     uint8_t     sound_type:3;
@@ -191,7 +194,7 @@ typedef struct __MECANWarningMessage {
 
 
 typedef struct __car_status {
-	uint8_t		acc:1;
+    uint8_t		acc:1;
     uint8_t     left_signal:1;
     uint8_t     right_signal:1;
     uint8_t     wipers:1;
@@ -204,30 +207,31 @@ typedef struct __car_status {
 
 typedef struct __warningtext {
 
-	uint32_t	warning_id;
-	uint8_t		start_flag;
-	uint8_t		sound_type;
-	uint8_t		forward_car_speed;
-	uint8_t		forward_car_Distance;
-	uint8_t		ldw_type;
-	uint8_t		load_type;
-	uint8_t		load_data;
-	uint8_t		car_speed;
-	uint16_t	high;
-	uint32_t	altitude;
-	uint32_t	longitude;
-	uint8_t		time[6];
-	uint8_t		mm_num;
-	car_status_s	car_status;	
-	sample_mm_info mm;
+    uint32_t	warning_id;
+    uint8_t		start_flag;
+    uint8_t		sound_type;
+    uint8_t		forward_car_speed;
+    uint8_t		forward_car_Distance;
+    uint8_t		ldw_type;
+    uint8_t		load_type;
+    uint8_t		load_data;
+    uint8_t		car_speed;
+    uint16_t	high;
+    uint32_t	altitude;
+    uint32_t	longitude;
+    uint8_t		time[6];
+    uint8_t		mm_num;
+    car_status_s	car_status;	
+    sample_mm_info mm;
 
 
 } __attribute__((packed)) warningtext;
 
 
 typedef struct __car_info {
-#ifdef BIG_ENDIAN
+//#ifdef BIG_ENDIAN
 
+#if 0
     uint8_t     byte0_resv1:1;
     uint8_t     byte0_resv0:1;
     uint8_t     high_beam:1;
@@ -238,7 +242,7 @@ typedef struct __car_info {
     uint8_t     brakes:1;
 
     uint8_t     speed_aval:1;
-    uint8_t     byte1_resv6:1;
+    uint8_t     byte1_resv1:1;
     uint8_t     high_beam_aval:1;
     uint8_t     low_beam_aval:1;
     uint8_t     wipers_aval:1;
@@ -260,7 +264,7 @@ typedef struct __car_info {
     uint8_t     wipers_aval:1;
     uint8_t     low_beam_aval:1;
     uint8_t     high_beam_aval:1;
-    uint8_t     byte1_resv0:1;
+    uint8_t     byte1_resv1:1;
     uint8_t     speed_aval:1;
 
     uint8_t     speed;
@@ -271,18 +275,12 @@ typedef struct __car_info {
 
 
 /**********************can message*****************************/
-
-
 typedef struct _can_struct{
-	uint8_t warning[8];
-	char source[20];
-	char time[20];
-	char topic[20];
-}can_algo;
-
-typedef struct _can_warning{
-
-}can_warning;
+    uint8_t warning[8];
+    char source[20];
+    char time[20];
+    char topic[20];
+}can_data_type;
 
 #define HW_LEVEL_NO_CAR     (0)
 #define HW_LEVEL_WHITE_CAR  (1)
@@ -301,13 +299,9 @@ typedef struct _can_warning{
 
 
 
-
-
-
 /*************set para*********************/
-
 typedef struct __CAN_PARA {
-//#ifdef BIG_ENDIAN
+    //#ifdef BIG_ENDIAN
 #if 0
 
 #else /*Little Endian*/   //a:0 a:1 ...
@@ -329,14 +323,35 @@ typedef struct __CAN_PARA {
 } __attribute__((packed)) can_para;
 
 
+/**********queue and repeat_send struct****************/
+#define PTR_QUEUE_BUF_SIZE   (1024 + 64)
+#define PTR_QUEUE_BUF_CNT    (16)
+#define UCHAR_QUEUE_SIZE    (2048)
 
+typedef struct _ptr_queue_node{
+    uint8_t cmd;
+    uint8_t need_ack;
+
+    int32_t len;
+    uint8_t *buf;
+} __attribute__((packed)) ptr_queue_node;
+
+typedef struct _package_repeat_status{
+#define REPEAT_SEND_TIMES_MAX   3
+
+    bool mm_data_trans_waiting;
+    uint8_t repeat_cnt;
+    struct timeval msg_sendtime;
+    bool start_wait_ack;
+    ptr_queue_node msgsend;
+} __attribute__((packed)) pkg_repeat_status;
+
+
+void repeat_send_pkg_status_init();
 void printbuf(uint8_t *buf, int len);
 void *communicate_with_host(void *para);
 void *parse_host_cmd(void *para);
-int can_message_send(can_algo *sourcecan);
-static int unescaple_msg(uint8_t *msg, int msglen, int timeout);
-int ptr_queue_init();
-int ptr_queue_destory();
+int can_message_send(can_data_type *sourcecan);
 
 #define DEBUG_BUF
 
