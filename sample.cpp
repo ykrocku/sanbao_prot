@@ -28,6 +28,33 @@
 #include <queue>
 using namespace std;
 
+
+static int32_t sample_send_image();
+
+
+extern pthread_mutex_t mutex;
+extern pthread_cond_t cond;
+extern warn_information warn_happen;
+extern para_setting warn_para;
+
+
+
+pthread_mutex_t id_lock = PTHREAD_MUTEX_INITIALIZER;
+uint32_t get_next_warning_id()
+{
+    static uint32_t s_warning_id = 0;
+    uint32_t id = 0;
+
+    pthread_mutex_lock(&id_lock);
+    s_warning_id ++;
+    id = s_warning_id;
+    pthread_mutex_unlock(&id_lock);
+
+    return id;
+}
+
+
+
 pthread_mutex_t ptr_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t uchar_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -143,7 +170,7 @@ static int ptr_queue_pop(queue<ptr_queue_node*> *p, ptr_queue_node *out)
 
 }
 
-static int send_package_timeout(struct timeval *tv, int timeout_sec)
+int send_package_timeout(struct timeval *tv, int timeout_sec)
 {
     struct timeval tv_cur;
 
@@ -228,17 +255,21 @@ static int send_pkg_to_host(int sock)
                     msgack.len = 0;
                     if(!ptr_queue_pop(g_ack_queue_p, &msgack))
                     {
+                            printf("get ack!!!");
                         if(msgack.cmd == g_pkg_status_p->msgsend.cmd)//send cmd and recv cmd match
                         {
+                            printf("get ack2!!!");
                             g_pkg_status_p->repeat_cnt = 0;
                             g_pkg_status_p->start_wait_ack = 0;//reset pop
                             return 0;
                         }
                         else
                         {
-                            printf("get ack cmd dismathch: ack cmd = %d, send cmd = 0x%x\n", msgack.cmd, g_pkg_status_p->msgsend.cmd);
+                            printf("get ack cmd dismathch: ack cmd = 0x%x, send cmd = 0x%x\n", msgack.cmd, g_pkg_status_p->msgsend.cmd);
                         }
                     }
+                    else
+                        usleep(10000);
                 }
             }
             else//repeat 3 times over
@@ -257,6 +288,7 @@ static int send_pkg_to_host(int sock)
             if(ret >0)
             {
                 printf("tcp write ret = %d, over\n", ret);
+                printbuf(g_pkg_status_p->msgsend.buf, ret);
             }
             else
             {
@@ -360,8 +392,8 @@ static int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t 
 
     memset(pHeader, 0, sizeof(*pHeader));
     pHeader->magic = SAMPLE_PROT_MAGIC;
-    pHeader->serial_num= htons(s_serial_num++); //used as message cnt
-    pHeader->vendor_id= htons(VENDOR_ID);
+    pHeader->serial_num= MY_HTONS(s_serial_num++); //used as message cnt
+    pHeader->vendor_id= MY_HTONS(VENDOR_ID);
     pHeader->device_id= SAMPLE_DEVICE_ID_ADAS;
     pHeader->cmd = cmd;
 
@@ -387,12 +419,12 @@ static int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t 
         case SAMPLE_CMD_REQ_STATUS:
         case SAMPLE_CMD_UPLOAD_STATUS:
         case SAMPLE_CMD_REQ_MM_DATA:
+        case SAMPLE_CMD_WARNING_REPORT:
             msg.need_ack = 0;
             break;
 
             //send as master
         case SAMPLE_CMD_UPLOAD_MM_DATA:
-        case SAMPLE_CMD_WARNING_REPORT:
             msg.need_ack = 1;
 
             break;
@@ -413,20 +445,23 @@ static int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t 
     return msg_len;
 }
 
+
 static MECANWarningMessage g_last_warning_data;
 static MECANWarningMessage g_last_can_msg;
 static uint8_t g_last_trigger_warning[sizeof(MECANWarningMessage)];
 int can_message_send(can_data_type *sourcecan)
 {
+    uint32_t warning_id = 0;
     time_t timep = 0;   
     struct tm *p = NULL; 
     warningtext uploadmsg;
     MECANWarningMessage can;
     car_info carinfo;
-    static uint32_t s_warning_id = 0;
     uint8_t txbuf[512];
     char image_name[50];
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
+    warn_information warn_local;
+    memset(&warn_local, 0, sizeof(warn_local));
 
     uint32_t i = 0;
     uint8_t all_warning_masks[sizeof(MECANWarningMessage)] = {
@@ -453,7 +488,7 @@ int can_message_send(can_data_type *sourcecan)
         if (0 == memcmp(all_warning_data, &g_last_warning_data, sizeof(g_last_warning_data))) {
             return 0;
         }
-
+#if 0
         if( (g_last_warning_data.headway_warning_level != can.headway_warning_level) || \
                 (0 != memcmp(trigger_data, &g_last_trigger_warning, sizeof(g_last_trigger_warning)) && 0 != trigger_data[4]) )
         {
@@ -473,19 +508,20 @@ int can_message_send(can_data_type *sourcecan)
 
             printf("%d-%d-%d %d:%d:%d\n", (1900 + p->tm_year), ( 1 + p->tm_mon), p->tm_mday,(p->tm_hour), p->tm_min, p->tm_sec); 
 
-            uploadmsg.warning_id = htonl(s_warning_id & 0xFFFFFFFF);
+            uploadmsg.warning_id = MY_HTONL(warning_id & 0xFFFFFFFF);
             uploadmsg.start_flag = 0;
             if(!system("/system/bin/rbget >/dev/null"))//get image success
             {
                 uploadmsg.mm.id = uploadmsg.warning_id;
-                sprintf(image_name, "/mnt/obb/rb_last_frame%d.jpg", s_warning_id % IMAGE_CACHE_NUM);
+                sprintf(image_name, "/mnt/obb/rb_last_frame%d.jpg", warning_id % IMAGE_CACHE_NUM);
                 rename("/mnt/obb/rb_last_frame.jpg", image_name);
                 uploadmsg.mm_num = uploadmsg.mm.id;
                 uploadmsg.mm.type = MM_PHOTO;
-                //   uploadmsg.mm.id = htonl(get_media_id());
+                //   uploadmsg.mm.id = MY_HTONL(get_media_id());
             }
-            s_warning_id++ ;
+            warning_id++ ;
         }
+#endif
         //LDW and FCW event
         if (0 != memcmp(trigger_data, &g_last_trigger_warning, sizeof(g_last_trigger_warning)) && 0 != trigger_data[4]) {
             printf("------LDW/FCW event-----------\n");
@@ -500,6 +536,8 @@ int can_message_send(can_data_type *sourcecan)
                     uploadmsg.ldw_type = SOUND_TYPE_RLDW;
 
                 sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT, (uint8_t *)&uploadmsg, sizeof(uploadmsg));
+
+
             }
             if (can.fcw_on) {
                 uploadmsg.start_flag = SW_STATUS_EVENT;
@@ -516,7 +554,22 @@ int can_message_send(can_data_type *sourcecan)
             if (HW_LEVEL_RED_CAR == can.headway_warning_level) {
                 uploadmsg.start_flag = SW_STATUS_BEGIN;
                 uploadmsg.sound_type = SW_TYPE_HW;
+
+                warning_id = get_next_warning_id();
+
+                uploadmsg.warning_id = MY_HTONL(warning_id & 0xFFFFFFFF);
+                uploadmsg.start_flag = 0;
+                uploadmsg.mm.id = uploadmsg.warning_id;
+
+                //warn_local.id[INDEX_HW] = uploadmsg.warning_id;
+                warn_local.id[INDEX_HW] = warning_id;
+
+                //   uploadmsg.mm.id = MY_HTONL(get_media_id());
+                uploadmsg.mm_num = 3;
+                uploadmsg.mm.type = MM_PHOTO;
+
                 sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT, (uint8_t *)&uploadmsg, sizeof(uploadmsg));
+                warn_local.type |= SOUND_TYPE_HW;
 
             } else if (HW_LEVEL_RED_CAR == g_last_warning_data.headway_warning_level) {
                 uploadmsg.start_flag = SW_STATUS_END;
@@ -529,14 +582,22 @@ int can_message_send(can_data_type *sourcecan)
         memcpy(&g_last_warning_data, all_warning_data, sizeof(g_last_warning_data));
         memcpy(&g_last_trigger_warning, trigger_data, sizeof(g_last_trigger_warning));
 
+        if(warn_local.type != 0)
+        {
+            printf("start write warning!\n");
+            pthread_mutex_lock(&mutex);
+            memcpy(&warn_happen, &warn_local, sizeof(warn_local));
+            pthread_mutex_unlock(&mutex);
+            pthread_cond_signal(&cond);
+        }
     }
 #if 1
     if(!strncmp(sourcecan->topic, MESSAGE_CAN760, strlen(MESSAGE_CAN760)))
     {
         memcpy(&carinfo, sourcecan->warning, sizeof(sourcecan->warning));
         //			uploadmsg.high = carinfo.
-        //			uploadmsg.altitude = carinfo. //htons(altitude)
-        //			uploadmsg.longitude= carinfo. //htons(longitude)
+        //			uploadmsg.altitude = carinfo. //MY_HTONS(altitude)
+        //			uploadmsg.longitude= carinfo. //MY_HTONS(longitude)
         //			uploadmsg.car_status.acc = 
         uploadmsg.car_status.left_signal = carinfo.left_signal;
         uploadmsg.car_status.right_signal = carinfo.right_signal;
@@ -552,31 +613,186 @@ int can_message_send(can_data_type *sourcecan)
     return 0;
 }
 
-static int32_t sample_send_image(sample_prot_header *pHeader, int32_t len)
+
+
+void send_snap_shot_event(uint32_t id)
 {
-#define IMAGE_SIZE_PER_PACKET   (512)
+    warningtext uploadmsg;
+    uint8_t txbuf[512];
+    uint8_t ack = 0;
+    sample_prot_header *pSend = (sample_prot_header *) txbuf;
+    uploadmsg.sound_type = SW_TYPE_SNAP;
+    uploadmsg.mm_num = 1;
+    uploadmsg.mm.type = MM_PHOTO;
+    uploadmsg.warning_id = MY_HTONL(id);
+    uploadmsg.mm.id = uploadmsg.warning_id;
+
+    sample_assemble_msg_to_push(pSend, SAMPLE_CMD_SNAP_SHOT, (uint8_t *)&ack, 1);
+    sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT, (uint8_t *)&uploadmsg, sizeof(uploadmsg));
+}
+
+
+
+static int32_t send_req_ack(sample_prot_header *pHeader, int len)
+{
+#define IMAGE_SIZE_PER_PACKET   (1024)
+
+    uint32_t mm_id = 0;
+    uint32_t warn_type = 0;
+    size_t filesize = 0;
+    FILE *fp = NULL;
+    sample_mm_info *mm_ptr = NULL;
+
+    if(pHeader->cmd == SAMPLE_CMD_REQ_MM_DATA && !g_pkg_status_p->mm_data_trans_waiting) //recv req
+    {
+
+        printf("------------req mm-------------\n");
+        printbuf((uint8_t *)pHeader, len);
+        printf("len = %d, len2 = %ld\n", len, sizeof(sample_mm_info) + sizeof(sample_prot_header));
+        if(len == sizeof(sample_mm_info) + sizeof(sample_prot_header) + 1)
+        {
+            mm_ptr = (sample_mm_info *)(pHeader + 1);
+            printf("req mm_type = 0x%x\n", mm_ptr->type);
+            printf("req mm_id = 0x%08x\n", MY_HTONL(mm_ptr->id));
+
+            g_pkg_status_p->mm.type = mm_ptr->type;
+            g_pkg_status_p->mm.id = mm_ptr->id;
+        }
+        else
+            return 0;
+       
+        printf("------------req mm1-------------\n");
+
+
+        //find file
+        mm_id = MY_HTONL(mm_ptr->id);
+        if(id_to_warning_type(mm_id, &warn_type))
+        {
+            printf("find id[%d] fail!\n", mm_id);
+            return -1;
+        }
+
+        if(mm_ptr->type == MM_PHOTO)
+        {
+            sprintf(g_pkg_status_p->filepath, "/mnt/obb/%s-%08d-%d.jpg", warning_type_to_str(warn_type), mm_id, g_pkg_status_p->file_index);
+        }
+        else if(mm_ptr->type == MM_AUDIO)
+        {
+            sprintf(g_pkg_status_p->filepath, "/mnt/obb/%s-%08d.wav", warning_type_to_str(warn_type), mm_id);
+        }
+        else if(mm_ptr->type == MM_VEDIO)
+        {
+            sprintf(g_pkg_status_p->filepath, "/mnt/obb/%s-%08d.avi", warning_type_to_str(warn_type), mm_id);
+        }
+        else
+        {
+            printf("mm type not valid, val=%d\n", mm_ptr->type);
+            return 0;
+        }
+        printf("try find filename: %s\n", g_pkg_status_p->filepath);
+        fp = fopen(g_pkg_status_p->filepath, "rb");
+        if(fp == NULL)
+        {
+            printf("open %s fail\n", g_pkg_status_p->filepath);
+            return -1;
+        }
+        else
+        {
+            printf("open %s ok\n", g_pkg_status_p->filepath);
+        }
+
+        fseek(fp, 0, SEEK_SET);
+        fseek(fp, 0, SEEK_END);
+        filesize = ftell(fp);
+        fclose(fp);
+
+        g_pkg_status_p->mm.packet_index = 0;
+        g_pkg_status_p->mm.packet_total_num = MY_HTONS((filesize + IMAGE_SIZE_PER_PACKET - 1)/IMAGE_SIZE_PER_PACKET);
+
+        g_pkg_status_p->mm_data_trans_waiting = 1;
+        sample_assemble_msg_to_push(pHeader, SAMPLE_CMD_REQ_MM_DATA, NULL, 0);
+
+        printf("------------send image-------------\n");
+        sample_send_image();
+    }
+    else
+    {
+        printf("current package is not valid!\n");
+        return 0;
+    }
+    return 0;
+}
+
+int get_file_information()
+{
+    size_t filesize = 0;
+    FILE *fp = NULL;
+    uint32_t mm_id = 0;
+    uint32_t warn_type = 0;
+
+    //find file
+    printf("%s enter!\n", __FUNCTION__);
+
+    mm_id = MY_HTONL(g_pkg_status_p->mm.id);
+    if(id_to_warning_type(mm_id, &warn_type))
+        return -1;
+
+    printf("g_pkg_status_p->file_index = %d\n", g_pkg_status_p->file_index);
+    g_pkg_status_p->file_index++;
+    printf("g_pkg_status_p->file_index = %d\n", g_pkg_status_p->file_index);
+
+
+    if(g_pkg_status_p->mm.type == MM_PHOTO)
+    {
+        sprintf(g_pkg_status_p->filepath, "/mnt/obb/%s-%08d-%d.jpg", warning_type_to_str(warn_type), mm_id, g_pkg_status_p->file_index);
+    }
+    else
+    {
+        id_to_free_slot(mm_id);
+        printf("mm type not valid!\n");
+        return -1;
+    }
+
+    printf("try find filename: %s\n", g_pkg_status_p->filepath);
+    fp = fopen(g_pkg_status_p->filepath, "rb");
+    if(fp == NULL)
+    {
+        id_to_free_slot(mm_id);
+        g_pkg_status_p->file_index=0;
+        printf("open %s fail\n", g_pkg_status_p->filepath);
+        return -1;
+    }
+    else
+    {
+        printf("open %s ok\n", g_pkg_status_p->filepath);
+    }
+
+    fseek(fp, 0, SEEK_SET);
+    fseek(fp, 0, SEEK_END);
+    filesize = ftell(fp);
+    fclose(fp);
+
+    g_pkg_status_p->mm.packet_index = 0;
+    g_pkg_status_p->mm.packet_total_num = MY_HTONS((filesize + IMAGE_SIZE_PER_PACKET - 1)/IMAGE_SIZE_PER_PACKET);
+
+    return 0;
+}
+
+static int recv_ack(sample_prot_header *pHeader, int32_t len)
+{
     uint8_t data[IMAGE_SIZE_PER_PACKET + \
         sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64];
     uint8_t txbuf[(IMAGE_SIZE_PER_PACKET + \
             sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64)*2];
     size_t filesize = 0;
     FILE *fp = NULL;
-    sample_prot_header *pSend = (sample_prot_header *) txbuf;
 
-    static int32_t s_total=0;
-    static char s_image_name[50];
-    static int32_t s_package_cnt = 0;
-    static int32_t s_sent = 0;
-    static int32_t s_to_send = 0;
-    static char s_req = 0;
+    sample_mm_ack mmack;
+
     ptr_queue_node msg;
 
-    sample_mm mm;
-    sample_mm *mm_ptr = NULL;
-    sample_mm_ack mmack;
-    uint32_t MMID = 0;
-
-    if((pHeader->cmd == SAMPLE_CMD_UPLOAD_MM_DATA) && (s_req == 1))//recv ack
+    printf("recv ack...........!\n");
+    if(pHeader->cmd == SAMPLE_CMD_UPLOAD_MM_DATA)//recv ack
     {
         memcpy(&mmack, pHeader+1, sizeof(mmack));
         if(mmack.ack)
@@ -586,101 +802,340 @@ static int32_t sample_send_image(sample_prot_header *pHeader, int32_t len)
         }
         else
         {
+        printf("recv ack..1.........!\n");
             msg.cmd = SAMPLE_CMD_UPLOAD_MM_DATA;
             msg.len = 0;
             msg.buf = NULL;
-            if(s_package_cnt == ntohs(mmack.packet_index) + 1)//recv ack index is correct
+            
+            printf("index = 0x%08x, index2 = 0x%08x\n", g_pkg_status_p->mm.packet_index, mmack.packet_index);
+
+            if(MY_HTONS(g_pkg_status_p->mm.packet_index) == \
+                    (MY_HTONS(mmack.packet_index) + 1)) //recv ack index is correct
             {
-                ptr_queue_push(g_ack_queue_p, &msg);
-                if(s_total == s_package_cnt)
+        printf("recv ack..2.........!\n");
+                ptr_queue_push(g_ack_queue_p, &msg);//notice ack recv
+
+        printf("push ack...........!\n");
+                if(MY_HTONS(g_pkg_status_p->mm.packet_total_num) == \
+                        MY_HTONS(g_pkg_status_p->mm.packet_index)) //the last pkg ack
                 {
-                    printf("transmit over!\n");
-                    g_pkg_status_p->mm_data_trans_waiting = 0;
-                    s_package_cnt = 0;
-                    s_to_send = 0;
-                    s_sent = 0;
-                    s_total = 0;
-                    s_req = 0;
-                    return 0;
+                    printf("transmit one file over!\n");
+
+                    if(!get_file_information())
+                    {
+                        sample_send_image();//send next file
+                    }
+                    else
+                    {
+                        printf("transmit over!\n");
+                        memset(&g_pkg_status_p->mm, 0, sizeof(g_pkg_status_p->mm));
+                        g_pkg_status_p->mm_data_trans_waiting = 0;
+                    }
+                }
+                else //send next
+                {
+                printf("send.........!\n");
+                    sample_send_image();
                 }
             }
 
         }
     }
-    else if(pHeader->cmd == SAMPLE_CMD_REQ_MM_DATA && !g_pkg_status_p->mm_data_trans_waiting) //recv req
-    {
-        printf("------------req mm-------------\n");
-        if(len == sizeof(mm) + sizeof(sample_prot_header))
-        {
-            mm_ptr = (sample_mm *)(pHeader + 1);
-            printf("mm_ptr->mm_id = 0x%08x\n", mm_ptr->mm_id);
-            MMID = htonl(mm_ptr->mm_id);
-        }
+    return 0;
+}
 
-        g_pkg_status_p->mm_data_trans_waiting = 1;
-        s_package_cnt = 0;
-        s_to_send = 0;
-        s_sent = 0;
-        s_req = 1;
+static int32_t sample_send_image()
+{
+    int ret=0;
+    int offset=0;
+    uint8_t data[IMAGE_SIZE_PER_PACKET + \
+        sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64];
+    uint8_t txbuf[(IMAGE_SIZE_PER_PACKET + \
+            sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64)*2];
+    size_t filesize = 0;
+    FILE *fp = NULL;
+    sample_prot_header *pSend = (sample_prot_header *) txbuf;
 
-        sprintf(s_image_name, "/mnt/obb/rb_last_frame%d.jpg", MMID % IMAGE_CACHE_NUM);
-        printf("try find filename: %s\n", s_image_name);
-        fp = fopen(s_image_name, "r");
-        if(fp ==NULL)
-        {
-            printf("open %s fail\n", s_image_name);
-            return -1;
-        }
-        else
-        {
-            printf("open %s ok\n", s_image_name);
-        }
-
-        fseek(fp, 0, SEEK_SET);
-        fseek(fp, 0, SEEK_END);
-        filesize = ftell(fp);
-        fclose(fp);
-        s_total = (filesize + IMAGE_SIZE_PER_PACKET - 1)/IMAGE_SIZE_PER_PACKET;
-        sample_assemble_msg_to_push(pHeader, SAMPLE_CMD_REQ_MM_DATA, NULL, 0);
-    }
-    else
-    {
-
-        printf("current package is not valid!\n");
-
-        return 0;
-    }
-
-    mm.req_type = MM_PHOTO;
-    mm.mm_id = htonl(MM_ID);
-    mm.packet_total_num = htons(s_total);
-    mm.packet_index = htons(s_package_cnt);
-    memcpy(data, &mm, sizeof(mm));
-    fp = fopen(s_image_name, "r");
+    fp = fopen(g_pkg_status_p->filepath, "rb");
     if(fp ==NULL)
     {
-        printf("open %s fail\n", s_image_name);
+        printf("open %s fail\n", g_pkg_status_p->filepath);
         return -1;
     }
-    fseek(fp, s_sent, SEEK_SET);
-    s_to_send = fread(data+ sizeof(mm), 1, IMAGE_SIZE_PER_PACKET, fp);
+    memcpy(data, &g_pkg_status_p->mm, sizeof(g_pkg_status_p->mm));
+    offset = MY_HTONS(g_pkg_status_p->mm.packet_index) * IMAGE_SIZE_PER_PACKET;
+    fseek(fp, offset, SEEK_SET);
+    ret = fread(data + sizeof(g_pkg_status_p->mm), 1, IMAGE_SIZE_PER_PACKET, fp);
     fclose(fp);
-    if(s_to_send >0)
+    if(ret>0)
     {
-        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_UPLOAD_MM_DATA, data, (sizeof(mm) + s_to_send));
-        s_sent += s_to_send;
-        printf("i==%d/%d, tosend = %d, sent = %d, cnt = %d\n", s_package_cnt, s_total, s_to_send, s_sent, s_package_cnt);
-        s_package_cnt++;
+        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_UPLOAD_MM_DATA, data, (sizeof(g_pkg_status_p->mm) + ret));
+        printf("send...[%d/%d]\n", MY_HTONS(g_pkg_status_p->mm.packet_total_num), MY_HTONS(g_pkg_status_p->mm.packet_index));
+        g_pkg_status_p->mm.packet_index = MY_HTONS(MY_HTONS(g_pkg_status_p->mm.packet_index) + 1);
     }
     else//end and clear
     {
+        printf("read file ret <=0\n");
     }
     return 0;
 }
 
-static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
+
+
+real_time_data dat;
+void recv_real_time_data(sample_prot_header *pHeader, int32_t len)
+{
+    
+    if(len == sizeof(sample_prot_header) + 1 + sizeof(dat))
+    {
+        memcpy(&dat, pHeader+1, sizeof(dat));
+    }
+    else
+    {
+        printf("recv cmd:0x%x, data len maybe error!\n", pHeader->cmd);
+    }
+}
+
+void recv_para_setting_data(sample_prot_header *pHeader, int32_t len)
+{
+    para_setting recv_para;
+    uint8_t ack = 0;
+    uint8_t txbuf[128] = {0};
+    sample_prot_header *pSend = (sample_prot_header *) txbuf;
+
+    if(len == sizeof(sample_prot_header) + 1 + sizeof(recv_para))
+    {
+    
+        memcpy(&recv_para, pHeader+1, sizeof(recv_para));
+
+        recv_para.auto_photo_time_period = MY_HTONS(recv_para.auto_photo_time_period);
+        recv_para.auto_photo_distance_period = MY_HTONS(recv_para.auto_photo_distance_period);
+    
+        memcpy(&warn_para, &recv_para, sizeof(recv_para));
+        write_file(LOCAL_PRAR_FILE, &recv_para, sizeof(recv_para));
+
+        ack = 0;
+        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_SET_PARAM, \
+                (uint8_t*)&ack, 1);
+    }
+    else
+    {
+        printf("recv cmd:0x%x, data len maybe error!\n", pHeader->cmd);
+        ack = 1;
+        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_SET_PARAM, \
+                (uint8_t*)&ack, 1);
+    }
+}
+
+void send_para_setting_data(sample_prot_header *pHeader, int32_t len)
+{
+    para_setting send_para;
+    uint8_t txbuf[256] = {0};
+    sample_prot_header *pSend = (sample_prot_header *) txbuf;
+
+    if(len == sizeof(sample_prot_header) + 1)
+    {
+
+        memcpy(&send_para, &warn_para, sizeof(send_para));
+        send_para.auto_photo_time_period = MY_HTONS(send_para.auto_photo_time_period);
+        send_para.auto_photo_distance_period = MY_HTONS(send_para.auto_photo_distance_period);
+
+        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_GET_PARAM, \
+                (uint8_t*)&send_para, sizeof(send_para));
+    }
+    else
+    {
+        printf("recv cmd:0x%x, data len maybe error!\n", pHeader->cmd);
+    }
+}
+
+void recv_warning_ack(sample_prot_header *pHeader, int32_t len)
 {
     ptr_queue_node msg;
+
+    if(len == sizeof(sample_prot_header) + 1)
+    {
+        msg.cmd = SAMPLE_CMD_WARNING_REPORT;
+        msg.buf = NULL;
+        msg.len = 0;
+        ptr_queue_push(g_ack_queue_p, &msg);//send
+    }
+    else
+    {
+        printf("recv cmd:0x%x, data len maybe error!\n", pHeader->cmd);
+    }
+}
+
+void send_module_status(sample_prot_header *pHeader, int32_t len)
+{
+    module_status module;
+    uint8_t txbuf[256] = {0};
+    sample_prot_header *pSend = (sample_prot_header *) txbuf;
+
+    memset(&module, 0, sizeof(module));
+
+    if(len == sizeof(sample_prot_header) + 1)
+    {
+        module.work_status = MODULE_WORKING;
+        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_REQ_STATUS, \
+                (uint8_t*)&module, sizeof(module));
+    }
+    else
+    {
+        printf("recv cmd:0x%x, data len maybe error!\n", pHeader->cmd);
+    }
+}
+
+void recv_upload_status_cmd_ack(sample_prot_header *pHeader, int32_t len)
+{
+    ptr_queue_node msg;
+
+    if(len == sizeof(sample_prot_header) + 1)
+    {
+        msg.cmd = SAMPLE_CMD_UPLOAD_STATUS;
+        msg.buf = NULL;
+        msg.len = 0;
+        ptr_queue_push(g_ack_queue_p, &msg);//send
+    }
+    else
+    {
+        printf("recv cmd:0x%x, data len maybe error!\n", pHeader->cmd);
+    }
+}
+
+typedef struct _file_trans_msg
+{
+    uint16_t    packet_num;
+    uint16_t    packet_index;
+} __attribute__((packed)) file_trans_msg;
+
+#define UPGRADE_CMD_START       0x1
+#define UPGRADE_CMD_CLEAN       0x2
+#define UPGRADE_CMD_TRANS       0x3
+#define UPGRADE_CMD_RUN         0x4
+
+
+uint32_t get_sum(uint8_t *buf, int len)
+{
+    uint32_t sum = 0;
+    int i=0;
+
+    for(i=0; i<len; i++)
+    {
+        sum += buf[i];
+    }
+    return sum;
+}
+int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
+{
+    int ret;
+    int fd;
+    static uint32_t sum = 0;
+    static uint32_t sum_new = 0;
+    uint8_t data[4];
+    uint8_t data_ack[5];
+    uint8_t     ack[2];
+    int32_t datalen = 0;
+    uint8_t *pchar=NULL;
+    static uint32_t packet_num = 0;
+    static uint32_t packet_index = 0;
+    static uint32_t offset = 0;
+    uint8_t     message_id = 0x03;
+    file_trans_msg file_trans;
+    unsigned char txbuf[256] = {0};
+    sample_prot_header * pSend = (sample_prot_header *) txbuf;
+
+    pchar = (uint8_t *)(pHeader+1);
+    message_id = *pchar;
+
+    printf("doing message_id 0x%02x\n", message_id);
+    if(message_id == UPGRADE_CMD_START ||\
+           message_id == UPGRADE_CMD_CLEAN ||\
+           message_id == UPGRADE_CMD_RUN)
+    {
+        
+        if(message_id == UPGRADE_CMD_CLEAN)
+        {
+            //do clean
+        }
+        if(message_id == UPGRADE_CMD_RUN)
+        {
+            //do run
+        }
+        ack[0] = message_id;
+        ack[1] = 0;
+        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_UPGRADE, \
+                ack, sizeof(ack));
+    }
+    else if(message_id == UPGRADE_CMD_TRANS) //recv file
+    {
+
+        memcpy(&file_trans, pchar+1, sizeof(file_trans));
+        packet_num = MY_HTONS(file_trans.packet_num);
+        packet_index = MY_HTONS(file_trans.packet_index);
+
+        if(packet_index == 0)
+        {
+            memcpy(&data, pchar+1+sizeof(file_trans), 4);
+
+            //  sum = *(uint32_t *)&data[0];
+            sum = MY_HTONL(*(uint32_t *)&data[0]);
+
+            printf("recv sum = 0x%08x\n", sum);
+        }
+        else //recv file
+        {
+            memcpy(&file_trans, pchar+1, sizeof(file_trans));
+            packet_num = MY_HTONS(file_trans.packet_num);
+            packet_index = MY_HTONS(file_trans.packet_index);
+
+            datalen = len - (sizeof(sample_prot_header) + 1 + 5);
+            printf("recv [%d]/[%d], datalen = %d\n", packet_num, packet_index, datalen);
+
+
+            fd = open("/mnt/obb/upgrade.jpg", O_RDWR|O_CREAT, 0644);
+            lseek(fd, offset, SEEK_SET);
+            ret = write(fd, pchar+5, datalen);
+            close(fd);
+
+            if(ret > 0)
+                offset += ret;
+
+            sum_new += get_sum((uint8_t *)pchar+5, datalen);
+
+            if(packet_index+1 == packet_num) //the last packet , packet 0 is sum, no data!
+            {
+
+                printf("sumnew = 0x%08x, sum=0x%08x\n", sum_new, sum);
+
+                if(sum_new == sum)
+                {
+                    printf("sun check ok!\n");
+
+                    memcpy(data_ack, pchar, sizeof(data_ack));
+                    sample_assemble_msg_to_push(pSend, SAMPLE_CMD_UPGRADE, \
+                            data_ack, sizeof(data_ack));
+                    return 0;
+                }
+                else
+                {
+                    printf("sun check err!\n");
+                }
+            }
+        }
+        memcpy(data_ack, pchar, sizeof(data_ack));
+        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_UPGRADE, \
+                data_ack, sizeof(data_ack));
+    }
+    else
+        ;
+
+    return 0;
+}
+
+
+static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
+{
     ptr_queue_node msgack;
     uint8_t buf[PTR_QUEUE_BUF_SIZE];
 
@@ -700,6 +1155,7 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
         return 0;
     }
 
+    printf("------cmd = 0x%x------\n", pHeader->cmd);
     switch (pHeader->cmd)
     {
         case SAMPLE_CMD_QUERY:
@@ -710,39 +1166,54 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
             sample_assemble_msg_to_push(pHeader, SAMPLE_CMD_FACTORY_RESET, NULL, 0);
             break;
 
+        case SAMPLE_CMD_SPEED_INFO: //不需要应答
+            recv_real_time_data(pHeader, len);
+            break;
+
         case SAMPLE_CMD_DEVICE_INFO:
             sample_assemble_msg_to_push(pSend, SAMPLE_CMD_DEVICE_INFO,
                     (uint8_t*)&dev_info, sizeof(dev_info));
 
             break;
 
-        case SAMPLE_CMD_SPEED_INFO:
-            //get car status
-            break;
-
         case SAMPLE_CMD_UPGRADE:
+            recv_upgrade_file(pHeader, len);
             break;
 
         case SAMPLE_CMD_GET_PARAM:
+            send_para_setting_data(pHeader, len);
+
             break;
 
         case SAMPLE_CMD_SET_PARAM:
+            recv_para_setting_data(pHeader, len);
             break;
 
-        case SAMPLE_CMD_WARNING_REPORT:
-            msg.cmd = SAMPLE_CMD_WARNING_REPORT;
-            msg.buf = NULL;
-            msg.len = 0;
-            ptr_queue_push(g_ack_queue_p, &msg);//send
+        case SAMPLE_CMD_WARNING_REPORT: //recv warning ack
+            recv_warning_ack(pHeader, len);
             break;
 
-        case SAMPLE_CMD_REQ_STATUS:
+        case SAMPLE_CMD_REQ_STATUS: 
+            send_module_status(pHeader, len);
+            break;
+
+        case SAMPLE_CMD_UPLOAD_STATUS: //主动上报状态后，接收到ack
+            recv_upload_status_cmd_ack(pHeader, len);
+            break;
+
+        case SAMPLE_CMD_REQ_MM_DATA:
+            send_req_ack(pHeader,len);
             break;
 
         case SAMPLE_CMD_UPLOAD_MM_DATA:
-        case SAMPLE_CMD_REQ_MM_DATA:
-            sample_send_image(pHeader, len);
+            recv_ack(pHeader, len);
             break;
+
+        case SAMPLE_CMD_SNAP_SHOT:
+            printf("------snap shot----------\n");
+            record_snap_shot();
+            break;
+
         default:
             printf("****************UNKNOW frame!*************\n");
             printbuf((uint8_t *)pHeader, len);
@@ -770,7 +1241,7 @@ static int try_connect()
 
     memset(&host_serv_addr, 0, sizeof(host_serv_addr));
     host_serv_addr.sin_family = AF_INET;
-    host_serv_addr.sin_port   = htons(HOST_SERVER_PORT);
+    host_serv_addr.sin_port   = MY_HTONS(HOST_SERVER_PORT);
 
     ret = inet_aton(server_ip, &host_serv_addr.sin_addr);
     if (0 == ret) {
@@ -849,8 +1320,12 @@ connect_again:
                     i=0;
                     while(ret--)
                     {
-                        if(!uchar_queue_push(&readbuf[i++]))
+                        if(!uchar_queue_push(&readbuf[i]))
+                        {
+                            i++;
+                            //printf("i = %d\n", i);
                             continue;
+                        }
                         else
                             usleep(10);
                     }
@@ -876,6 +1351,8 @@ static int unescaple_msg(uint8_t *msg, int msglen)
     char got_esc_char = 0;
     int cnt = 0;
 
+    int i = 0;
+
     if(!msg || msglen <0)
         return -1;
 
@@ -888,6 +1365,7 @@ static int unescaple_msg(uint8_t *msg, int msglen)
         }
         if(!uchar_queue_pop(&ch))//pop success
         {
+           // printf("data[%d] = 0x%02x\n", i++, ch);
             if(!get_head)
             {
                 if((ch == SAMPLE_PROT_MAGIC) && (cnt == 0))//get head
@@ -904,6 +1382,7 @@ static int unescaple_msg(uint8_t *msg, int msglen)
             {
                 if((ch == SAMPLE_PROT_MAGIC) && (cnt > 0))//get tail
                 {
+
                     if(cnt < 6)//maybe error frame, as header, restart
                     {
                         cnt = 0;
@@ -914,6 +1393,7 @@ static int unescaple_msg(uint8_t *msg, int msglen)
                     }
                     else
                     {
+                    printf("get tail! cnt = %d, return\n", cnt);
                         msg[cnt] = SAMPLE_PROT_MAGIC;
                         get_head = 0;//over
                         cnt++;
@@ -956,10 +1436,10 @@ static int unescaple_msg(uint8_t *msg, int msglen)
 
 void *parse_host_cmd(void *para)
 {
-    int8_t ret = 0;
+    int32_t ret = 0;
     uint8_t sum = 0;
     uint32_t framelen = 0;
-    unsigned char msgbuf[512];
+    unsigned char msgbuf[2048];
     sample_prot_header *pHeader = (sample_prot_header *) msgbuf;
 
     while(1)
@@ -968,6 +1448,7 @@ void *parse_host_cmd(void *para)
         if(ret>0)
         {
             framelen = ret;
+            printf("recv framelen = %d\n", framelen);
             sum = sample_calc_sum(pHeader, framelen);
             if (sum != pHeader->checksum) {
                 printf("Checksum missmatch calcated: 0x%02hhx != 0x%2hhx\n",

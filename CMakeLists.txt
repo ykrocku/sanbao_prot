@@ -1,8 +1,10 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8.2)
-PROJECT(sanbao_prj)
+PROJECT(common_test)
 
-SET(CMAKE_CXX_FLAGS_RELEASE "-Wno-unused-result -static -Wno-narrowing -DCR_DEBUG_FLAG -O3 -Wall -std=gnu++0x")
-SET(CMAKE_CXX_FLAGS_DEBUG "-Wno-unused-result -static -Wno-narrowing -Wno-unused-variable -Wall -DCR_DEBUG_FLAG -g -std=gnu++0x")
+#SET(CMAKE_CXX_FLAGS_RELEASE "-Wno-unused-result -Wno-narrowing -DCR_DEBUG_FLAG -O3 -Wall -std=gnu++0x")
+#SET(CMAKE_CXX_FLAGS_DEBUG "-Wno-unused-result -Wno-narrowing -Wno-unused-variable -Wall -DCR_DEBUG_FLAG -g -std=gnu++0x")
+SET(CMAKE_CXX_FLAGS_RELEASE "-Wno-unused-result -Wno-narrowing -DCR_DEBUG_FLAG -O3 -Wall -std=gnu++0x -std=c++11")
+SET(CMAKE_CXX_FLAGS_DEBUG "-Wno-unused-result -Wno-narrowing -Wno-unused-variable -Wall -DCR_DEBUG_FLAG -g -std=gnu++0x -std=c++11")
 
 SET(PROJECT_ROOT_PATH "${CMAKE_SOURCE_DIR}")
 MESSAGE(STATUS "${CMAKE_SOURCE_DIR}")
@@ -14,29 +16,6 @@ SET(CMAKE_SHARED_LINKER_FLAGS "-Wl,--export-all-symbols")
 SET(LINK_FLAGS ${LINK_FLAGS} "-Wl,-whole-archive")
 
 MESSAGE(STATUS ${PROJECT_ROOT_PATH})
-
-
-#-------------------------------------------------
-#---------simple example to config CMakeList.txt
-#cmake_minimum_required(VERSION 3.4)
-#project (Hello)
-#include_directories("D:/OSGEARTH/include")
-#LINK_DIRECTORIES("D:/OSGEARTH/lib")
-#LINK_LIBRARIES(osg osgDB osgViewer)
-#add_executable(HelloOSG HelloOSG.cpp)
-#----------------------------------------------
-
-LINK_DIRECTORIES("${PROJECT_ROOT_PATH}/thirdparty/websocket/linux/arm64-v8a")
-LINK_DIRECTORIES("${PROJECT_ROOT_PATH}/thirdparty/msgpackc/linux/arm64-v8a")
-#LINK_LIBRARIES( msgpackc libmsgpackc.a websockets libwebsockets.a)
-#LINK_LIBRARIES( msgpackc websockets )
-LINK_LIBRARIES( libmsgpackc.a libwebsockets.a)
-
-include_directories("${PROJECT_ROOT_PATH}/thirdparty/websocket/include")
-include_directories("${PROJECT_ROOT_PATH}/thirdparty/msgpackc/include")
-
-
-
 
 #root
 INCLUDE_DIRECTORIES("${PROJECT_ROOT_PATH}")
@@ -65,7 +44,7 @@ ENDIF()
 #include
 IF (WIN32)
 ELSEIF (ANDROID_ABI)
-    MESSAGE(STATUS "android platform-----------${PROJECT_ROOT_PATH}------------------------")
+    MESSAGE(STATUS "android platform")
     #include directory
     INCLUDE_DIRECTORIES(
         "${PROJECT_ROOT_PATH}/thirdparty/opencv/android/sdk/native/jni/include/"
@@ -73,46 +52,55 @@ ELSEIF (ANDROID_ABI)
         "${PROJECT_ROOT_PATH}/thirdparty/gtest/linux/include/"
         "${PROJECT_ROOT_PATH}/thirdparty/rapidjson-1.1.0/include/"
         "${PROJECT_ROOT_PATH}/lib/"
+        "${PROJECT_ROOT_PATH}/thirdparty/websocket/include"
+        "${PROJECT_ROOT_PATH}/thirdparty/msgpackc/include"
     )
 
-#    LINK_DIRECTORIES(
-#        #"/usr/local/lib/"
-#        "${PROJECT_ROOT_PATH}/thirdparty/websocket/linux/arm64-v8a/
-#        "${PROJECT_ROOT_PATH}/thirdparty/msgpackc/linux/arm64-v8a/
-#
-#
-#        "${PROJECT_ROOT_PATH}/thirdparty/opencv/android/sdk/native/libs/arm64-v8a/"
-#        "${PROJECT_ROOT_PATH}/thirdparty/opencv/android/sdk/native/3rdparty/libs/arm64-v8a/"
-#        "${PROJECT_ROOT_PATH}/thirdparty/gtest/linux/static/${PLATFORM}/"
-#        "${PROJECT_ROOT_PATH}/lib/"
-#    )
+    LINK_DIRECTORIES(
+        #"/usr/local/lib/"
+        "${PROJECT_ROOT_PATH}/thirdparty/opencv/android/sdk/native/libs/arm64-v8a/"
+        "${PROJECT_ROOT_PATH}/thirdparty/opencv/android/sdk/native/3rdparty/libs/arm64-v8a/"
+        "${PROJECT_ROOT_PATH}/thirdparty/gtest/linux/static/${PLATFORM}/"
+        "${PROJECT_ROOT_PATH}/lib/"
+
+        "${PROJECT_ROOT_PATH}/thirdparty/websocket/linux/arm64-v8a/"
+        "${PROJECT_ROOT_PATH}/thirdparty/msgpackc/linux/arm64-v8a/"
+    )
 
 ELSEIF (UNIX)
 ENDIF()
-#
-##ADD_SUBDIRECTORY(common/base)
-##ADD_SUBDIRECTORY(common/concurrency)
-##ADD_SUBDIRECTORY(common/system)
-##ADD_SUBDIRECTORY(common/time)
-##ADD_SUBDIRECTORY(common/file_operate)
-##ADD_SUBDIRECTORY(common/memory)
-##ADD_SUBDIRECTORY(common/string)
-##ADD_SUBDIRECTORY(common/hal)
-##IF (ANDROID_ABI)
-##    ADD_SUBDIRECTORY(thirdparty/miniglog)
-#ENDIF()
+
+ADD_SUBDIRECTORY(common/base)
+ADD_SUBDIRECTORY(common/concurrency)
+ADD_SUBDIRECTORY(common/system)
+ADD_SUBDIRECTORY(common/time)
+ADD_SUBDIRECTORY(common/file_operate)
+ADD_SUBDIRECTORY(common/memory)
+ADD_SUBDIRECTORY(common/string)
+ADD_SUBDIRECTORY(common/hal)
+ADD_SUBDIRECTORY(common/ringbuf)
+IF (ANDROID_ABI)
+    ADD_SUBDIRECTORY(thirdparty/miniglog)
+ENDIF()
+
 
 #link library
 IF (WIN32)
 ELSEIF(ANDROID_ABI)
-    ADD_EXECUTABLE(websocket_client ./websocket_client.cpp ./sample.cpp )
-    TARGET_LINK_LIBRARIES(websocket_client -ldl)
-#    ADD_DEPENDENCIES(data_collector MINIEYE_VERSION)
-#    TARGET_LINK_LIBRARIES(msgpackc websockets
- #       halio concurrency
- #       -Wl,--start-group
- #       -Wl,--end-group
-#        )
+
+
+    #SET(SRC_LIST RingBufDebug.cpp CRingBuf.cpp)
+    #ADD_LIBRARY(ringbuf STATIC ${SRC_LIST})
+
+    ADD_EXECUTABLE(websocket_client websocket_client.cpp sample.cpp rbgetx.cpp MjpegWriter.cpp)
+    #ADD_DEPENDENCIES(websocket_client MINIEYE_VERSION)
+    TARGET_LINK_LIBRARIES(websocket_client
+        #        halio concurrency
+        libmsgpackc.a libwebsockets.a dl
+        ringbuf halio concurrency
+        -Wl,--start-group
+        -Wl,--end-group
+        )
 ELSE()
     ADD_EXECUTABLE(audioplayer ./audioplayer_linux.cpp)
     TARGET_LINK_LIBRARIES(audioplayer

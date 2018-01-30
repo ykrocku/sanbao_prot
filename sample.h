@@ -15,7 +15,21 @@
 #define MM_AUDIO 1
 #define MM_VEDIO 2
 
-#define IMAGE_CACHE_NUM     1
+
+#define LOCAL_PRAR_FILE "/data/para"
+
+
+//protocol
+#define PROTOCOL_USING_BIG_ENDIAN
+
+#ifdef PROTOCOL_USING_BIG_ENDIAN
+#define MY_HTONL(x)     htonl(x)
+#define MY_HTONS(x)     htons(x)
+#else
+#define MY_HTONL(x)     (x)
+#define MY_HTONS(x)     (x)
+#endif
+
 
 
 #define MESSAGE_CAN700	"output.can.0x700"
@@ -40,7 +54,7 @@
 #define SAMPLE_CMD_UPLOAD_STATUS        (0x38)
 #define SAMPLE_CMD_REQ_MM_DATA          (0x50)
 #define SAMPLE_CMD_UPLOAD_MM_DATA       (0x51)
-#define SAMPLE_CMD_UPLOAD_MM_DATA_ACK   (0x51)
+#define SAMPLE_CMD_SNAP_SHOT            (0x52)
 
 #define SAMPLE_PROT_MAGIC               (0x7E)
 #define SAMPLE_PROT_ESC_CHAR            (0x7D)
@@ -108,8 +122,8 @@ typedef struct _sample_warning
 
 typedef struct _sample_mm
 {
-    uint8_t     req_type;
-    uint32_t    mm_id;
+    uint8_t     type;
+    uint32_t    id;
     uint16_t    packet_total_num;
     uint16_t    packet_index;
 } __attribute__((packed)) sample_mm;
@@ -194,16 +208,61 @@ typedef struct __MECANWarningMessage {
 
 
 typedef struct __car_status {
-    uint8_t		acc:1;
-    uint8_t     left_signal:1;
-    uint8_t     right_signal:1;
-    uint8_t     wipers:1;
-    uint8_t     inster:1;
-    uint8_t     brakes:1;
-
+    uint16_t		acc:1;
+    uint16_t     left_signal:1;
+    uint16_t     right_signal:1;
+    uint16_t     wipers:1;
+    uint16_t     brakes:1;
+    uint16_t     card:1;
     uint16_t     byte_resv:10;
 
 } __attribute__((packed)) car_status_s;
+
+
+typedef struct _real_time_data{
+
+    uint8_t     car_speed;
+    uint8_t     reserve1;
+    uint8_t     mileage;
+    uint8_t     reserve2[2];
+
+    uint16_t	high;
+    uint32_t	altitude;
+    uint32_t	longitude;
+
+    uint8_t     time[6];
+    car_status_s    car_status;
+
+} __attribute__((packed)) real_time_data;
+
+
+typedef struct _module_status{
+    
+#define MODULE_STANDBY          0x01
+#define MODULE_WORKING          0x02
+#define MODULE_MAINTAIN         0x03
+#define MODULE_ABNORMAL         0x04
+    uint8_t work_status;
+
+    uint32_t camera_err:1;
+    uint32_t main_memory_err:1;
+    uint32_t aux_memory_err:1;
+    uint32_t infrared_err:1;
+    uint32_t speaker_err:1;
+    uint32_t battery_err:1;
+    uint32_t reserve6_err:1;
+    uint32_t reserve7_err:1;
+    uint32_t reserve8_err:1;
+    uint32_t reserve9_err:1;
+    uint32_t comm_module_err:1;
+    uint32_t def_module_err:1;
+    uint32_t reserve_err:20;
+
+
+
+} __attribute__((packed)) module_status;
+
+
 
 typedef struct __warningtext {
 
@@ -286,42 +345,87 @@ typedef struct _can_struct{
 #define HW_LEVEL_WHITE_CAR  (1)
 #define HW_LEVEL_RED_CAR    (2)
 
-#define SOUND_TYPE_SILENCE  (0)
-#define SOUND_TYPE_LLDW     (1)
-#define SOUND_TYPE_RLDW     (2)
-#define SOUND_TYPE_HW       (3)
-#define SOUND_TYPE_TSR      (4)
-#define SOUND_TYPE_VB       (5)
-#define SOUND_TYPE_FCW_PCW  (6)
+
+#define WARN_TYPE_NUM       (8)
+
+#define SOUND_WARN_NONE     (0x0)
+#define SOUND_TYPE_SILENCE  (1 << 0)
+#define SOUND_TYPE_LLDW     (1 << 1)
+#define SOUND_TYPE_RLDW     (1 << 2)
+#define SOUND_TYPE_HW       (1 << 3)
+#define SOUND_TYPE_TSR      (1 << 4)
+#define SOUND_TYPE_VB       (1 << 5)
+#define SOUND_TYPE_FCW_PCW  (1 << 6)
+
+#define INDEX_SILENCE  (0)
+#define INDEX_LLDW     (1)
+#define INDEX_RLDW     (2)
+#define INDEX_HW       (3)
+#define INDEX_TSR      (4)
+#define INDEX_VB       (5)
+#define FCW_PCW        (6)
+
+#define AUTO_TAKE_PHOTO     (1 << 31)
 
 #define MINIEYE_WARNING_CAN_ID  (0x700)
 #define MINIEYE_CAR_INFO_CAN_ID (0x760)
 
 
+typedef struct _warn_information{
+    uint32_t type;
+    uint32_t id[WARN_TYPE_NUM];
+} __attribute__((packed)) warn_information;
 
-/*************set para*********************/
-typedef struct __CAN_PARA {
-    //#ifdef BIG_ENDIAN
-#if 0
 
-#else /*Little Endian*/   //a:0 a:1 ...
-    uint8_t     voice;
-    uint8_t     auto_photograph;
-    uint16_t    auto_photograph_time_gap;
-    uint16_t    auto_photograph_distance_gap;
-    uint8_t     sigle_photograph_num;
-    uint8_t     sigle_photograph_time_gap;
+typedef struct _para_setting{
 
-    uint8_t     photo_resolution;
-    uint8_t     vedio_resolution;
-    uint32_t    warning_enable;
-    uint32_t    event_enable;
-    uint8_t     resv0;
-    uint8_t     threshold;
-#endif
+    uint8_t warning_speed_val;
+    uint8_t warning_volume;
+    uint8_t auto_photo_mode;
+    uint16_t auto_photo_time_period;
+    uint16_t auto_photo_distance_period;
+    uint8_t photo_num;
+    uint8_t photo_time_period;
+    uint8_t image_Resolution;
+    uint8_t video_Resolution;
+    uint8_t reserve[9];
 
-} __attribute__((packed)) can_para;
+    uint8_t obstacle_distance_threshold;
+    uint8_t obstacle_video_time;
+    uint8_t obstacle_photo_num;
+    uint8_t obstacle_photo_time_period;
 
+    uint8_t FLC_time_threshold;
+    uint8_t FLC_times_threshold;
+    uint8_t FLC_video_time;
+    uint8_t FLC_photo_num;
+    uint8_t FLC_photo_time_period;
+
+    uint8_t LDW_video_time;
+    uint8_t LDW_photo_num;
+    uint8_t LDW_photo_time_period;
+
+
+    uint8_t FCW_time_threshold;
+    uint8_t FCW_video_time;
+    uint8_t FCW_photo_num;
+    uint8_t FCW_photo_time_period;
+
+
+    uint8_t PCW_time_threshold;
+    uint8_t PCW_video_time;
+    uint8_t PCW_photo_num;
+    uint8_t PCW_photo_time_period;
+
+    uint8_t HW_time_threshold;
+    uint8_t HW_video_time;
+    uint8_t HW_photo_num;
+    uint8_t HW_photo_time_period;
+
+    uint8_t TSR_photo_num;
+    uint8_t TSR_photo_time_period;
+
+} __attribute__((packed)) para_setting;
 
 /**********queue and repeat_send struct****************/
 #define PTR_QUEUE_BUF_SIZE   (1024 + 64)
@@ -339,6 +443,12 @@ typedef struct _ptr_queue_node{
 typedef struct _package_repeat_status{
 #define REPEAT_SEND_TIMES_MAX   3
 
+
+    char filepath[100];
+    char file_index;
+    sample_mm mm;
+
+
     bool mm_data_trans_waiting;
     uint8_t repeat_cnt;
     struct timeval msg_sendtime;
@@ -346,7 +456,18 @@ typedef struct _package_repeat_status{
     ptr_queue_node msgsend;
 } __attribute__((packed)) pkg_repeat_status;
 
+void *pthread_sav_warning_jpg(void *p);
+void *pthread_encode_jpeg(void *p);
 
+
+int write_file(const char* filename, const void* data, size_t size);
+int record_snap_shot();
+void send_snap_shot_event(uint32_t id);
+uint32_t get_next_warning_id();
+int32_t id_to_warning_type(uint32_t id, uint32_t *type);
+int32_t id_to_free_slot(uint32_t id);
+char *warning_type_to_str(int type);
+int send_package_timeout(struct timeval *tv, int timeout_sec);
 void repeat_send_pkg_status_init();
 void printbuf(uint8_t *buf, int len);
 void *communicate_with_host(void *para);

@@ -12,6 +12,7 @@
 #include <libwebsockets.h>
 #include <msgpack.h>
 #include "sample.h"
+#include "rbgetx.h"
 
 #include <queue>
 using namespace std;
@@ -412,6 +413,23 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
+    if(pthread_create(&pth[3], NULL, pthread_encode_jpeg, NULL))
+    {
+        printf("pthread_create fail!\n");
+        return -1;
+    }
+    if(pthread_create(&pth[4], NULL, pthread_sav_warning_jpg, NULL))
+    {
+        printf("pthread_create fail!\n");
+        return -1;
+    }
+#if 0
+    if(pthread_create(&pth[5], NULL, pthread_take_photot, NULL))
+    {
+        printf("pthread_create fail!\n");
+        return -1;
+    }
+#endif
 
     pthread_join(pth[1], NULL);
     printf("join pthread 1\n");
