@@ -24,7 +24,7 @@ using namespace std;
     msgpack_pack_str(&pk, content_len);\
     msgpack_pack_str_body(&pk, content, content_len);
 
-int pack_req_can_cmd(uint8_t *data, uint32_t len)
+int pack_req_can_cmd(uint8_t *data, uint32_t len, const char *name)
 {
     unsigned int map_size = 3;
     uint32_t minlen = 0;
@@ -40,8 +40,18 @@ int pack_req_can_cmd(uint8_t *data, uint32_t len)
 
     PACK_MAP_MSG("source", strlen("source"), "client-name", strlen("client-name"));
     PACK_MAP_MSG("topic", strlen("topic"), "subscribe", strlen("subscribe"));
-    PACK_MAP_MSG("data", strlen("data"), "output.can.0x700", strlen("output.can.0x700"));
-    //    PACK_MAP_MSG("data", strlen("data"), "output.can.0x760", strlen("output.can.0x700"));
+
+    if(!memcmp(name, "700", strlen("700")))
+    {
+        PACK_MAP_MSG("data", strlen("data"), "output.can.0x700", strlen("output.can.0x700"));
+    }
+    else if(!memcmp(name, "760", strlen("760")))
+    {
+        PACK_MAP_MSG("data", strlen("data"), "output.can.0x760", strlen("output.can.0x700"));
+    }
+    else
+        ;
+
     minlen = (sbuf.size<len) ? sbuf.size : len;
     memcpy(data, sbuf.data, minlen);
 
@@ -264,10 +274,20 @@ static int callback_lws_communicate(struct lws *wsi, enum lws_callback_reasons r
 
         case LWS_CALLBACK_CLIENT_WRITEABLE:
             printf("LWS_CALLBACK_CLIENT_WRITEABLE\n");
-            if(sendflag == 1)
+            if(sendflag == 1 || sendflag == 2)
             {
-                sendflag = 0;
-                msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd));
+                if(sendflag == 2)
+                {
+                    printf("request 760!\n");
+                    msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), "760");
+                    sendflag = 0;
+                }
+                if(sendflag == 1)
+                {
+                    printf("request 700!\n");
+                    msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), "700");
+                    sendflag = 2;
+                }
                 printf("client send request, ret = %d!\n", msgpacklen);
                 if(msgpacklen < LWS_WRITE_BUF_LEN && msgpacklen >0)
                 {
@@ -278,8 +298,6 @@ static int callback_lws_communicate(struct lws *wsi, enum lws_callback_reasons r
                         printf("lws write ret = %d\n", n);
                     }
                 }
-                lwsl_info("Client wsi %p writable\n", wsi);
-
                 lws_callback_on_writable(wsi);
             }
             break;
@@ -397,6 +415,7 @@ int main(int argc, char **argv)
     pthread_t pth[10];
 
     signal(SIGINT, sighandler);
+    global_var_init();
 
     if(pthread_create(&pth[0], NULL, communicate_with_host, NULL))
     {
@@ -423,13 +442,11 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
-#if 0
-    if(pthread_create(&pth[5], NULL, pthread_take_photot, NULL))
+    if(pthread_create(&pth[5], NULL, pthread_snap_shot, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
     }
-#endif
 
     pthread_join(pth[1], NULL);
     printf("join pthread 1\n");

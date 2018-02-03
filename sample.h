@@ -2,22 +2,27 @@
 #define __SAMPLE_H__
 #include <stdio.h>
 #include <stdint.h>
+#include <arpa/inet.h>
 
 #include <queue>
-
 
 #define SANBAO_VERSION 0x01
 #define VENDOR_ID 0x1234
 
-#define MM_ID 0x911
+#define GET_NEXT_SEND_NUM        1
+#define RECORD_RECV_NUM     2
+#define GET_RECV_NUM        3
 
 #define MM_PHOTO 0
 #define MM_AUDIO 1
-#define MM_VEDIO 2
+#define MM_VIDEO 2
 
-
-#define LOCAL_PRAR_FILE "/data/para"
-
+#define DO_DELETE_SNAP_SHOT_FILES "rm -r /data/snap/*"
+#define SNAP_SHOT_JPEG_PATH "/data/snap/"
+//#define SNAP_SHOT_JPEG_PATH "/mnt/obb/"
+#define LOCAL_PRAR_FILE     "/data/para"
+#define UPGRADE_FILE_PATH     "/data/upgrade.mpk"
+#define UPGRADE_FILE_CMD     "/data/upgrade.sh /data/upgrade.mpk"
 
 //protocol
 #define PROTOCOL_USING_BIG_ENDIAN
@@ -97,6 +102,8 @@ typedef struct _sample_dev_info
 #define SW_STATUS_END   (0x1)
 #define SW_STATUS_EVENT (0x10)
 
+#define WARN_TYPE_NUM       (8)
+
 #define SW_TYPE_FCW     (0x1)
 #define SW_TYPE_LDW     (0x2)
 #define SW_TYPE_HW      (0x3)
@@ -105,6 +112,9 @@ typedef struct _sample_dev_info
 #define SW_TYPE_TSRW    (0x6)
 #define SW_TYPE_TSR     (0x10)
 #define SW_TYPE_SNAP    (0x11)
+
+//#define SW_TYPE_TIMER_SNAP    (0x7)
+
 #define SW_TSR_TYPE_SPEED   (0x1)
 #define SW_TSR_TYPE_HIGHT   (0x2)
 #define SW_TSR_TYPE_WEIGHT  (0x3)
@@ -223,10 +233,10 @@ typedef struct _real_time_data{
 
     uint8_t     car_speed;
     uint8_t     reserve1;
-    uint8_t     mileage;
+    uint32_t     mileage;
     uint8_t     reserve2[2];
 
-    uint16_t	high;
+    uint16_t	height;
     uint32_t	altitude;
     uint32_t	longitude;
 
@@ -270,19 +280,18 @@ typedef struct __warningtext {
     uint8_t		start_flag;
     uint8_t		sound_type;
     uint8_t		forward_car_speed;
-    uint8_t		forward_car_Distance;
+    uint8_t		forward_car_distance;
     uint8_t		ldw_type;
     uint8_t		load_type;
     uint8_t		load_data;
     uint8_t		car_speed;
-    uint16_t	high;
+    uint16_t	height;
     uint32_t	altitude;
     uint32_t	longitude;
     uint8_t		time[6];
-    uint8_t		mm_num;
     car_status_s	car_status;	
-    sample_mm_info mm;
-
+    uint8_t		mm_num;
+    sample_mm_info mm[0];
 
 } __attribute__((packed)) warningtext;
 
@@ -346,17 +355,19 @@ typedef struct _can_struct{
 #define HW_LEVEL_RED_CAR    (2)
 
 
-#define WARN_TYPE_NUM       (8)
-
+#if 1
 #define SOUND_WARN_NONE     (0x0)
-#define SOUND_TYPE_SILENCE  (1 << 0)
-#define SOUND_TYPE_LLDW     (1 << 1)
-#define SOUND_TYPE_RLDW     (1 << 2)
-#define SOUND_TYPE_HW       (1 << 3)
-#define SOUND_TYPE_TSR      (1 << 4)
-#define SOUND_TYPE_VB       (1 << 5)
-#define SOUND_TYPE_FCW_PCW  (1 << 6)
+#define SOUND_TYPE_SILENCE  (0)
+#define SOUND_TYPE_LLDW     (1)
+#define SOUND_TYPE_RLDW     (2)
+#define SOUND_TYPE_HW       (3)
+#define SOUND_TYPE_TSR      (4)
+#define SOUND_TYPE_VB       (5)
+#define SOUND_TYPE_FCW_PCW  (6)
+#endif
 
+
+#if 0
 #define INDEX_SILENCE  (0)
 #define INDEX_LLDW     (1)
 #define INDEX_RLDW     (2)
@@ -365,16 +376,12 @@ typedef struct _can_struct{
 #define INDEX_VB       (5)
 #define FCW_PCW        (6)
 
-#define AUTO_TAKE_PHOTO     (1 << 31)
+#endif
 
 #define MINIEYE_WARNING_CAN_ID  (0x700)
 #define MINIEYE_CAR_INFO_CAN_ID (0x760)
 
 
-typedef struct _warn_information{
-    uint32_t type;
-    uint32_t id[WARN_TYPE_NUM];
-} __attribute__((packed)) warn_information;
 
 
 typedef struct _para_setting{
@@ -425,7 +432,34 @@ typedef struct _para_setting{
     uint8_t TSR_photo_num;
     uint8_t TSR_photo_time_period;
 
+    uint8_t reserve2[4];
 } __attribute__((packed)) para_setting;
+
+typedef struct _mm_node{
+#define SLOT_STABLE     0
+#define SLOT_WRITING    1
+#define SLOT_READING    2
+
+char rw_flag;
+uint8_t warn_type;
+uint8_t mm_type;
+uint32_t mm_id;
+uint8_t time[6];
+
+} __attribute__((packed)) mm_node;
+
+#define WARN_SNAP_NUM_MAX   10
+typedef struct _mm_header_info{
+
+uint8_t warn_type;
+uint8_t mm_type;
+uint8_t video_time;
+uint8_t photo_time_period;
+uint8_t photo_num;
+uint32_t mm_id[WARN_SNAP_NUM_MAX];
+
+} __attribute__((packed)) mm_header_info;
+
 
 /**********queue and repeat_send struct****************/
 #define PTR_QUEUE_BUF_SIZE   (1024 + 64)
@@ -436,6 +470,8 @@ typedef struct _ptr_queue_node{
     uint8_t cmd;
     uint8_t need_ack;
 
+    mm_header_info mm;
+
     int32_t len;
     uint8_t *buf;
 } __attribute__((packed)) ptr_queue_node;
@@ -445,9 +481,7 @@ typedef struct _package_repeat_status{
 
 
     char filepath[100];
-    char file_index;
     sample_mm mm;
-
 
     bool mm_data_trans_waiting;
     uint8_t repeat_cnt;
@@ -456,18 +490,34 @@ typedef struct _package_repeat_status{
     ptr_queue_node msgsend;
 } __attribute__((packed)) pkg_repeat_status;
 
+
+
+
+
+void *pthread_snap_shot(void *p);
 void *pthread_sav_warning_jpg(void *p);
 void *pthread_encode_jpeg(void *p);
 
 
+void set_algo_para();
+
+void read_warn_para(para_setting *para);
+void write_warn_para(para_setting *para);
+
+int write_local_para_file(const char* filename);
+
+void set_para_setting_default();
+void global_var_init();
+int pull_mm_queue(mm_header_info *mm);
+void push_mm_queue(mm_header_info *mm);
 int write_file(const char* filename, const void* data, size_t size);
 int record_snap_shot();
-void send_snap_shot_event(uint32_t id);
-uint32_t get_next_warning_id();
-int32_t id_to_warning_type(uint32_t id, uint32_t *type);
-int32_t id_to_free_slot(uint32_t id);
-char *warning_type_to_str(int type);
-int send_package_timeout(struct timeval *tv, int timeout_sec);
+int do_snap_shot();
+void display_mm_resource();
+int32_t find_mm_resource(uint32_t id, mm_node *m);
+int32_t delete_mm_resource(uint32_t id);
+char *warning_type_to_str(uint8_t type);
+int is_timeout(struct timeval *tv, int timeout_sec);
 void repeat_send_pkg_status_init();
 void printbuf(uint8_t *buf, int len);
 void *communicate_with_host(void *para);

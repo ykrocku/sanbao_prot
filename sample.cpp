@@ -28,42 +28,105 @@
 #include <queue>
 using namespace std;
 
-
 static int32_t sample_send_image();
+#define WRITE_REAL_TIME_MSG 0
+#define READ_REAL_TIME_MSG  1
 
-
-extern pthread_mutex_t mutex;
-extern pthread_cond_t cond;
-extern warn_information warn_happen;
-extern para_setting warn_para;
-
-
-
-pthread_mutex_t id_lock = PTHREAD_MUTEX_INITIALIZER;
-uint32_t get_next_warning_id()
+void do_with_real_time(real_time_data *data, int mode)
 {
+    static real_time_data msg={0};
+    static pthread_mutex_t real_time_msg_lock = PTHREAD_MUTEX_INITIALIZER;
+
+    pthread_mutex_lock(&real_time_msg_lock);
+    if(mode == WRITE_REAL_TIME_MSG)
+    {
+        memcpy(&msg, data, sizeof(real_time_data));
+    }
+    else if(mode == READ_REAL_TIME_MSG)
+    {
+        memcpy(data, &msg, sizeof(real_time_data));
+    }
+    pthread_mutex_unlock(&real_time_msg_lock);
+}
+
+#define WARNING_ID_MODE 0
+#define MM_ID_MODE 1
+uint32_t get_next_id(int mode, uint32_t *id, uint32_t num)
+{
+    static pthread_mutex_t id_lock = PTHREAD_MUTEX_INITIALIZER;
     static uint32_t s_warning_id = 0;
-    uint32_t id = 0;
+    static uint32_t s_mm_id = 0;
+    uint32_t warn_id = 0;
+    uint32_t i;
 
     pthread_mutex_lock(&id_lock);
-    s_warning_id ++;
-    id = s_warning_id;
+    if(mode == WARNING_ID_MODE)
+    {
+        s_warning_id ++;
+        warn_id = s_warning_id;
+    }
+    else if(mode == MM_ID_MODE)
+    {
+        for(i=0; i<num; i++)
+        {
+            s_mm_id ++;
+            id[i] = s_mm_id;
+        }
+    }
+    else
+    {
+        warn_id = 0;
+    }
     pthread_mutex_unlock(&id_lock);
 
-    return id;
+    return warn_id;
+}
+
+void do_serial_num(uint16_t *num, int mode)
+{
+    static uint16_t send_serial_num= 0;
+    static uint16_t recv_serial_num= 0;
+    static pthread_mutex_t serial_num_lock = PTHREAD_MUTEX_INITIALIZER;
+
+    pthread_mutex_lock(&serial_num_lock);
+    if(mode == GET_NEXT_SEND_NUM)
+    {
+        send_serial_num ++;
+        *num = send_serial_num;
+    }
+    else if(mode == RECORD_RECV_NUM)
+    {
+        recv_serial_num = *num;
+        if(*num > send_serial_num)
+        {
+            send_serial_num = *num;
+        }
+    }
+    else if(mode == GET_RECV_NUM)
+    {
+        *num = recv_serial_num; 
+    }
+    else
+    {
+    }
+    pthread_mutex_unlock(&serial_num_lock);
+
 }
 
 
+pthread_mutex_t photo_queue_lock = PTHREAD_MUTEX_INITIALIZER;
+queue<ptr_queue_node *> g_photo_queue;
+queue<ptr_queue_node *> *g_photo_queue_p = &g_photo_queue;
 
 pthread_mutex_t ptr_queue_lock = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t uchar_queue_lock = PTHREAD_MUTEX_INITIALIZER;
-
 queue<ptr_queue_node *> g_ptr_queue;
 queue<ptr_queue_node *> *g_ptr_queue_p = &g_ptr_queue;
 
+pthread_mutex_t ack_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 queue<ptr_queue_node *> g_ack_queue;
 queue<ptr_queue_node *> *g_ack_queue_p = &g_ack_queue;
 
+pthread_mutex_t uchar_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 queue<uint8_t> g_uchar_queue;
 
 pkg_repeat_status g_pkg_status;
@@ -74,103 +137,113 @@ void repeat_send_pkg_status_init()
     memset(g_pkg_status_p, 0, sizeof(pkg_repeat_status));
 }
 
-static int ptr_queue_push(queue<ptr_queue_node *> *p, ptr_queue_node *in)
+static int ptr_queue_push(queue<ptr_queue_node *> *p, ptr_queue_node *in,  pthread_mutex_t lock)
 {
     int ret;
-    ptr_queue_node *msg = NULL;
+    ptr_queue_node *header = NULL;
     uint8_t *ptr = NULL;
 
     if(!in || !p)
         return -1;
 
-    pthread_mutex_lock(&ptr_queue_lock);
+    pthread_mutex_lock(&lock);
     if((int)p->size() == PTR_QUEUE_BUF_CNT)
     {
         ret = -1;
-        goto over;
+        goto out;
     }
     else
     {
-        msg = (ptr_queue_node *)malloc(sizeof(ptr_queue_node));
-        if(!msg)
+        header = (ptr_queue_node *)malloc(sizeof(ptr_queue_node));
+        if(!header)
         {
             perror("ptr_queue_push malloc1");
             ret = -1;
-            goto over;
-        }
-        ptr = (uint8_t *)malloc(PTR_QUEUE_BUF_SIZE);
-        if(!ptr)
-        {
-            perror("ptr_queue_push malloc2");
-            free(msg);
-            ret = -1;
-            goto over;
+            goto out;
         }
 
-        memcpy(msg, in, sizeof(ptr_queue_node));
-        msg->buf = ptr;
-        if(!in->buf)//no buf push
+        memcpy(header, in, sizeof(ptr_queue_node));
+        if(!in->buf)//user don't need buffer
         {
-            msg->len = PTR_QUEUE_BUF_SIZE;
-            memset(msg->buf, 0, msg->len);
+            header->len = 0;
+            header->buf = NULL;
         }
-        else
+        else //user need buffer
         {
-            msg->len = in->len > PTR_QUEUE_BUF_SIZE ? PTR_QUEUE_BUF_SIZE : in->len;
-            memcpy(msg->buf, in->buf, msg->len);
+            ptr = (uint8_t *)malloc(PTR_QUEUE_BUF_SIZE);
+            if(!ptr)
+            {
+                perror("ptr_queue_push malloc2");
+                free(header);
+                ret = -1;
+                goto out;
+            }
+
+            header->buf = ptr;
+            header->len = in->len > PTR_QUEUE_BUF_SIZE ? PTR_QUEUE_BUF_SIZE : in->len;
+            memcpy(header->buf, in->buf, header->len);
         }
 
-        p->push(msg);
+        p->push(header);
         ret = 0;
-        goto over;
+        goto out;
     }
 
-over:
-    pthread_mutex_unlock(&ptr_queue_lock);
+out:
+    pthread_mutex_unlock(&lock);
     return ret;
 }
 
-static int ptr_queue_pop(queue<ptr_queue_node*> *p, ptr_queue_node *out)
+static int ptr_queue_pop(queue<ptr_queue_node*> *p, ptr_queue_node *out,  pthread_mutex_t lock)
 {
-    ptr_queue_node *msg = NULL;
-    int32_t len = 0;
+    ptr_queue_node *header = NULL;
+    int32_t user_buflen = 0;
     uint8_t *ptr = NULL;
 
     if(!out || !p)
         return -1;
 
-    pthread_mutex_lock(&ptr_queue_lock);
+    pthread_mutex_lock(&lock);
     if(!p->empty())
     {
-        msg = p->front();
+        header = p->front();
         p->pop();
     }
-    pthread_mutex_unlock(&ptr_queue_lock);
+    pthread_mutex_unlock(&lock);
 
-    if(!msg)
+    if(!header)
         return -1;
 
-    if(!out->buf)//don't need data
+    if(!header->buf)//no data in node
     {
-        memcpy(out, msg, sizeof(ptr_queue_node));
-        out->buf = NULL;
+        memcpy(out, header, sizeof(ptr_queue_node));
     }
-    else
+    else//node have data,
     {
-        ptr = out->buf;
-        memcpy(out, msg, sizeof(ptr_queue_node));
-        out->buf = ptr;
-        out->len = msg->len > PTR_QUEUE_BUF_SIZE ? PTR_QUEUE_BUF_SIZE : msg->len;
-        memcpy(out->buf, msg->buf, out->len);
+        if(!out->buf)//user don't need data
+        {
+            memcpy(out, header, sizeof(ptr_queue_node));
+        }
+        else
+        {
+            //record ptr and len
+            ptr = out->buf;
+            user_buflen = out->len;
+            memcpy(out, header, sizeof(ptr_queue_node));
+            out->buf = ptr;
+            //get the min len
+            header->len = header->len > PTR_QUEUE_BUF_SIZE ? PTR_QUEUE_BUF_SIZE : header->len;
+            out->len = header->len > user_buflen ? user_buflen : header->len;
+            memcpy(out->buf, header->buf, out->len);
+        }
+        free(header->buf);
     }
 
-    free(msg->buf);
-    free(msg);
+    free(header);
     return 0;
-
 }
 
-int send_package_timeout(struct timeval *tv, int timeout_sec)
+int is_timeout(struct timeval *tv, int timeout_sec)
 {
     struct timeval tv_cur;
 
@@ -179,7 +252,7 @@ int send_package_timeout(struct timeval *tv, int timeout_sec)
     if((tv_cur.tv_sec >= tv->tv_sec + timeout_sec) && \
             (tv_cur.tv_usec >= tv->tv_usec))
     {
-        printf("recv ack timeout! %ds\n", timeout_sec);
+        printf("timeout! %ds\n", timeout_sec);
         return 0;
     }
     else
@@ -223,6 +296,166 @@ static int unblock_write(int sock, uint8_t *buf, int len)
     return offset;
 }
 
+void push_mm_queue(mm_header_info *mm)
+{
+    ptr_queue_node header;
+    header.buf = NULL;
+    header.len = 0;
+
+    memcpy(&header.mm, mm, sizeof(*mm));
+
+    ptr_queue_push(g_photo_queue_p, &header, photo_queue_lock);
+}
+
+int pull_mm_queue(mm_header_info *mm)
+{
+    ptr_queue_node header;
+    header.buf = NULL;
+    header.len = 0;
+    if(!ptr_queue_pop(g_photo_queue_p, &header, photo_queue_lock))
+    {
+        memcpy(mm, &header.mm, sizeof(*mm));
+        return 0;
+    }
+
+    return -1;
+}
+
+void get_real_time_msg(warningtext *uploadmsg)
+{
+
+    real_time_data tmp;
+    do_with_real_time(&tmp, READ_REAL_TIME_MSG);
+
+    uploadmsg->height = tmp.height;
+    uploadmsg->altitude = tmp.altitude;
+    uploadmsg->longitude = tmp.longitude;
+    uploadmsg->car_speed = tmp.car_speed;
+
+    memcpy(uploadmsg->time, tmp.time, sizeof(uploadmsg->time));
+    memcpy(&uploadmsg->car_status, &tmp.car_status, sizeof(uploadmsg->car_status));
+}
+
+//填写和can数据不相关的字段
+int do_record_warning_info(int type, warningtext *uploadmsg)
+{
+    uint8_t video_time=0;
+    uint8_t photo_num=0;
+    uint8_t photo_time_period=0;
+    int i=0;
+    mm_header_info mm;
+    para_setting para;
+
+    read_warn_para(&para);
+    memset(&mm, 0, sizeof(mm));
+
+    get_real_time_msg(uploadmsg);
+
+    switch(type)
+    {
+        case SW_TYPE_FCW:
+        case SW_TYPE_LDW:
+        case SW_TYPE_HW:
+        case SW_TYPE_PCW:
+        case SW_TYPE_FLC:
+            if(type == SW_TYPE_FCW){
+                photo_num = para.FCW_photo_num;
+                photo_time_period = para.FCW_photo_time_period;
+                video_time = para.FCW_video_time;
+            }else if(type == SW_TYPE_LDW){
+                photo_num = para.LDW_photo_num;
+                photo_time_period = para.LDW_photo_time_period;
+                video_time = para.LDW_video_time;
+            }else if(type == SW_TYPE_HW){
+                photo_num = para.HW_photo_num;
+                photo_time_period = para.HW_photo_time_period;
+                video_time = para.HW_video_time;
+            }else if(type == SW_TYPE_PCW){
+                photo_num = para.PCW_photo_num;
+                photo_time_period = para.PCW_photo_time_period;
+                video_time = para.PCW_video_time;
+            }else if(type == SW_TYPE_FLC){
+                photo_num = para.FLC_photo_num;
+                photo_time_period = para.FLC_photo_time_period;
+                video_time = para.FLC_video_time;
+            }else{
+                ;
+            }
+ //           printf("---------------------type=%d\n", type);
+            uploadmsg->warning_id = MY_HTONL(get_next_id(WARNING_ID_MODE, NULL, 0));
+            uploadmsg->sound_type = type;
+            uploadmsg->car_speed = 0;
+            uploadmsg->mm_num = 0;
+
+            mm.warn_type = type;
+            mm.video_time = video_time;
+            mm.photo_time_period = photo_time_period;
+            mm.photo_num = photo_num;
+            if(photo_num != 0 && photo_num < WARN_SNAP_NUM_MAX)
+            {
+                mm.mm_type = MM_PHOTO;
+                get_next_id(MM_ID_MODE, mm.mm_id, photo_num);
+                for(i=0; i<photo_num; i++)
+                {
+                   // printf("mm.mm_id[%d] = %d\n", i, mm.mm_id[i]);
+                    uploadmsg->mm_num++;
+                    uploadmsg->mm[i].type = mm.mm_type;
+                    uploadmsg->mm[i].id = MY_HTONL(mm.mm_id[i]);
+                }
+                push_mm_queue(&mm);
+            }
+            if(video_time != 0)
+            {
+                mm.mm_type = MM_VIDEO;
+                get_next_id(MM_ID_MODE, mm.mm_id, 1);
+                push_mm_queue(&mm);
+
+                uploadmsg->mm_num++;
+                uploadmsg->mm[i].type = mm.mm_type;
+                uploadmsg->mm[i].id = MY_HTONL(mm.mm_id[0]);
+            }
+
+            break;
+
+        case SW_TYPE_TSRW:
+        case SW_TYPE_TSR:
+            break;
+
+        case SW_TYPE_SNAP:
+        //case SW_TYPE_TIMER_SNAP:
+        
+                photo_num = para.photo_num;
+                photo_time_period = para.photo_time_period;
+
+                uploadmsg->warning_id = MY_HTONL(get_next_id(WARNING_ID_MODE, NULL, 0));
+                uploadmsg->sound_type = type;
+                uploadmsg->car_speed = 0;
+                uploadmsg->mm_num = 0;
+               // printf("snap shot num = %d\n", photo_num);
+                if(photo_num != 0 && photo_num < WARN_SNAP_NUM_MAX)
+                {
+                    mm.warn_type = type;
+                    mm.mm_type = MM_PHOTO;
+                    mm.photo_num = photo_num;
+                    mm.photo_time_period = photo_time_period;
+                    get_next_id(MM_ID_MODE, mm.mm_id, photo_num);
+                    for(i=0; i<photo_num; i++)
+                    {
+                        uploadmsg->mm_num++;
+                        uploadmsg->mm[i].type = mm.mm_type;
+                        uploadmsg->mm[i].id = MY_HTONL(mm.mm_id[i]);
+                    }
+                    push_mm_queue(&mm);
+                }
+                break;
+
+        default:
+            break;
+    }
+
+    return uploadmsg->mm_num;
+}
+
 static int send_pkg_to_host(int sock)
 {
     static uint8_t s_buf[PTR_QUEUE_BUF_SIZE];
@@ -230,7 +463,8 @@ static int send_pkg_to_host(int sock)
     int ret = 0;
 
     g_pkg_status_p->msgsend.buf = s_buf;
-    if(g_pkg_status_p->start_wait_ack || !ptr_queue_pop(g_ptr_queue_p, &g_pkg_status_p->msgsend))
+    g_pkg_status_p->msgsend.len = sizeof(s_buf);
+    if(g_pkg_status_p->start_wait_ack || !ptr_queue_pop(g_ptr_queue_p, &g_pkg_status_p->msgsend, ptr_queue_lock))
     {
         if(g_pkg_status_p->msgsend.need_ack)// deal ack
         {
@@ -238,22 +472,24 @@ static int send_pkg_to_host(int sock)
             {
                 if(g_pkg_status_p->start_wait_ack == 0)
                 {
-                    ret = write(sock, g_pkg_status_p->msgsend.buf, g_pkg_status_p->msgsend.len);
+                    ret = unblock_write(sock, g_pkg_status_p->msgsend.buf,\
+                            g_pkg_status_p->msgsend.len);
                     g_pkg_status_p->repeat_cnt++;
                     gettimeofday(&g_pkg_status_p->msg_sendtime, NULL);
                     g_pkg_status_p->start_wait_ack = 1;
                 }
-                if(!send_package_timeout(&g_pkg_status_p->msg_sendtime, 2))//timeout
+                if(!is_timeout(&g_pkg_status_p->msg_sendtime, 2))//timeout
                 {
                     g_pkg_status_p->repeat_cnt++;
-                    ret = write(sock, g_pkg_status_p->msgsend.buf, g_pkg_status_p->msgsend.len);
+                    ret = unblock_write(sock, g_pkg_status_p->msgsend.buf,\
+                            g_pkg_status_p->msgsend.len);
                     gettimeofday(&g_pkg_status_p->msg_sendtime, NULL);
                 }
                 else//poll ack
                 {
                     msgack.buf = NULL;
                     msgack.len = 0;
-                    if(!ptr_queue_pop(g_ack_queue_p, &msgack))
+                    if(!ptr_queue_pop(g_ack_queue_p, &msgack, ack_queue_lock))
                     {
                             printf("get ack!!!");
                         if(msgack.cmd == g_pkg_status_p->msgsend.cmd)//send cmd and recv cmd match
@@ -301,36 +537,50 @@ static int send_pkg_to_host(int sock)
 
 static int uchar_queue_push(uint8_t *ch)
 {
+    int ret = -1;
     if(!ch)
-        return -1;
+        return ret;
 
     pthread_mutex_lock(&uchar_queue_lock);
     if((int)g_uchar_queue.size() == UCHAR_QUEUE_SIZE)
     {
         printf("g_uchar_queue full flow\n");
-        pthread_mutex_unlock(&uchar_queue_lock);
-        return -1;
+        ret = -1;
+        goto out;
     }
-    g_uchar_queue.push(ch[0]);
+    else
+    {
+        g_uchar_queue.push(ch[0]);
+        ret = 0;
+        goto out;
+    }
+out:
     pthread_mutex_unlock(&uchar_queue_lock);
-    return 0;
+    return ret;
 }
 
 static int8_t uchar_queue_pop(uint8_t *ch)
 {
+    int ret = -1;
+    if(!ch)
+        return ret;
+
     pthread_mutex_lock(&uchar_queue_lock);
     if(!g_uchar_queue.empty())
     {
         *ch = g_uchar_queue.front();
         g_uchar_queue.pop();
-        pthread_mutex_unlock(&uchar_queue_lock);
-        return 0;
+        ret = 0;
+        goto out;
     }
     else
     {
-        pthread_mutex_unlock(&uchar_queue_lock);
-        return -1;
+        ret = -1;
+        goto out;
     }
+out:
+    pthread_mutex_unlock(&uchar_queue_lock);
+    return ret;
 }
 
 static uint8_t sample_calc_sum(sample_prot_header *pHeader, int32_t msg_len)
@@ -384,15 +634,55 @@ static int32_t sample_escaple_msg(sample_prot_header *pHeader, int32_t msg_len)
 static int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t cmd,
         uint8_t *payload, int32_t payload_len)
 {
-    static uint16_t s_serial_num = 0;
+    uint16_t serial_num = 0;
+    char master_is_me = 0;
     ptr_queue_node msg;
     int32_t msg_len = sizeof(*pHeader) + 1 + payload_len;
     uint8_t *data = ((uint8_t*) pHeader + sizeof(*pHeader));
     uint8_t *tail = data + payload_len;
 
+    switch(cmd)
+    {
+        case SAMPLE_CMD_QUERY:
+        case SAMPLE_CMD_FACTORY_RESET:
+        case SAMPLE_CMD_SPEED_INFO:        
+        case SAMPLE_CMD_DEVICE_INFO:
+        case SAMPLE_CMD_UPGRADE:
+        case SAMPLE_CMD_GET_PARAM:
+        case SAMPLE_CMD_SET_PARAM:
+        case SAMPLE_CMD_REQ_STATUS:
+        case SAMPLE_CMD_REQ_MM_DATA:
+            msg.need_ack = 0;
+            master_is_me = 0;
+            break;
+
+            //send as master
+        case SAMPLE_CMD_WARNING_REPORT:
+        case SAMPLE_CMD_UPLOAD_MM_DATA:
+        case SAMPLE_CMD_UPLOAD_STATUS:
+            master_is_me = 1;
+            msg.need_ack = 1;
+
+            break;
+
+        default:
+            msg.need_ack = 0;
+            break;
+
+    }
+
     memset(pHeader, 0, sizeof(*pHeader));
     pHeader->magic = SAMPLE_PROT_MAGIC;
-    pHeader->serial_num= MY_HTONS(s_serial_num++); //used as message cnt
+    if(master_is_me)
+    {
+        do_serial_num(&serial_num, GET_NEXT_SEND_NUM);
+    }
+    else
+    {
+        do_serial_num(&serial_num, GET_RECV_NUM);
+    }
+
+    pHeader->serial_num= MY_HTONS(serial_num); //used as message cnt
     pHeader->vendor_id= MY_HTONS(VENDOR_ID);
     pHeader->device_id= SAMPLE_DEVICE_ID_ADAS;
     pHeader->cmd = cmd;
@@ -407,44 +697,66 @@ static int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t 
 
     msg_len = sample_escaple_msg(pHeader, msg_len);
 
-    switch(cmd)
-    {
-        case SAMPLE_CMD_QUERY:
-        case SAMPLE_CMD_FACTORY_RESET:
-        case SAMPLE_CMD_SPEED_INFO:        
-        case SAMPLE_CMD_DEVICE_INFO:
-        case SAMPLE_CMD_UPGRADE:
-        case SAMPLE_CMD_GET_PARAM:
-        case SAMPLE_CMD_SET_PARAM:
-        case SAMPLE_CMD_REQ_STATUS:
-        case SAMPLE_CMD_UPLOAD_STATUS:
-        case SAMPLE_CMD_REQ_MM_DATA:
-        case SAMPLE_CMD_WARNING_REPORT:
-            msg.need_ack = 0;
-            break;
-
-            //send as master
-        case SAMPLE_CMD_UPLOAD_MM_DATA:
-            msg.need_ack = 1;
-
-            break;
-
-        default:
-            msg.need_ack = 0;
-            break;
-
-    }
-
-
     msg.cmd = cmd;
     msg.len = msg_len;
     msg.buf = (uint8_t *)pHeader;
     //    printf("sendpackage cmd = 0x%x,msg.need_ack = %d, len=%d, push!\n",msg.cmd, msg.need_ack, msg.len);
-    ptr_queue_push(g_ptr_queue_p, &msg);
+    ptr_queue_push(g_ptr_queue_p, &msg, ptr_queue_lock);
 
     return msg_len;
 }
 
+void send_snap_shot_ack(sample_prot_header *pHeader, int32_t len)
+{
+    uint8_t txbuf[256] = {0};
+    uint8_t ack = 0;
+    sample_prot_header *pSend = (sample_prot_header *) txbuf;
+
+    if(len == sizeof(sample_prot_header) + 1)
+    {
+        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_SNAP_SHOT, (uint8_t *)&ack, 1);
+    }
+    else
+    {
+        printf("recv cmd:0x%x, data len maybe error!\n", pHeader->cmd);
+    }
+}
+
+int do_snap_shot()
+{
+    uint8_t mm_num = 0;
+    uint8_t msgbuf[512];
+    warningtext *uploadmsg = (warningtext *)&msgbuf[0];
+    uint8_t txbuf[512];
+    sample_prot_header *pSend = (sample_prot_header *) txbuf;
+
+    mm_num = do_record_warning_info(SW_TYPE_SNAP, uploadmsg);
+
+    sample_assemble_msg_to_push(pSend, \
+            SAMPLE_CMD_WARNING_REPORT,\
+            (uint8_t *)uploadmsg,\
+            sizeof(*uploadmsg) + mm_num*sizeof(sample_mm_info));
+
+    return 0;
+}
+
+void set_BCD_time(warningtext *uploadmsg, char *second)
+{
+    struct tm *p = NULL; 
+    time_t timep = 0;   
+    printf("time:%s\n", second);
+    timep = strtoul(second, NULL, 10);
+    timep = timep/1000000;
+    p = localtime(&timep);
+    uploadmsg->time[0] = p->tm_year;
+    uploadmsg->time[1] = p->tm_mon+1;
+    uploadmsg->time[2] = p->tm_mday;
+    uploadmsg->time[3] = p->tm_hour;
+    uploadmsg->time[4] = p->tm_min;
+    uploadmsg->time[5] = p->tm_sec;
+
+    printf("%d-%d-%d %d:%d:%d\n", (1900 + p->tm_year), ( 1 + p->tm_mon), p->tm_mday,(p->tm_hour), p->tm_min, p->tm_sec); 
+}
 
 static MECANWarningMessage g_last_warning_data;
 static MECANWarningMessage g_last_can_msg;
@@ -452,16 +764,14 @@ static uint8_t g_last_trigger_warning[sizeof(MECANWarningMessage)];
 int can_message_send(can_data_type *sourcecan)
 {
     uint32_t warning_id = 0;
-    time_t timep = 0;   
-    struct tm *p = NULL; 
-    warningtext uploadmsg;
+    uint8_t msgbuf[512];
+    uint8_t mm_num = 0;
+    warningtext *uploadmsg = (warningtext *)&msgbuf[0];
     MECANWarningMessage can;
     car_info carinfo;
     uint8_t txbuf[512];
     char image_name[50];
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
-    warn_information warn_local;
-    memset(&warn_local, 0, sizeof(warn_local));
 
     uint32_t i = 0;
     uint8_t all_warning_masks[sizeof(MECANWarningMessage)] = {
@@ -475,10 +785,8 @@ int can_message_send(can_data_type *sourcecan)
 
     if(!memcmp(sourcecan->topic, MESSAGE_CAN700, strlen(MESSAGE_CAN700)))
     {
+        printf("700 come********************************\n");
         memcpy(&can, sourcecan->warning, sizeof(sourcecan->warning));
-        
-        //printf("recv can700 data:\n");
-
 
         for (i = 0; i < sizeof(all_warning_masks); i++) {
             all_warning_data[i] = sourcecan->warning[i] & all_warning_masks[i];
@@ -488,38 +796,13 @@ int can_message_send(can_data_type *sourcecan)
         if (0 == memcmp(all_warning_data, &g_last_warning_data, sizeof(g_last_warning_data))) {
             return 0;
         }
-#if 0
+#if 1
         if( (g_last_warning_data.headway_warning_level != can.headway_warning_level) || \
                 (0 != memcmp(trigger_data, &g_last_trigger_warning, sizeof(g_last_trigger_warning)) && 0 != trigger_data[4]) )
         {
             printf("warning happened.........................\n");
-            memset(&uploadmsg, 0, sizeof(uploadmsg));
-
-            printf("time:%s\n", sourcecan->time);
-            timep = strtoul(sourcecan->time, NULL, 10);
-            timep = timep/1000000;
-            p = localtime(&timep);
-            uploadmsg.time[0] = p->tm_year;
-            uploadmsg.time[1] = p->tm_mon+1;
-            uploadmsg.time[2] = p->tm_mday;
-            uploadmsg.time[3] = p->tm_hour;
-            uploadmsg.time[4] = p->tm_min;
-            uploadmsg.time[5] = p->tm_sec;
-
-            printf("%d-%d-%d %d:%d:%d\n", (1900 + p->tm_year), ( 1 + p->tm_mon), p->tm_mday,(p->tm_hour), p->tm_min, p->tm_sec); 
-
-            uploadmsg.warning_id = MY_HTONL(warning_id & 0xFFFFFFFF);
-            uploadmsg.start_flag = 0;
-            if(!system("/system/bin/rbget >/dev/null"))//get image success
-            {
-                uploadmsg.mm.id = uploadmsg.warning_id;
-                sprintf(image_name, "/mnt/obb/rb_last_frame%d.jpg", warning_id % IMAGE_CACHE_NUM);
-                rename("/mnt/obb/rb_last_frame.jpg", image_name);
-                uploadmsg.mm_num = uploadmsg.mm.id;
-                uploadmsg.mm.type = MM_PHOTO;
-                //   uploadmsg.mm.id = MY_HTONL(get_media_id());
-            }
-            warning_id++ ;
+            memset(msgbuf, 0, sizeof(msgbuf));
+            set_BCD_time(uploadmsg, sourcecan->time);
         }
 #endif
         //LDW and FCW event
@@ -527,22 +810,26 @@ int can_message_send(can_data_type *sourcecan)
             printf("------LDW/FCW event-----------\n");
 
             if (can.left_ldw || can.right_ldw) {
-                uploadmsg.start_flag = SW_STATUS_EVENT;
-                uploadmsg.sound_type = SW_TYPE_LDW;
+                memset(uploadmsg, 0, sizeof(*uploadmsg));
+                mm_num = do_record_warning_info(SW_TYPE_LDW, uploadmsg);
+                uploadmsg->start_flag = SW_STATUS_EVENT;
 
                 if(can.left_ldw)
-                    uploadmsg.ldw_type = SOUND_TYPE_LLDW;
+                    uploadmsg->ldw_type = SOUND_TYPE_LLDW;
                 if(can.right_ldw)
-                    uploadmsg.ldw_type = SOUND_TYPE_RLDW;
+                    uploadmsg->ldw_type = SOUND_TYPE_RLDW;
 
-                sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT, (uint8_t *)&uploadmsg, sizeof(uploadmsg));
-
-
+                sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT,\
+                        (uint8_t *)uploadmsg, \
+                        sizeof(*uploadmsg) + mm_num*sizeof(sample_mm_info));
             }
             if (can.fcw_on) {
-                uploadmsg.start_flag = SW_STATUS_EVENT;
-                uploadmsg.sound_type = SW_TYPE_FCW;
-                sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT, (uint8_t *)&uploadmsg, sizeof(uploadmsg));
+                mm_num = do_record_warning_info(SW_TYPE_FCW, uploadmsg);
+                uploadmsg->start_flag = SW_STATUS_EVENT;
+                uploadmsg->sound_type = SW_TYPE_FCW;
+                sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT,\
+                        (uint8_t *)uploadmsg, \
+                        sizeof(*uploadmsg) + mm_num*sizeof(sample_mm_info));
             }
         }
         //Headway
@@ -552,103 +839,68 @@ int can_message_send(can_data_type *sourcecan)
             printf("headway_measurement:%d\n", can.headway_measurement);
 
             if (HW_LEVEL_RED_CAR == can.headway_warning_level) {
-                uploadmsg.start_flag = SW_STATUS_BEGIN;
-                uploadmsg.sound_type = SW_TYPE_HW;
+                mm_num = do_record_warning_info(SW_TYPE_HW, uploadmsg);
+                uploadmsg->start_flag = SW_STATUS_BEGIN;
+                uploadmsg->sound_type = SW_TYPE_HW;
 
-                warning_id = get_next_warning_id();
+                sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT,\
+                        (uint8_t *)uploadmsg, \
+                        sizeof(*uploadmsg) + mm_num*sizeof(sample_mm_info));
 
-                uploadmsg.warning_id = MY_HTONL(warning_id & 0xFFFFFFFF);
-                uploadmsg.start_flag = 0;
-                uploadmsg.mm.id = uploadmsg.warning_id;
+            } else if (HW_LEVEL_RED_CAR == \
+                    g_last_warning_data.headway_warning_level) {
+                mm_num = do_record_warning_info(SW_TYPE_HW, uploadmsg);
+                uploadmsg->start_flag = SW_STATUS_END;
+                uploadmsg->sound_type = SW_TYPE_HW;
 
-                //warn_local.id[INDEX_HW] = uploadmsg.warning_id;
-                warn_local.id[INDEX_HW] = warning_id;
-
-                //   uploadmsg.mm.id = MY_HTONL(get_media_id());
-                uploadmsg.mm_num = 3;
-                uploadmsg.mm.type = MM_PHOTO;
-
-                sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT, (uint8_t *)&uploadmsg, sizeof(uploadmsg));
-                warn_local.type |= SOUND_TYPE_HW;
-
-            } else if (HW_LEVEL_RED_CAR == g_last_warning_data.headway_warning_level) {
-                uploadmsg.start_flag = SW_STATUS_END;
-                uploadmsg.sound_type = SW_TYPE_HW;
-                sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT, (uint8_t *)&uploadmsg, sizeof(uploadmsg));
+                sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT,\
+                        (uint8_t *)uploadmsg,\
+                        sizeof(*uploadmsg) + mm_num*sizeof(sample_mm_info));
             }
         }
 
         memcpy(&g_last_can_msg, &can, sizeof(g_last_can_msg));
         memcpy(&g_last_warning_data, all_warning_data, sizeof(g_last_warning_data));
-        memcpy(&g_last_trigger_warning, trigger_data, sizeof(g_last_trigger_warning));
-
-        if(warn_local.type != 0)
-        {
-            printf("start write warning!\n");
-            pthread_mutex_lock(&mutex);
-            memcpy(&warn_happen, &warn_local, sizeof(warn_local));
-            pthread_mutex_unlock(&mutex);
-            pthread_cond_signal(&cond);
-        }
+        memcpy(&g_last_trigger_warning, trigger_data,\
+                sizeof(g_last_trigger_warning));
     }
-#if 1
     if(!strncmp(sourcecan->topic, MESSAGE_CAN760, strlen(MESSAGE_CAN760)))
     {
-        memcpy(&carinfo, sourcecan->warning, sizeof(sourcecan->warning));
+        printf("760 come.........................\n");
+        printbuf(sourcecan->warning, 8);
+        memcpy(&carinfo, sourcecan->warning, sizeof(carinfo));
+#if 0
         //			uploadmsg.high = carinfo.
         //			uploadmsg.altitude = carinfo. //MY_HTONS(altitude)
         //			uploadmsg.longitude= carinfo. //MY_HTONS(longitude)
         //			uploadmsg.car_status.acc = 
-        uploadmsg.car_status.left_signal = carinfo.left_signal;
-        uploadmsg.car_status.right_signal = carinfo.right_signal;
+        uploadmsg->car_status.left_signal = carinfo.left_signal;
+        uploadmsg->car_status.right_signal = carinfo.right_signal;
 
         if(carinfo.wipers_aval)
-            uploadmsg.car_status.wipers = carinfo.wipers;
-
-        uploadmsg.car_status.brakes = carinfo.brakes;
+            uploadmsg->car_status.wipers = carinfo.wipers;
+        uploadmsg->car_status.brakes = carinfo.brakes;
         //			uploadmsg.car_status.insert = 
-    }
 #endif
-
+    }
     return 0;
 }
 
-
-
-void send_snap_shot_event(uint32_t id)
-{
-    warningtext uploadmsg;
-    uint8_t txbuf[512];
-    uint8_t ack = 0;
-    sample_prot_header *pSend = (sample_prot_header *) txbuf;
-    uploadmsg.sound_type = SW_TYPE_SNAP;
-    uploadmsg.mm_num = 1;
-    uploadmsg.mm.type = MM_PHOTO;
-    uploadmsg.warning_id = MY_HTONL(id);
-    uploadmsg.mm.id = uploadmsg.warning_id;
-
-    sample_assemble_msg_to_push(pSend, SAMPLE_CMD_SNAP_SHOT, (uint8_t *)&ack, 1);
-    sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT, (uint8_t *)&uploadmsg, sizeof(uploadmsg));
-}
-
-
-
-static int32_t send_req_ack(sample_prot_header *pHeader, int len)
+static int32_t send_mm_req_ack(sample_prot_header *pHeader, int len)
 {
 #define IMAGE_SIZE_PER_PACKET   (1024)
 
+    mm_node node;
     uint32_t mm_id = 0;
-    uint32_t warn_type = 0;
+    uint8_t warn_type = 0;
     size_t filesize = 0;
     FILE *fp = NULL;
     sample_mm_info *mm_ptr = NULL;
 
     if(pHeader->cmd == SAMPLE_CMD_REQ_MM_DATA && !g_pkg_status_p->mm_data_trans_waiting) //recv req
     {
-
         printf("------------req mm-------------\n");
         printbuf((uint8_t *)pHeader, len);
-        printf("len = %d, len2 = %ld\n", len, sizeof(sample_mm_info) + sizeof(sample_prot_header));
         if(len == sizeof(sample_mm_info) + sizeof(sample_prot_header) + 1)
         {
             mm_ptr = (sample_mm_info *)(pHeader + 1);
@@ -659,37 +911,43 @@ static int32_t send_req_ack(sample_prot_header *pHeader, int len)
             g_pkg_status_p->mm.id = mm_ptr->id;
         }
         else
-            return 0;
-       
-        printf("------------req mm1-------------\n");
-
-
-        //find file
-        mm_id = MY_HTONL(mm_ptr->id);
-        if(id_to_warning_type(mm_id, &warn_type))
         {
-            printf("find id[%d] fail!\n", mm_id);
+            printf("recv cmd:0x%x, data len maybe error[%d]/[%ld]!\n", \
+                    pHeader->cmd, len,\
+                    sizeof(sample_mm_info) + sizeof(sample_prot_header) + 1);
             return -1;
         }
 
+        //find file
+        mm_id = MY_HTONL(mm_ptr->id);
+        if(find_mm_resource(mm_id, &node))
+        {
+            printf("find id[0x%x] fail!\n", mm_id);
+            return -1;
+        }
+
+        sprintf(g_pkg_status_p->filepath, SNAP_SHOT_JPEG_PATH);
         if(mm_ptr->type == MM_PHOTO)
         {
-            sprintf(g_pkg_status_p->filepath, "/mnt/obb/%s-%08d-%d.jpg", warning_type_to_str(warn_type), mm_id, g_pkg_status_p->file_index);
+            sprintf(&g_pkg_status_p->filepath[strlen(SNAP_SHOT_JPEG_PATH)],\
+                    "%s-%08d.jpg", warning_type_to_str(node.warn_type), mm_id);
         }
         else if(mm_ptr->type == MM_AUDIO)
         {
-            sprintf(g_pkg_status_p->filepath, "/mnt/obb/%s-%08d.wav", warning_type_to_str(warn_type), mm_id);
+            sprintf(&g_pkg_status_p->filepath[strlen(SNAP_SHOT_JPEG_PATH)], \
+                    "%s-%08d.wav", warning_type_to_str(node.warn_type), mm_id);
         }
-        else if(mm_ptr->type == MM_VEDIO)
+        else if(mm_ptr->type == MM_VIDEO)
         {
-            sprintf(g_pkg_status_p->filepath, "/mnt/obb/%s-%08d.avi", warning_type_to_str(warn_type), mm_id);
+            sprintf(&g_pkg_status_p->filepath[strlen(SNAP_SHOT_JPEG_PATH)],\
+                    "%s-%08d.avi", warning_type_to_str(node.warn_type), mm_id);
         }
         else
         {
             printf("mm type not valid, val=%d\n", mm_ptr->type);
-            return 0;
+            return -1;
         }
-        printf("try find filename: %s\n", g_pkg_status_p->filepath);
+        printf("try open filename: %s\n", g_pkg_status_p->filepath);
         fp = fopen(g_pkg_status_p->filepath, "rb");
         if(fp == NULL)
         {
@@ -712,73 +970,17 @@ static int32_t send_req_ack(sample_prot_header *pHeader, int len)
         g_pkg_status_p->mm_data_trans_waiting = 1;
         sample_assemble_msg_to_push(pHeader, SAMPLE_CMD_REQ_MM_DATA, NULL, 0);
 
-        printf("------------send image-------------\n");
         sample_send_image();
     }
     else
     {
         printf("current package is not valid!\n");
-        return 0;
+        return -1;
     }
     return 0;
 }
 
-int get_file_information()
-{
-    size_t filesize = 0;
-    FILE *fp = NULL;
-    uint32_t mm_id = 0;
-    uint32_t warn_type = 0;
-
-    //find file
-    printf("%s enter!\n", __FUNCTION__);
-
-    mm_id = MY_HTONL(g_pkg_status_p->mm.id);
-    if(id_to_warning_type(mm_id, &warn_type))
-        return -1;
-
-    printf("g_pkg_status_p->file_index = %d\n", g_pkg_status_p->file_index);
-    g_pkg_status_p->file_index++;
-    printf("g_pkg_status_p->file_index = %d\n", g_pkg_status_p->file_index);
-
-
-    if(g_pkg_status_p->mm.type == MM_PHOTO)
-    {
-        sprintf(g_pkg_status_p->filepath, "/mnt/obb/%s-%08d-%d.jpg", warning_type_to_str(warn_type), mm_id, g_pkg_status_p->file_index);
-    }
-    else
-    {
-        id_to_free_slot(mm_id);
-        printf("mm type not valid!\n");
-        return -1;
-    }
-
-    printf("try find filename: %s\n", g_pkg_status_p->filepath);
-    fp = fopen(g_pkg_status_p->filepath, "rb");
-    if(fp == NULL)
-    {
-        id_to_free_slot(mm_id);
-        g_pkg_status_p->file_index=0;
-        printf("open %s fail\n", g_pkg_status_p->filepath);
-        return -1;
-    }
-    else
-    {
-        printf("open %s ok\n", g_pkg_status_p->filepath);
-    }
-
-    fseek(fp, 0, SEEK_SET);
-    fseek(fp, 0, SEEK_END);
-    filesize = ftell(fp);
-    fclose(fp);
-
-    g_pkg_status_p->mm.packet_index = 0;
-    g_pkg_status_p->mm.packet_total_num = MY_HTONS((filesize + IMAGE_SIZE_PER_PACKET - 1)/IMAGE_SIZE_PER_PACKET);
-
-    return 0;
-}
-
-static int recv_ack(sample_prot_header *pHeader, int32_t len)
+static int recv_ack_and_send_image(sample_prot_header *pHeader, int32_t len)
 {
     uint8_t data[IMAGE_SIZE_PER_PACKET + \
         sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64];
@@ -788,7 +990,6 @@ static int recv_ack(sample_prot_header *pHeader, int32_t len)
     FILE *fp = NULL;
 
     sample_mm_ack mmack;
-
     ptr_queue_node msg;
 
     printf("recv ack...........!\n");
@@ -797,44 +998,32 @@ static int recv_ack(sample_prot_header *pHeader, int32_t len)
         memcpy(&mmack, pHeader+1, sizeof(mmack));
         if(mmack.ack)
         {
-            printf("recv no ack!\n");
-            return 0;
+            printf("recv ack err!\n");
+            return -1;
         }
         else
         {
-        printf("recv ack..1.........!\n");
             msg.cmd = SAMPLE_CMD_UPLOAD_MM_DATA;
             msg.len = 0;
             msg.buf = NULL;
             
-            printf("index = 0x%08x, index2 = 0x%08x\n", g_pkg_status_p->mm.packet_index, mmack.packet_index);
+            //printf("index = 0x%08x, index2 = 0x%08x\n", g_pkg_status_p->mm.packet_index, mmack.packet_index);
 
             if(MY_HTONS(g_pkg_status_p->mm.packet_index) == \
                     (MY_HTONS(mmack.packet_index) + 1)) //recv ack index is correct
             {
-        printf("recv ack..2.........!\n");
-                ptr_queue_push(g_ack_queue_p, &msg);//notice ack recv
+                ptr_queue_push(g_ack_queue_p, &msg, ack_queue_lock);//notice ack recv
 
-        printf("push ack...........!\n");
                 if(MY_HTONS(g_pkg_status_p->mm.packet_total_num) == \
                         MY_HTONS(g_pkg_status_p->mm.packet_index)) //the last pkg ack
                 {
+                    g_pkg_status_p->mm_data_trans_waiting = 0;
                     printf("transmit one file over!\n");
-
-                    if(!get_file_information())
-                    {
-                        sample_send_image();//send next file
-                    }
-                    else
-                    {
-                        printf("transmit over!\n");
-                        memset(&g_pkg_status_p->mm, 0, sizeof(g_pkg_status_p->mm));
-                        g_pkg_status_p->mm_data_trans_waiting = 0;
-                    }
+                    delete_mm_resource(MY_HTONL(g_pkg_status_p->mm.id));
+                    //display_mm_resource();
                 }
                 else //send next
                 {
-                printf("send.........!\n");
                     sample_send_image();
                 }
             }
@@ -851,7 +1040,7 @@ static int32_t sample_send_image()
     uint8_t data[IMAGE_SIZE_PER_PACKET + \
         sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64];
     uint8_t txbuf[(IMAGE_SIZE_PER_PACKET + \
-            sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64)*2];
+        sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64)*2];
     size_t filesize = 0;
     FILE *fp = NULL;
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
@@ -869,8 +1058,10 @@ static int32_t sample_send_image()
     fclose(fp);
     if(ret>0)
     {
-        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_UPLOAD_MM_DATA, data, (sizeof(g_pkg_status_p->mm) + ret));
-        printf("send...[%d/%d]\n", MY_HTONS(g_pkg_status_p->mm.packet_total_num), MY_HTONS(g_pkg_status_p->mm.packet_index));
+        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_UPLOAD_MM_DATA, \
+                data, (sizeof(g_pkg_status_p->mm) + ret));
+        printf("send...[%d/%d]\n", MY_HTONS(g_pkg_status_p->mm.packet_total_num),\
+                MY_HTONS(g_pkg_status_p->mm.packet_index));
         g_pkg_status_p->mm.packet_index = MY_HTONS(MY_HTONS(g_pkg_status_p->mm.packet_index) + 1);
     }
     else//end and clear
@@ -880,15 +1071,11 @@ static int32_t sample_send_image()
     return 0;
 }
 
-
-
-real_time_data dat;
-void recv_real_time_data(sample_prot_header *pHeader, int32_t len)
+void write_real_time_data(sample_prot_header *pHeader, int32_t len)
 {
-    
-    if(len == sizeof(sample_prot_header) + 1 + sizeof(dat))
+    if(len == sizeof(sample_prot_header) + 1 + sizeof(real_time_data))
     {
-        memcpy(&dat, pHeader+1, sizeof(dat));
+        do_with_real_time((real_time_data *)(pHeader+1), WRITE_REAL_TIME_MSG);
     }
     else
     {
@@ -896,10 +1083,19 @@ void recv_real_time_data(sample_prot_header *pHeader, int32_t len)
     }
 }
 
-void recv_para_setting_data(sample_prot_header *pHeader, int32_t len)
+void do_factory_reset()
+{
+    set_para_setting_default();
+
+    write_local_para_file(LOCAL_PRAR_FILE);
+}
+
+
+void recv_para_setting(sample_prot_header *pHeader, int32_t len)
 {
     para_setting recv_para;
     uint8_t ack = 0;
+    char cmd[100];
     uint8_t txbuf[128] = {0};
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
 
@@ -908,15 +1104,30 @@ void recv_para_setting_data(sample_prot_header *pHeader, int32_t len)
     
         memcpy(&recv_para, pHeader+1, sizeof(recv_para));
 
-        recv_para.auto_photo_time_period = MY_HTONS(recv_para.auto_photo_time_period);
-        recv_para.auto_photo_distance_period = MY_HTONS(recv_para.auto_photo_distance_period);
+        //大端传输
+        recv_para.auto_photo_time_period = \
+            MY_HTONS(recv_para.auto_photo_time_period);
+        recv_para.auto_photo_distance_period = \
+            MY_HTONS(recv_para.auto_photo_distance_period);
     
-        memcpy(&warn_para, &recv_para, sizeof(recv_para));
-        write_file(LOCAL_PRAR_FILE, &recv_para, sizeof(recv_para));
+        write_warn_para(&recv_para);
+        write_local_para_file(LOCAL_PRAR_FILE);
 
         ack = 0;
         sample_assemble_msg_to_push(pSend, SAMPLE_CMD_SET_PARAM, \
                 (uint8_t*)&ack, 1);
+
+#if 1
+        printf("start to kill algo!\n");
+        //set alog detect.flag
+        system("busybox killall -9 split_detect"); //killall
+        sprintf(cmd, "busybox sed -i 's/^.*--test_speed.*$/--test_speed=%d/' /data/xiao/install/detect.flag",\
+                recv_para.warning_speed_val);
+        system(cmd);
+        usleep(100000);
+        printf("restart algo!\n");
+        system("/data/algo.sh");//restart
+#endif
     }
     else
     {
@@ -927,7 +1138,7 @@ void recv_para_setting_data(sample_prot_header *pHeader, int32_t len)
     }
 }
 
-void send_para_setting_data(sample_prot_header *pHeader, int32_t len)
+void send_para_setting(sample_prot_header *pHeader, int32_t len)
 {
     para_setting send_para;
     uint8_t txbuf[256] = {0};
@@ -936,9 +1147,11 @@ void send_para_setting_data(sample_prot_header *pHeader, int32_t len)
     if(len == sizeof(sample_prot_header) + 1)
     {
 
-        memcpy(&send_para, &warn_para, sizeof(send_para));
-        send_para.auto_photo_time_period = MY_HTONS(send_para.auto_photo_time_period);
-        send_para.auto_photo_distance_period = MY_HTONS(send_para.auto_photo_distance_period);
+        read_warn_para(&send_para);
+        send_para.auto_photo_time_period = \
+            MY_HTONS(send_para.auto_photo_time_period);
+        send_para.auto_photo_distance_period = \
+            MY_HTONS(send_para.auto_photo_distance_period);
 
         sample_assemble_msg_to_push(pSend, SAMPLE_CMD_GET_PARAM, \
                 (uint8_t*)&send_para, sizeof(send_para));
@@ -958,7 +1171,7 @@ void recv_warning_ack(sample_prot_header *pHeader, int32_t len)
         msg.cmd = SAMPLE_CMD_WARNING_REPORT;
         msg.buf = NULL;
         msg.len = 0;
-        ptr_queue_push(g_ack_queue_p, &msg);//send
+        ptr_queue_push(g_ack_queue_p, &msg, ack_queue_lock);//send
     }
     else
     {
@@ -966,7 +1179,7 @@ void recv_warning_ack(sample_prot_header *pHeader, int32_t len)
     }
 }
 
-void send_module_status(sample_prot_header *pHeader, int32_t len)
+void send_work_status_req_ack(sample_prot_header *pHeader, int32_t len)
 {
     module_status module;
     uint8_t txbuf[256] = {0};
@@ -985,6 +1198,18 @@ void send_module_status(sample_prot_header *pHeader, int32_t len)
         printf("recv cmd:0x%x, data len maybe error!\n", pHeader->cmd);
     }
 }
+void send_work_status()
+{
+    module_status module;
+    uint8_t txbuf[256] = {0};
+    sample_prot_header *pSend = (sample_prot_header *) txbuf;
+
+    memset(&module, 0, sizeof(module));
+    module.work_status = MODULE_WORKING;
+    sample_assemble_msg_to_push(pSend, SAMPLE_CMD_REQ_STATUS, \
+            (uint8_t*)&module, sizeof(module));
+}
+
 
 void recv_upload_status_cmd_ack(sample_prot_header *pHeader, int32_t len)
 {
@@ -995,7 +1220,7 @@ void recv_upload_status_cmd_ack(sample_prot_header *pHeader, int32_t len)
         msg.cmd = SAMPLE_CMD_UPLOAD_STATUS;
         msg.buf = NULL;
         msg.len = 0;
-        ptr_queue_push(g_ack_queue_p, &msg);//send
+        ptr_queue_push(g_ack_queue_p, &msg, ack_queue_lock);//send
     }
     else
     {
@@ -1013,8 +1238,6 @@ typedef struct _file_trans_msg
 #define UPGRADE_CMD_CLEAN       0x2
 #define UPGRADE_CMD_TRANS       0x3
 #define UPGRADE_CMD_RUN         0x4
-
-
 uint32_t get_sum(uint8_t *buf, int len)
 {
     uint32_t sum = 0;
@@ -1030,11 +1253,12 @@ int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
 {
     int ret;
     int fd;
+    char cmd_rm_file[50];
     static uint32_t sum = 0;
     static uint32_t sum_new = 0;
     uint8_t data[4];
     uint8_t data_ack[5];
-    uint8_t     ack[2];
+    uint8_t ack[2];
     int32_t datalen = 0;
     uint8_t *pchar=NULL;
     static uint32_t packet_num = 0;
@@ -1060,7 +1284,10 @@ int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
         }
         if(message_id == UPGRADE_CMD_RUN)
         {
-            //do run
+            //do run, do upgrade
+            printf("upgrade...\n");
+            //system(UPGRADE_FILE_CMD);
+
         }
         ack[0] = message_id;
         ack[1] = 0;
@@ -1069,17 +1296,19 @@ int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
     }
     else if(message_id == UPGRADE_CMD_TRANS) //recv file
     {
-
         memcpy(&file_trans, pchar+1, sizeof(file_trans));
         packet_num = MY_HTONS(file_trans.packet_num);
         packet_index = MY_HTONS(file_trans.packet_index);
 
         if(packet_index == 0)
         {
+            sprintf(cmd_rm_file, "rm %s",UPGRADE_FILE_PATH);
+            system(cmd_rm_file);
             memcpy(&data, pchar+1+sizeof(file_trans), 4);
 
             //  sum = *(uint32_t *)&data[0];
-            sum = MY_HTONL(*(uint32_t *)&data[0]);
+            //sum = MY_HTONL(*(uint32_t *)&data[0]);
+            sum = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
 
             printf("recv sum = 0x%08x\n", sum);
         }
@@ -1091,23 +1320,18 @@ int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
 
             datalen = len - (sizeof(sample_prot_header) + 1 + 5);
             printf("recv [%d]/[%d], datalen = %d\n", packet_num, packet_index, datalen);
-
-
-            fd = open("/mnt/obb/upgrade.jpg", O_RDWR|O_CREAT, 0644);
+                
+            fd = open(UPGRADE_FILE_PATH, O_RDWR|O_CREAT, 0644);
             lseek(fd, offset, SEEK_SET);
             ret = write(fd, pchar+5, datalen);
             close(fd);
 
             if(ret > 0)
                 offset += ret;
-
             sum_new += get_sum((uint8_t *)pchar+5, datalen);
-
             if(packet_index+1 == packet_num) //the last packet , packet 0 is sum, no data!
             {
-
                 printf("sumnew = 0x%08x, sum=0x%08x\n", sum_new, sum);
-
                 if(sum_new == sum)
                 {
                     printf("sun check ok!\n");
@@ -1115,6 +1339,7 @@ int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
                     memcpy(data_ack, pchar, sizeof(data_ack));
                     sample_assemble_msg_to_push(pSend, SAMPLE_CMD_UPGRADE, \
                             data_ack, sizeof(data_ack));
+
                     return 0;
                 }
                 else
@@ -1132,12 +1357,11 @@ int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
 
     return 0;
 }
-
-
 static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
 {
     ptr_queue_node msgack;
     uint8_t buf[PTR_QUEUE_BUF_SIZE];
+    uint16_t serial_num = 0;
 
     sample_dev_info dev_info = {
         15, "MINIEYE",
@@ -1155,7 +1379,10 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
         return 0;
     }
 
-    printf("------cmd = 0x%x------\n", pHeader->cmd);
+    serial_num = MY_HTONS(pHeader->serial_num);
+    do_serial_num(&serial_num, RECORD_RECV_NUM);
+
+    //printf("------cmd = 0x%x------\n", pHeader->cmd);
     switch (pHeader->cmd)
     {
         case SAMPLE_CMD_QUERY:
@@ -1164,16 +1391,16 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
 
         case SAMPLE_CMD_FACTORY_RESET:
             sample_assemble_msg_to_push(pHeader, SAMPLE_CMD_FACTORY_RESET, NULL, 0);
+            do_factory_reset();
             break;
 
         case SAMPLE_CMD_SPEED_INFO: //不需要应答
-            recv_real_time_data(pHeader, len);
+            write_real_time_data(pHeader, len);
             break;
 
         case SAMPLE_CMD_DEVICE_INFO:
             sample_assemble_msg_to_push(pSend, SAMPLE_CMD_DEVICE_INFO,
                     (uint8_t*)&dev_info, sizeof(dev_info));
-
             break;
 
         case SAMPLE_CMD_UPGRADE:
@@ -1181,12 +1408,11 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
             break;
 
         case SAMPLE_CMD_GET_PARAM:
-            send_para_setting_data(pHeader, len);
-
+            send_para_setting(pHeader, len);
             break;
 
         case SAMPLE_CMD_SET_PARAM:
-            recv_para_setting_data(pHeader, len);
+            recv_para_setting(pHeader, len);
             break;
 
         case SAMPLE_CMD_WARNING_REPORT: //recv warning ack
@@ -1194,7 +1420,7 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
             break;
 
         case SAMPLE_CMD_REQ_STATUS: 
-            send_module_status(pHeader, len);
+            send_work_status_req_ack(pHeader, len);
             break;
 
         case SAMPLE_CMD_UPLOAD_STATUS: //主动上报状态后，接收到ack
@@ -1202,16 +1428,17 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
             break;
 
         case SAMPLE_CMD_REQ_MM_DATA:
-            send_req_ack(pHeader,len);
+            send_mm_req_ack(pHeader,len);
             break;
 
         case SAMPLE_CMD_UPLOAD_MM_DATA:
-            recv_ack(pHeader, len);
+            recv_ack_and_send_image(pHeader, len);
             break;
 
         case SAMPLE_CMD_SNAP_SHOT:
             printf("------snap shot----------\n");
-            record_snap_shot();
+            send_snap_shot_ack(pHeader, len);
+            do_snap_shot();
             break;
 
         default:
@@ -1366,7 +1593,7 @@ static int unescaple_msg(uint8_t *msg, int msglen)
         if(!uchar_queue_pop(&ch))//pop success
         {
            // printf("data[%d] = 0x%02x\n", i++, ch);
-            if(!get_head)
+            if(!get_head)//not recv head
             {
                 if((ch == SAMPLE_PROT_MAGIC) && (cnt == 0))//get head
                 {
@@ -1378,7 +1605,7 @@ static int unescaple_msg(uint8_t *msg, int msglen)
                 else
                     continue;
             }
-            else
+            else//recv head
             {
                 if((ch == SAMPLE_PROT_MAGIC) && (cnt > 0))//get tail
                 {
@@ -1393,7 +1620,7 @@ static int unescaple_msg(uint8_t *msg, int msglen)
                     }
                     else
                     {
-                    printf("get tail! cnt = %d, return\n", cnt);
+                    //printf("get tail! cnt = %d, return\n", cnt);
                         msg[cnt] = SAMPLE_PROT_MAGIC;
                         get_head = 0;//over
                         cnt++;
@@ -1448,7 +1675,7 @@ void *parse_host_cmd(void *para)
         if(ret>0)
         {
             framelen = ret;
-            printf("recv framelen = %d\n", framelen);
+            //printf("recv framelen = %d\n", framelen);
             sum = sample_calc_sum(pHeader, framelen);
             if (sum != pHeader->checksum) {
                 printf("Checksum missmatch calcated: 0x%02hhx != 0x%2hhx\n",
@@ -1463,4 +1690,70 @@ void *parse_host_cmd(void *para)
             ;
     }
 }
+
+#define SNAP_SHOT_CLOSE             0
+#define SNAP_SHOT_USE_TIME          1
+#define SNAP_SHOT_USE_DISTANCE      2
+void *pthread_snap_shot(void *p)
+{
+    para_setting tmp;
+    real_time_data rt_data;;
+    uint32_t mileage = 0;
+    int start = 0;
+    int mileage_start = 0;
+    struct timeval record_time;  
+
+    send_work_status();
+    while(1)
+    {
+        read_warn_para(&tmp);
+        if(tmp.auto_photo_mode == SNAP_SHOT_CLOSE)
+        {
+            sleep(2);
+        }
+        else if(tmp.auto_photo_mode == SNAP_SHOT_USE_TIME)
+        {
+            if(start == 0 && tmp.auto_photo_time_period != 0)
+            {
+                gettimeofday(&record_time, NULL);
+                start = 1;
+            }
+            if(start == 1)
+            {
+                if(!is_timeout(&record_time, tmp.auto_photo_time_period))//timeout
+                {
+                    start = 0;
+                    do_snap_shot();
+                }
+            }
+            usleep(600000);//wait 600ms, get new rt_data
+
+        }
+        else if(tmp.auto_photo_mode == SNAP_SHOT_USE_DISTANCE)
+        {
+            do_with_real_time(&rt_data, READ_REAL_TIME_MSG);
+            if(rt_data.mileage != 0)
+            {
+                if(mileage_start == 0)
+                {
+                    mileage_start = 1;
+                    mileage = rt_data.mileage; //单位是0.1km
+                    printf("start snap by mileage!\n");
+                }
+                if((rt_data.mileage - mileage)*100 >= tmp.auto_photo_distance_period)
+                {
+                    printf("snap by mileage!\n");
+                    mileage = rt_data.mileage; //单位是0.1km
+                    do_snap_shot();
+                }
+                usleep(600000);//wait 600ms, get new rt_data
+            }
+        }
+        else
+        {
+            sleep(2);
+        }
+    }
+}
+
 
