@@ -5,7 +5,8 @@
 /// Copyright (C) 2018 - MiniEye INC.
 
 #include <stdio.h>
-#include "common/mjpeg/MjpegWriter.h"
+//#include "common/mjpeg/MjpegWriter.h"
+#include "MjpegWriter.h"
 
 #define fourCC(a, b, c, d) ( static_cast<int>(((unsigned char)(d) << 24) | \
                 ((unsigned char)(c) << 16) | ((unsigned char)(b) << 8) |\

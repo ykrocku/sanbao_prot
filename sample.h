@@ -10,8 +10,8 @@
 #define VENDOR_ID 0x1234
 
 #define GET_NEXT_SEND_NUM        1
-#define RECORD_RECV_NUM     2
-#define GET_RECV_NUM        3
+#define RECORD_RECV_NUM          2
+#define GET_RECV_NUM             3
 
 #define MM_PHOTO 0
 #define MM_AUDIO 1
@@ -452,19 +452,27 @@ uint8_t time[6];
 typedef struct _mm_header_info{
 
 uint8_t warn_type;
-uint8_t mm_type;
+//uint8_t mm_type;
+uint8_t photo_enable;
+uint8_t sound_enable;
+uint8_t video_enable;
+
 uint8_t video_time;
 uint8_t photo_time_period;
 uint8_t photo_num;
-uint32_t mm_id[WARN_SNAP_NUM_MAX];
+uint32_t photo_id[WARN_SNAP_NUM_MAX];
+uint32_t video_id[2];
 
 } __attribute__((packed)) mm_header_info;
 
 
 /**********queue and repeat_send struct****************/
-#define PTR_QUEUE_BUF_SIZE   (1024 + 64)
+#define IMAGE_SIZE_PER_PACKET   (1024)
+
+#define PTR_QUEUE_BUF_SIZE   (2*(IMAGE_SIZE_PER_PACKET + 64)) //加64, 大于 header + tail, 
 #define PTR_QUEUE_BUF_CNT    (16)
 #define UCHAR_QUEUE_SIZE    (2048)
+
 
 typedef struct _ptr_queue_node{
     uint8_t cmd;
@@ -472,7 +480,7 @@ typedef struct _ptr_queue_node{
 
     mm_header_info mm;
 
-    int32_t len;
+    uint32_t len;
     uint8_t *buf;
 } __attribute__((packed)) ptr_queue_node;
 
@@ -517,12 +525,13 @@ void display_mm_resource();
 int32_t find_mm_resource(uint32_t id, mm_node *m);
 int32_t delete_mm_resource(uint32_t id);
 char *warning_type_to_str(uint8_t type);
-int is_timeout(struct timeval *tv, int timeout_sec);
+int is_timeout(struct timeval *tv, int ms);
 void repeat_send_pkg_status_init();
 void printbuf(uint8_t *buf, int len);
 void *communicate_with_host(void *para);
 void *parse_host_cmd(void *para);
 int can_message_send(can_data_type *sourcecan);
+void warn_para_check(para_setting *para);
 
 #define DEBUG_BUF
 

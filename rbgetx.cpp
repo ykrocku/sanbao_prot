@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <sys/types.h>
+#include <dirent.h>
 #include <stdint.h>
 #include <getopt.h>
 #include <unistd.h>
@@ -32,6 +34,12 @@
 
 using namespace std;
 
+
+
+#define  ADAS_JPEG_SIZE (4* 1024 * 1024)
+#define  ADAS_IMAGE_SIZE (100* 1024 * 1024)
+
+
 void print_para(para_setting *para);
 
 // global variables
@@ -53,7 +61,7 @@ void write_warn_para(para_setting *para)
     uint32_t i;
     uint8_t *in8 = NULL;
     uint8_t *out8 = NULL;
-    
+
     in8 = (uint8_t *)&para->warning_speed_val;
     out8 = (uint8_t *)&warn_para.warning_speed_val;
 
@@ -75,6 +83,8 @@ void write_warn_para(para_setting *para)
             out8[i] = in8[i];
         }
     }
+
+    warn_para_check(&warn_para);
 
     pthread_mutex_unlock(&para_lock);
 }
@@ -100,8 +110,8 @@ int32_t find_mm_resource(uint32_t id, mm_node *m)
     pthread_mutex_lock(&mm_resource_lock);
     for(it=mmlist.begin();it!=mmlist.end();it++)  
     {  
-      //  printf("find id=%d,list id = %d\n",id, it->mm_id);
-      //  printf("warn_type = %d, mm_type=%d\n",it->warn_type, it->mm_type);
+        //  printf("find id=%d,list id = %d\n",id, it->mm_id);
+        //  printf("warn_type = %d, mm_type=%d\n",it->warn_type, it->mm_type);
         if(it->mm_id == id)
         {
             memcpy(m, &it->rw_flag, sizeof(mm_node));  
@@ -122,15 +132,14 @@ int32_t delete_mm_resource(uint32_t id)
     pthread_mutex_lock(&mm_resource_lock);
     for(it=mmlist.begin();it!=mmlist.end();it++)  
     {  
-     //   printf("delete id=%d, list id = %d\n",id, it->mm_id);
-     //   printf("warn_type = %d, mm_type=%d\n",it->warn_type, it->mm_type);
+        //   printf("delete id=%d, list id = %d\n",id, it->mm_id);
+        //   printf("warn_type = %d, mm_type=%d\n",it->warn_type, it->mm_type);
         if(it->mm_id == id)
         {
             if(it->mm_type == MM_PHOTO)
             {
-                sprintf(filepath, SNAP_SHOT_JPEG_PATH);
-                sprintf(&filepath[strlen(SNAP_SHOT_JPEG_PATH)],\
-                        "%s-%08d.jpg",warning_type_to_str(it->warn_type), id);
+                sprintf(filepath, "%s%s-%08d.jpg",SNAP_SHOT_JPEG_PATH,\
+                        warning_type_to_str(it->warn_type), id);
                 printf("rm jpeg %s\n", filepath);
                 remove(filepath);
                 it = mmlist.erase(it);  
@@ -139,9 +148,8 @@ int32_t delete_mm_resource(uint32_t id)
             }
             if(it->mm_type == MM_VIDEO)
             {
-                sprintf(filepath, SNAP_SHOT_JPEG_PATH);
-                sprintf(&filepath[strlen(SNAP_SHOT_JPEG_PATH)],\
-                        "%s-%08d.avi",warning_type_to_str(it->warn_type), id);
+                sprintf(filepath,"%s%s-%08d.avi",SNAP_SHOT_JPEG_PATH,\
+                        warning_type_to_str(it->warn_type), id);
                 printf("rm avi %s\n", filepath);
                 remove(filepath);
                 it = mmlist.erase(it);  
@@ -200,16 +208,21 @@ int write_file(const char* filename, const void* data, size_t size) {
 
 int read_local_para_file(const char* filename) {
     para_setting para;
-    char cmd[100];
+    char cmd[512];
 
     FILE* fp = fopen(filename, "r");
     if (!fp) {
         fprintf(stderr, "Cannot open for write: %s, so create\n", filename);
         fp = fopen(filename, "w+");
         if (!fp) {
-        fprintf(stderr, "create: %s, file\n", filename);
-        return 1;
+            fprintf(stderr, "create: %s, file\n", filename);
+            return 1;
         }
+        fclose(fp);
+
+        //no para file ,so set default to file
+        set_para_setting_default();
+        write_local_para_file(filename);
     }
     size_t nb = fread(&para, 1, sizeof(para), fp);
     if (nb != sizeof(para)) {
@@ -219,9 +232,17 @@ int read_local_para_file(const char* filename) {
     }
     write_warn_para(&para);
 
+#if 0
     //set alog detect.flag
     sprintf(cmd, "busybox sed -i 's/^.*--test_speed.*$/--test_speed=%d/' /data/xiao/install/detect.flag",\
             para.warning_speed_val);
+#endif
+
+    //set alog detect.flag
+    sprintf(cmd, "busybox sed -i 's/^.*--output_lane_info_speed_thresh.*$/--output_lane_info_speed_thresh=%d/' /data/xiao/install/detect.flag",\
+            para.warning_speed_val);
+
+
     system(cmd);
 
     print_para(&para);
@@ -342,10 +363,8 @@ void *pthread_encode_jpeg(void *p)
     int cnt = 0;
     mm_header_info mm;
 
-    const int RB_SIZE = 100 * 1024 * 1024;
-    const int RB_SIZE2 = 8* 1024 * 1024;
-    CRingBuf* pRB = new CRingBuf("encode_jpeg", "adas_image", RB_SIZE, CRB_PERSONALITY_READER);
-    CRingBuf* pwjpg = new CRingBuf("producer", "adas_jpg", RB_SIZE2, CRB_PERSONALITY_WRITER);
+    CRingBuf* pRB = new CRingBuf("encode_jpeg", "adas_image", ADAS_IMAGE_SIZE, CRB_PERSONALITY_READER);
+    CRingBuf* pwjpg = new CRingBuf("producer", "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_WRITER);
 
     while(1)
     {
@@ -394,6 +413,205 @@ void print_para(para_setting *para)
     printf("para->TSR_photo_time_period   = %d\n", para->TSR_photo_time_period);
 }
 
+//if para error, set default val
+void warn_para_check(para_setting *p)
+{
+    para_setting *para = (para_setting *)p;
+    
+    if(para->warning_speed_val < 0 || para->warning_speed_val > 60)
+    {
+        para->warning_speed_val = 30;// km/h, 0-60
+        printf("warn speed valid, set to default!\n");
+    }
+    if(para->warning_volume < 0 || para->warning_volume > 8)
+    {
+        para->warning_volume = 6;//0~8
+        printf("warn volume valid, set to default!\n");
+    }
+
+    //initiative
+    if(para->auto_photo_mode < 0 || para->auto_photo_mode > 3)
+    {
+        para->auto_photo_mode = 0;//主动拍照默认关闭
+        printf("warn photo para valid, set to default!\n");
+    }
+    if(para->auto_photo_time_period <0 || para->auto_photo_time_period > 3600)
+    {
+        printf("warn para valid, set to default!\n");
+        para->auto_photo_time_period = 1800; //单位：秒, 0~3600
+    }
+    if(para->auto_photo_distance_period < 0 || para->auto_photo_distance_period > 60000)
+    {
+        printf("warn para valid, set to default!\n");
+        para->auto_photo_distance_period = 100; //单位：米, 0-60000
+    }
+
+    //photo
+    if(para->photo_num < 1 || para->photo_num > 10)
+    {
+        printf("warn photo valid, set to default!\n");
+        para->photo_num = 3;//1-10
+    }
+    if(para->photo_time_period < 1 || para->photo_time_period > 5)
+    {
+        printf("warn photo valid, set to default!\n");
+        para->photo_time_period = 2; //单位：100ms, 1-5
+    }
+    if(para->image_Resolution < 1 || para->image_Resolution > 6)
+    {
+        printf("warn photo valid, set to default!\n");
+        para->image_Resolution = 1;
+    }
+    if(para->video_Resolution < 1 || para->video_Resolution > 7)
+    {
+        printf("warn photo valid, set to default!\n");
+        para->video_Resolution = 1;
+    }
+
+    //obstacle
+    if(para->obstacle_distance_threshold < 10 || para->obstacle_distance_threshold > 50)
+    {
+        printf("warn obstacle valid, set to default!\n");
+        para->obstacle_distance_threshold = 30; // 单位：100ms
+    }
+    if(para->obstacle_video_time < 0 || para->obstacle_video_time > 60)
+    {
+        printf("warn obstacle valid, set to default!\n");
+        para->obstacle_video_time = 5; //单位：秒
+    }
+    if(para->obstacle_photo_num < 0 || para->obstacle_photo_num > 10)
+    {
+        printf("warn obstacle valid, set to default!\n");
+        para->obstacle_photo_num = 3;
+    }
+    if(para->obstacle_photo_time_period < 1 || para->obstacle_photo_time_period > 10)
+    {
+        printf("warn obstacle valid, set to default!\n");
+        para->obstacle_photo_time_period = 2; // 单位：100ms
+    }
+
+    //FLC
+    if(para->FLC_time_threshold < 30 || para->FLC_time_threshold >120)
+    {
+        printf("warn FLC valid, set to default!\n");
+        para->FLC_time_threshold = 60;
+    }
+    if(para->FLC_times_threshold < 3 || para->FLC_times_threshold >10)
+    {
+        printf("warn FLC valid, set to default!\n");
+        para->FLC_times_threshold = 5 ;
+    }
+    if(para->FLC_video_time < 0 || para->FLC_video_time > 60)
+    {
+        printf("warn FLC valid, set to default!\n");
+        para->FLC_video_time = 5;
+    }
+    if(para->FLC_photo_num < 0 || para->FLC_photo_num >10)
+    {
+        printf("warn FLC valid, set to default!\n");
+        para->FLC_photo_num = 3;
+    }
+    if(para->FLC_photo_time_period < 1 || para->FLC_photo_time_period > 10)
+    {
+        printf("warn FLC valid, set to default!\n");
+        para->FLC_photo_time_period = 2;
+    }
+
+    //LDW
+    if(para->LDW_video_time < 0 || para->LDW_video_time > 60)
+    {
+        printf("warn LDW valid, set to default!\n");
+        para->LDW_video_time = 5;
+    }
+    if(para->LDW_photo_num < 0 || para->LDW_photo_num > 10)
+    {
+        printf("warn LDW valid, set to default!\n");
+        para->LDW_photo_num = 3;
+    }
+    if(para->LDW_photo_time_period < 1 || para->LDW_photo_time_period > 10)
+    {
+        printf("warn LDW valid, set to default!\n");
+        para->LDW_photo_time_period = 2;
+    }
+
+    //FCW
+    if(para->FCW_time_threshold < 10 || para->FCW_time_threshold > 50)
+    {
+        printf("warn FCW valid, set to default!\n");
+        para->FCW_time_threshold = 27;
+    }
+    if(para->FCW_video_time < 0 || para->FCW_video_time > 60)
+    {
+        printf("warn FCW valid, set to default!\n");
+        para->FCW_video_time = 5;
+    }
+    if(para->FCW_photo_num < 0 || para->FCW_photo_num > 10)
+    {
+        printf("warn FCW valid, set to default!\n");
+        para->FCW_photo_num = 3;
+    }
+    if(para->FCW_photo_time_period < 1 || para->FCW_photo_time_period > 10)
+    {
+        printf("warn FCW valid, set to default!\n");
+        para->FCW_photo_time_period = 2;
+    }
+
+    //PCW
+    if(para->PCW_time_threshold < 0 || para->PCW_time_threshold > 50)
+    {
+        printf("warn PCW valid, set to default!\n");
+        para->PCW_time_threshold = 30;
+    }
+    if(para->PCW_video_time < 10 || para->PCW_video_time > 60)
+    {
+        printf("warn pcw valid, set to default!\n");
+        para->PCW_video_time = 5;
+    }
+    if(para->PCW_photo_num < 0 || para->PCW_photo_num > 10)
+    {
+        printf("warn PCW valid, set to default!\n");
+        para->PCW_photo_num = 3;
+    }
+    if(para->PCW_photo_time_period < 1 || para->PCW_photo_time_period > 10)
+    {
+        printf("warn PCW valid, set to default!\n");
+        para->PCW_photo_time_period = 2;
+    }
+
+    //HMW
+    if(para->HW_time_threshold < 0 ||  para->HW_time_threshold > 50)
+    {
+        printf("warn HMW valid, set to default!\n");
+        para->HW_time_threshold = 30; // 单位：100ms 
+    }
+    if(para->HW_video_time < 0 || para->HW_video_time > 60)
+    {
+        printf("warn HMW valid, set to default!\n");
+        para->HW_video_time = 5;
+    }
+    if(para->HW_photo_num < 0 || para->HW_photo_num > 10)
+    {
+        printf("warn HMW valid, set to default!\n");
+        para->HW_photo_num = 3;
+    }
+    if(para->HW_photo_time_period < 1 || para->HW_photo_time_period > 10)
+    {
+        printf("warn HMW valid, set to default!\n");
+        para->HW_photo_time_period = 2; // 单位：100ms
+    }
+
+    //TSR
+    if(para->TSR_photo_num < 0 || para->TSR_photo_num > 10)
+    {
+        printf("warn TSR valid, set to default!\n");
+        para->TSR_photo_num = 3;
+    }
+    if(para->TSR_photo_time_period < 1 || para->TSR_photo_time_period > 10)
+    {
+        printf("warn TSR valid, set to default!\n");
+        para->TSR_photo_time_period = 2;
+    }
+}
 
 
 void set_para_setting_default()
@@ -450,6 +668,15 @@ void set_para_setting_default()
 
     write_warn_para(&para);
 }
+#define FCW_NAME            "FCW"
+#define LDW_NAME            "LDW"
+#define HW_NAME             "HW"
+#define PCW_NAME            "PCW"
+#define FLC_NAME            "FLC"
+#define TSRW_NAME           "TSRW"
+#define TSR_NAME            "TSR"
+#define SNAP_NAME           "SNAP"
+
 char *warning_type_to_str(uint8_t type)
 {
     static char name[20];
@@ -459,179 +686,431 @@ char *warning_type_to_str(uint8_t type)
     switch(type)
     {
         case SW_TYPE_FCW:
-            return strcpy(name, "FCW");
+            return strcpy(name, FCW_NAME);
         case SW_TYPE_LDW:
-            return strcpy(name, "LDW");
+            return strcpy(name, LDW_NAME);
         case SW_TYPE_HW:
-            return strcpy(name, "HW");
+            return strcpy(name, HW_NAME);
         case SW_TYPE_PCW:
-            return strcpy(name, "PCW");
+            return strcpy(name, PCW_NAME);
         case SW_TYPE_FLC:
-            return strcpy(name, "FLC");
+            return strcpy(name, FLC_NAME);
         case SW_TYPE_TSRW:
-            return strcpy(name, "TSRW");
+            return strcpy(name, TSRW_NAME);
         case SW_TYPE_TSR:
-            return strcpy(name, "TSR");
+            return strcpy(name, TSR_NAME);
         case SW_TYPE_SNAP:
-            return strcpy(name, "SNAP");
+            return strcpy(name, SNAP_NAME);
 
-       // case SW_TYPE_TIMER_SNAP:
-         //   return strcpy(name, "TIMER_SNAP");
+            // case SW_TYPE_TIMER_SNAP:
+            //   return strcpy(name, "TIMER_SNAP");
         default:
-                return name;
+            return name;
     }
-
 }
 
-void record_jpeg(CRingBuf* pjpg, mm_header_info info)
+int str_to_warning_type(char *type, uint8_t *val)
+{
+
+    if(!strncmp(FCW_NAME, type, sizeof(FCW_NAME)))
+    {
+        *val = SW_TYPE_FCW;
+    }
+    else if(!strncmp(LDW_NAME, type, sizeof(LDW_NAME)))
+    {
+        *val = SW_TYPE_LDW;
+    }
+    else if(!strncmp(HW_NAME, type, sizeof(HW_NAME)))
+    {
+        *val = SW_TYPE_HW;
+    }
+    else if(!strncmp(PCW_NAME, type, sizeof(PCW_NAME)))
+    {
+        *val = SW_TYPE_PCW;
+    }
+    else if(!strncmp(FLC_NAME, type, sizeof(FLC_NAME)))
+    {
+        *val = SW_TYPE_FLC;
+    }
+    else if(!strncmp(TSRW_NAME, type, sizeof(TSRW_NAME)))
+    {
+        *val = SW_TYPE_TSRW;
+    }
+    else if(!strncmp(TSR_NAME, type, sizeof(TSR_NAME)))
+    {
+        *val = SW_TYPE_TSR;
+    }
+    else if(!strncmp(SNAP_NAME, type, sizeof(SNAP_NAME)))
+    {
+        *val = SW_TYPE_SNAP;
+    }
+    else
+    {
+        printf("unknow warn type: %s\n", type);
+        return -1;   
+    }
+
+    return 0;
+}
+
+void store_one_jpeg(mm_header_info *mm, RBFrame* pFrame, int index)
+{
+    char filepath[100];
+    mm_node node;
+
+    sprintf(filepath,"%s%s-%08d.jpg",SNAP_SHOT_JPEG_PATH,\
+            warning_type_to_str(mm->warn_type), mm->photo_id[index]);
+
+    fprintf(stdout, "Saving image file...%s\n", filepath);
+    int rc = write_file(filepath, pFrame->data, pFrame->dataLen);
+    if (rc == 0) {
+        printf("Image saved to [%s]\n", filepath);
+    } else {
+        fprintf(stderr, "Cannot save image to %s\n", filepath);
+    }
+
+    node.warn_type = mm->warn_type;
+    node.mm_type = MM_PHOTO;
+    node.mm_id = mm->photo_id[index];
+    //uint8_t time[6];
+    insert_mm_resouce(node);
+}
+
+RBFrame* request_jpeg_frame(CRingBuf* pRB, uint32_t repeat_times)
+{
+    RBFrame* pFrame = nullptr;
+    uint32_t frameLen = 0;
+    uint32_t try_times = 0;
+
+    do{
+        pFrame = reinterpret_cast<RBFrame*>(pRB->RequestReadFrame(&frameLen));
+        if (!CRB_VALID_ADDRESS(pFrame)) {
+            fprintf(stderr, "Error: RequestReadFrame failed\n");
+            usleep(10000);
+            pFrame = nullptr;
+        }
+        else
+        {
+            break;
+        }
+    }while(try_times++ < repeat_times);
+
+    return pFrame;
+}
+
+
+void store_warn_jpeg(CRingBuf* pRB, mm_header_info *mm)
+{
+    RBFrame* pFrame = nullptr;
+    int jpeg_index = 0;
+    uint64_t jpeg_timestart = 0;
+    struct timeval record_time;
+    int force_exit_time;
+
+    force_exit_time = mm->photo_time_period*100*mm->photo_num;
+    gettimeofday(&record_time, NULL);
+    while(jpeg_index < mm->photo_num)
+    {
+        if(!is_timeout(&record_time, force_exit_time))//timeout
+        {
+            printf("store jpeg force exit!\n");
+            break;
+        }
+
+        pRB->SeekIndexByTime(0);
+        pFrame = request_jpeg_frame(pRB, 0);
+        if(pFrame == nullptr)
+        {
+            usleep(25000);
+            continue;
+        }
+        print_frame("video-read", pFrame);
+
+        if(jpeg_index == 0 || (uint64_t)pFrame->time > mm->photo_time_period*100 + jpeg_timestart)//record first jpeg
+        {
+            print_frame("jpeg", pFrame);
+            jpeg_timestart = pFrame->time;
+            store_one_jpeg(mm, pFrame, jpeg_index++);
+        }
+
+        pRB->CommitRead();
+    }
+}
+
+#define RECORD_JPEG_NEED 1
+#define RECORD_JPEG_NO_NEED 0
+
+void store_one_avi(CRingBuf* pRB, mm_header_info *mm, int jpeg_flag)
+{
+#define VIDEO_FRAMES_PER_SECOND   15
+    RBFrame* pFrame = nullptr;
+    char avifilepath[100];
+    MjpegWriter mjpeg;
+    mm_node node;
+    struct timeval record_time;  
+    int jpeg_index = 0;
+    uint64_t jpeg_timestart = 0;
+    int force_exit_time;
+
+    if(jpeg_flag)
+    {
+        pRB->SeekIndexByTime(0);
+        pFrame = request_jpeg_frame(pRB, 10);
+        if(pFrame == nullptr)
+            return;
+
+        print_frame("curtent-read", pFrame);
+        jpeg_timestart = pFrame->time;
+        print_frame("jpeg", pFrame);
+        store_one_jpeg(mm, pFrame, jpeg_index++);
+    }
+
+    sprintf(avifilepath,"%s%s-%08d.avi", SNAP_SHOT_JPEG_PATH,\
+            warning_type_to_str(mm->warn_type), mm->video_id[0]);
+
+    printf("seek time:%d\n", 0-mm->video_time);
+    pRB->SeekIndexByTime((0-mm->video_time));
+
+    mjpeg.Open(avifilepath, VIDEO_FRAMES_PER_SECOND, pFrame->video.VWidth, pFrame->video.VHeight);
+    fprintf(stdout, "Saving image file...%s\n", avifilepath);
+
+    force_exit_time = mm->video_time*1000;
+    gettimeofday(&record_time, NULL);
+    while(1)
+    {
+        if(!is_timeout(&record_time, force_exit_time))
+        {
+            printf("avi timeout break\n");
+            break;
+        }
+
+        pFrame = request_jpeg_frame(pRB, 0);
+        if(pFrame == nullptr)
+        {
+            usleep(20000);
+            continue;
+        }
+        print_frame("video-read", pFrame);
+
+        mjpeg.Write(pFrame->data, pFrame->dataLen);
+
+        if(jpeg_flag)
+        {
+            if(jpeg_index < mm->photo_num && ((uint64_t)pFrame->time > mm->photo_time_period*100 + jpeg_timestart))//record first jpeg
+            {
+                print_frame("jpeg", pFrame);
+                jpeg_timestart = pFrame->time;
+                store_one_jpeg(mm, pFrame, jpeg_index++);
+            }
+        }
+        pRB->CommitRead();
+    }
+    mjpeg.Close();
+    printf("%s avi done!\n", warning_type_to_str(mm->warn_type));
+
+    node.warn_type = mm->warn_type;
+    node.mm_type = MM_VIDEO;
+    node.mm_id = mm->video_id[0];
+    //uint8_t time[6];
+    insert_mm_resouce(node);
+    //display_mm_resource();
+}
+
+//修改为同时获取jpg 和 avi
+void record_jpeg(CRingBuf* pRB, mm_header_info info)
 {
     int i=0;
     RBFrame* pFrame = nullptr;
-    uint32_t frameLen = 0;
-    char filepath[100];
+    char avifilepath[100];
     mm_header_info mm;
     MjpegWriter mjpeg;
     mm_node node;
     uint64_t timestart = 0;
     struct timeval record_time;  
-    
+    int cnt = 1;
+
     printf("--pthread run---- enter!\n");
     memcpy(&mm, &info, sizeof(mm));
-    printf("mm.mm_type = %d \n", mm.mm_type);
-    if(mm.mm_type == MM_PHOTO)
+
+    if(mm.photo_enable && !mm.video_enable)
     {
-        printf("record_jpeg enter!\n");
-        for(i=0; i<mm.photo_num; i++)
-        {
-            pjpg->SeekIndexByTime(0);  // seek to the latest frame
-            pFrame = reinterpret_cast<RBFrame*>(pjpg->RequestReadFrame(&frameLen));
-            if (!CRB_VALID_ADDRESS(pFrame)) {
-                fprintf(stderr, "Error: RequestReadFrame failed\n");
-                continue;
-            }
-            if (pFrame->data == nullptr ||
-                    pFrame->video.VWidth == 0 ||
-                    pFrame->video.VHeight == 0) {
-                fprintf(stderr, "Error:: image stream exhausted\n");
-                pjpg->CommitRead();
-                continue;
-            }
-
-            print_frame("jpeg", pFrame);
-
-            sprintf(filepath, SNAP_SHOT_JPEG_PATH);
-            sprintf(&filepath[strlen(SNAP_SHOT_JPEG_PATH)],\
-                    "%s-%08d.jpg", warning_type_to_str(mm.warn_type), mm.mm_id[i]);
-
-            fprintf(stdout, "Saving image file...%s\n", filepath);
-            int rc = write_file(filepath, pFrame->data, pFrame->dataLen);
-            if (rc == 0) {
-                printf("Image saved to [%s]\n", filepath);
-            } else {
-                fprintf(stderr, "Cannot save image to %s\n", filepath);
-            }
-           // pjpg->CommitRead();
-         
-            node.warn_type = mm.warn_type;
-            node.mm_type = MM_PHOTO;
-            node.mm_id = mm.mm_id[i];
-            //uint8_t time[6];
-            insert_mm_resouce(node);
-            //display_mm_resource();
-
-            if(i+1 != mm.photo_num)
-                usleep(100*mm.photo_time_period*1000);
-        }
+        store_warn_jpeg(pRB, &mm);
     }
-    else if(mm.mm_type == MM_VIDEO)
+    else if(!mm.photo_enable && mm.video_enable)
     {
-        printf("record_video enter!\n");
-        //seek time
-        printf("seek time:%d\n", 0-mm.video_time);
-        //pjpg->SeekIndexByTime((0-2));
-        pjpg->SeekIndexByTime((0-mm.video_time));
-        pFrame = reinterpret_cast<RBFrame*>(pjpg->RequestReadFrame(&frameLen));
-        if (!CRB_VALID_ADDRESS(pFrame)) {
-            fprintf(stderr, "Error: RequestReadFrame failed\n");
-        }
-        timestart = pFrame->time;
-       // print_frame("video-0", pFrame);
-        pjpg->CommitRead();
-
-        sprintf(filepath, SNAP_SHOT_JPEG_PATH);
-        sprintf(&filepath[strlen(SNAP_SHOT_JPEG_PATH)],\
-                "%s-%08d.avi",warning_type_to_str(mm.warn_type), mm.mm_id[0]);
-        mjpeg.Open(filepath, 15, 720, 360);
-        fprintf(stdout, "Saving image file...%s\n", filepath);
-
-        gettimeofday(&record_time, NULL);
-        while(1)
-        {
-            if(!is_timeout(&record_time, mm.video_time+1))//timeout
-            {
-                printf("avi timeout break\n");
-                break;
-            }
-            pFrame = reinterpret_cast<RBFrame*>(pjpg->RequestReadFrame(&frameLen));
-            if (!CRB_VALID_ADDRESS(pFrame)) {
-                fprintf(stderr, "Error: RequestReadFrame failed\n");
-                usleep(200000);
-                continue;
-            }
-            print_frame("video-read", pFrame);
-            mjpeg.Write(pFrame->data, pFrame->dataLen);
-            if((uint64_t)pFrame->time > mm.video_time*2*1000 + timestart)
-            {
-                printf("avi break\n");
-                pjpg->CommitRead();
-                break;
-            }
-            pjpg->CommitRead();
-        }
-
-        mjpeg.Close();
-        printf("%s avi done!\n", warning_type_to_str(mm.warn_type));
-
-        node.warn_type = mm.warn_type;
-        node.mm_type = MM_VIDEO;
-        node.mm_id = mm.mm_id[0];
-        //uint8_t time[6];
-        insert_mm_resouce(node);
-        //display_mm_resource();
-
+        store_one_avi(pRB, &mm, RECORD_JPEG_NO_NEED);
     }
+    else if(mm.photo_enable && mm.video_enable)
+    {
+        store_one_avi(pRB, &mm, RECORD_JPEG_NEED);
+    }
+    else //do nothing
+    {
+        ;
+    }
+}
+
+int get_mm_type(char *file_type, uint8_t *val)
+{
+
+    if(!strncmp("jpg", file_type, strlen("jpg")))
+    {
+        *val = MM_PHOTO;
+    }
+    else if(!strncmp("wav", file_type, strlen("wav")))
+    {
+        *val = MM_AUDIO;
+    }
+    else if(!strncmp("avi", file_type, strlen("avi")))
+    {
+        *val = MM_VIDEO;
+    }
+    else
+    {
+        printf("unknow mm file type: %s\n", file_type);
+        return -1;
+    }
+
+    return 0;
+}
+
+void parse_filename(char *filename)
+{
+    char warn_name[32];
+    char mm_id[32];
+    char file_type[32];
+    mm_node node;
+    uint32_t i=0, j=0;
+    int ret = 0;
+    char *pos = &warn_name[0];
+
+    memset(warn_name, 0, sizeof(warn_name));
+    memset(mm_id, 0, sizeof(mm_id));
+    memset(file_type, 0, sizeof(file_type));
+    for(i=0; i<strlen(filename); i++)
+    {
+        if(filename[i] == '-')
+        {
+            j=0;
+            pos = &mm_id[0];
+            continue;
+        }
+        else if(filename[i] == '.')
+        {
+            j=0;
+            pos = &file_type[0];
+            continue;
+        }
+        pos[j++] = filename[i];
+    }
+
+    ret = str_to_warning_type(warn_name, &node.warn_type);
+    if(ret < 0)
+        return;
+
+    ret = get_mm_type(file_type, &node.mm_type);
+    if(ret < 0)
+        return;
+
+    node.mm_id = strtol(mm_id, NULL, 10);
+
+    printf("warn type = %d\n", node.warn_type);
+    printf("mmid = %d\n", node.mm_id);
+    printf("mm type = %d\n", node.mm_type);
+
+    insert_mm_resouce(node);
+
+}
+
+int traverse_directory(DIR *dirp)
+{
+    struct dirent *dir_info = NULL;
+
+    do{
+        dir_info = readdir(dirp);
+        if(!dir_info) //end or error
+        {
+            return 1;
+        }
+        else
+        {
+            printf("---------------------\n");
+            printf("dir_info->d_ino = %d\n", dir_info->d_type);
+            printf("dir_info->d_name = %s\n", dir_info->d_name);
+
+            if(!strncmp(".", dir_info->d_name, 1))
+            {
+                printf("ignore .\n");
+            }
+            else if(!strncmp("..", dir_info->d_name, 2))
+            {
+                printf("ignore ..\n");
+            }
+            else
+            {
+                parse_filename(dir_info->d_name);
+            }
+
+        }
+    }while(dir_info);
+
+    return 0;
+}
+
+int read_local_file_to_list()
+{
+    DIR *pdir;
+
+    pdir = opendir(SNAP_SHOT_JPEG_PATH);
+    if(!pdir)
+    {
+        perror("error");
+        return -1;
+    }
+
+    traverse_directory(pdir);
+
+    closedir(pdir);
+
+    return 0;
 }
 
 void global_var_init()
 {
-    set_para_setting_default();
     read_local_para_file(LOCAL_PRAR_FILE);
-    
-    system(DO_DELETE_SNAP_SHOT_FILES);
-    printf("do %s\n", DO_DELETE_SNAP_SHOT_FILES);
+
+
+    //    system(DO_DELETE_SNAP_SHOT_FILES);
+    //    printf("do %s\n", DO_DELETE_SNAP_SHOT_FILES);
+
+
+    read_local_file_to_list();
 }
 
 void *pthread_sav_warning_jpg(void *p)
 {
+#define CUSTOMER_NUM   8 
+    int cnt = 0;
     int i = 0;
     int index = 0;
     mm_header_info mm;
     CRingBuf* pr[WARN_TYPE_NUM];
     Closure<void>* cls[WARN_TYPE_NUM];
-    char user_name[WARN_TYPE_NUM][20]={
-    "customer1","customer2","customer3","customer4",
-    "customer5","customer6","customer7","customer8",
+    // char user_name[WARN_TYPE_NUM][20]={
+    char user_name[CUSTOMER_NUM][20]={
+        "customer_FCW_avi","customer_LDW_avi","customer_HW_avi","customer_PCW_avi",
+        "customer_FLC_avi","customer_TSRW_avi","customer_TSR_avi","customer_SNAP_avi",
 #if 0
-    "customer9","customer10","customer11","customer12",
-    "customer13","customer14", "customer15","customer16",
+        "customer_FCW_jpg","customer_LDW_jpg","customer_HW_jpg","customer_PCW_jpg",
+        "customer_FLC_jpg","customer_TSRW_jpg","customer_TSR_jpg","customer_SNAP_jpg",
 #endif
     };
-    const int RB_SIZE2 = 8* 1024 * 1024;
 
-    for(i=0; i<WARN_TYPE_NUM; i++)
+    //for(i=0; i<WARN_TYPE_NUM; i++)
+    for(i=0; i<CUSTOMER_NUM; i++)
     {
         printf("name:%s\n", user_name[i]);
-        pr[i] = new CRingBuf(user_name[i], "adas_jpg", RB_SIZE2, CRB_PERSONALITY_READER);
+        pr[i] = new CRingBuf(user_name[i], "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
     }
 
     ThreadPool pool; // 0 - cpu member
@@ -639,17 +1118,35 @@ void *pthread_sav_warning_jpg(void *p)
 
     while(1)
     {
+#if 1        
         if(pull_mm_queue(&mm))
         {
             usleep(10000);
             continue;
         }
+
+#else//debug
+        mm.mm_type = MM_VIDEO;
+
+        if(cnt == 1)
+            mm.mm_type = MM_PHOTO;
+
+        mm.video_time = 3;
+        mm.warn_type = cnt;
+        mm.mm_id[0] = cnt++;
+        sleep(2);
+
+        if(cnt >= 2)
+            sleep(100000);
+#endif
+
+
 #if 0
         printf("warn type: 0x%x, period0x%x\n", mm.warn_type, mm.photo_time_period);
         printf("mm type: 0x%x, mmid: 0x%x\n", mm.mm_type, mm.mm_id[0]);
         printf("video_time: 0x%x, num: 0x%x\n", mm.video_time, mm.photo_num);
 #endif
-
+        i = 0;
         switch(mm.warn_type)
         {
             case SW_TYPE_FCW:
@@ -677,12 +1174,14 @@ void *pthread_sav_warning_jpg(void *p)
                 i=7;
                 break;
             default:
+                i=6;
                 break;
 
         }
-           // printf("Thread pool enter! i = %d\n", i);
-            cls[i] = NewClosure(record_jpeg, pr[i], mm);
-            pool.AddTask(cls[i]);
+
+        // printf("Thread pool enter! i = %d\n", i);
+        cls[i] = NewClosure(record_jpeg, pr[i], mm);
+        pool.AddTask(cls[i]);
     }
 
     return NULL;
