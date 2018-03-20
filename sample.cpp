@@ -266,8 +266,8 @@ int is_timeout(struct timeval *tv, int ms)
 
     gettimeofday(&tv_cur, NULL);
 
-    if((tv_cur.tv_sec >= tv->tv_sec + timeout_sec) && \
-            (tv_cur.tv_usec >= tv->tv_usec + timeout_usec))
+    if((tv_cur.tv_sec > tv->tv_sec + timeout_sec) || \
+            ((tv_cur.tv_sec == tv->tv_sec + timeout_sec) && (tv_cur.tv_usec > tv->tv_usec + timeout_usec)))
     {
         printf("timeout! %d ms\n", ms);
         return 0;

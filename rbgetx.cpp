@@ -807,6 +807,8 @@ void store_warn_jpeg(CRingBuf* pRB, mm_header_info *mm)
     struct timeval record_time;
     int force_exit_time;
 
+
+    printf("%s enter!\n", __FUNCTION__);
     force_exit_time = mm->photo_time_period*100*mm->photo_num;
     gettimeofday(&record_time, NULL);
     while(jpeg_index < mm->photo_num)
@@ -852,12 +854,15 @@ void store_one_avi(CRingBuf* pRB, mm_header_info *mm, int jpeg_flag)
     uint64_t jpeg_timestart = 0;
     int force_exit_time;
 
+    printf("%s enter!\n", __FUNCTION__);
+
+    pRB->SeekIndexByTime(0);
+    pFrame = request_jpeg_frame(pRB, 10);
+    if(pFrame == nullptr)
+        return;
+
     if(jpeg_flag)
     {
-        pRB->SeekIndexByTime(0);
-        pFrame = request_jpeg_frame(pRB, 10);
-        if(pFrame == nullptr)
-            return;
 
         print_frame("curtent-read", pFrame);
         jpeg_timestart = pFrame->time;
@@ -929,7 +934,6 @@ void record_jpeg(CRingBuf* pRB, mm_header_info info)
     struct timeval record_time;  
     int cnt = 1;
 
-    printf("--pthread run---- enter!\n");
     memcpy(&mm, &info, sizeof(mm));
 
     if(mm.photo_enable && !mm.video_enable)
@@ -1094,6 +1098,8 @@ void *pthread_sav_warning_jpg(void *p)
     int i = 0;
     int index = 0;
     mm_header_info mm;
+    struct timeval time_begin[WARN_TYPE_NUM];
+    char first_record_time[WARN_TYPE_NUM] = {1, 1, 1, 1, 1, 1, 1, 1};
     CRingBuf* pr[WARN_TYPE_NUM];
     Closure<void>* cls[WARN_TYPE_NUM];
     // char user_name[WARN_TYPE_NUM][20]={
@@ -1116,9 +1122,10 @@ void *pthread_sav_warning_jpg(void *p)
     ThreadPool pool; // 0 - cpu member
     pool.SetMinThreads(4);
 
+    sleep(3);
     while(1)
     {
-#if 1        
+#if 0        
         if(pull_mm_queue(&mm))
         {
             usleep(10000);
@@ -1126,26 +1133,27 @@ void *pthread_sav_warning_jpg(void *p)
         }
 
 #else//debug
-        mm.mm_type = MM_VIDEO;
-
-        if(cnt == 1)
-            mm.mm_type = MM_PHOTO;
 
         mm.video_time = 3;
-        mm.warn_type = cnt;
-        mm.mm_id[0] = cnt++;
-        sleep(2);
+        mm.warn_type = 1;
+        mm.video_id[0] = cnt++;
+        mm.video_enable = 1;
+        mm.photo_enable = 0;
+ //       sleep(2);
 
         if(cnt >= 2)
-            sleep(100000);
-#endif
+            sleep(2);
 
+        if(cnt >= 4)
+            sleep(2000000);
+#endif
 
 #if 0
         printf("warn type: 0x%x, period0x%x\n", mm.warn_type, mm.photo_time_period);
         printf("mm type: 0x%x, mmid: 0x%x\n", mm.mm_type, mm.mm_id[0]);
         printf("video_time: 0x%x, num: 0x%x\n", mm.video_time, mm.photo_num);
 #endif
+
         i = 0;
         switch(mm.warn_type)
         {
@@ -1178,7 +1186,28 @@ void *pthread_sav_warning_jpg(void *p)
                 break;
 
         }
-
+        
+        //上一个报警视频没有获取完成，当有新的同类型报警,视频不再获取。
+        if(mm.video_enable)
+        {
+            if(first_record_time[i])
+            {
+                first_record_time[i] = 0;
+                gettimeofday(&time_begin[i], NULL);
+            }
+            else
+            {
+                if(!is_timeout(&time_begin[i], mm.video_time*1000)) //we can record again
+                {
+                    gettimeofday(&time_begin[i], NULL);
+                }
+                else
+                {
+                    printf("new warning video ignore!\n");
+                    continue;
+                }
+            }
+        }
         // printf("Thread pool enter! i = %d\n", i);
         cls[i] = NewClosure(record_jpeg, pr[i], mm);
         pool.AddTask(cls[i]);
