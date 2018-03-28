@@ -31,6 +31,7 @@ using namespace std;
 static int32_t sample_send_image();
 #define WRITE_REAL_TIME_MSG 0
 #define READ_REAL_TIME_MSG  1
+
 //实时数据处理
 void RealTimeDdata_process(real_time_data *data, int mode)
 {
@@ -101,6 +102,7 @@ void do_serial_num(uint16_t *num, int mode)
             *num = send_serial_num;
         }
     }
+    //记录接收到的序列号，发送序列号在此基础上累加 
     else if(mode == RECORD_RECV_NUM)
     {
         recv_serial_num = *num;
@@ -117,21 +119,15 @@ void do_serial_num(uint16_t *num, int mode)
     {
     }
     pthread_mutex_unlock(&serial_num_lock);
-
 }
 
-
 pthread_mutex_t photo_queue_lock = PTHREAD_MUTEX_INITIALIZER;
-queue<ptr_queue_node *> g_photo_queue;
-queue<ptr_queue_node *> *g_photo_queue_p = &g_photo_queue;
+queue<ptr_queue_node *> g_image_queue;
+queue<ptr_queue_node *> *g_image_queue_p = &g_image_queue;
 
 pthread_mutex_t ptr_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 queue<ptr_queue_node *> g_ptr_queue;
 queue<ptr_queue_node *> *g_ptr_queue_p = &g_ptr_queue;
-
-pthread_mutex_t ack_queue_lock = PTHREAD_MUTEX_INITIALIZER;
-queue<ptr_queue_node *> g_ack_queue;
-queue<ptr_queue_node *> *g_ack_queue_p = &g_ack_queue;
 
 pthread_mutex_t uchar_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 queue<uint8_t> g_uchar_queue;
@@ -144,7 +140,8 @@ void repeat_send_pkg_status_init()
     memset(g_pkg_status_p, 0, sizeof(pkg_repeat_status));
 }
 
-static int ptr_queue_push(queue<ptr_queue_node *> *p, ptr_queue_node *in,  pthread_mutex_t lock)
+//推入队列，可以只有node的header，数据可以为空
+static int ptr_queue_push(queue<ptr_queue_node *> *p, ptr_queue_node *in,  pthread_mutex_t *lock)
 {
     int ret;
     ptr_queue_node *header = NULL;
@@ -153,7 +150,7 @@ static int ptr_queue_push(queue<ptr_queue_node *> *p, ptr_queue_node *in,  pthre
     if(!in || !p)
         return -1;
 
-    pthread_mutex_lock(&lock);
+    pthread_mutex_lock(lock);
     if((int)p->size() == PTR_QUEUE_BUF_CNT)
     {
         printf("ptr queue overflow...\n");
@@ -198,11 +195,12 @@ static int ptr_queue_push(queue<ptr_queue_node *> *p, ptr_queue_node *in,  pthre
     }
 
 out:
-    pthread_mutex_unlock(&lock);
+    pthread_mutex_unlock(lock);
     return ret;
 }
 
-static int ptr_queue_pop(queue<ptr_queue_node*> *p, ptr_queue_node *out,  pthread_mutex_t lock)
+//弹出队列，可以只取node的header，数据不要
+static int ptr_queue_pop(queue<ptr_queue_node*> *p, ptr_queue_node *out,  pthread_mutex_t *lock)
 {
     ptr_queue_node *header = NULL;
     uint32_t user_buflen = 0;
@@ -211,13 +209,13 @@ static int ptr_queue_pop(queue<ptr_queue_node*> *p, ptr_queue_node *out,  pthrea
     if(!out || !p)
         return -1;
 
-    pthread_mutex_lock(&lock);
+    pthread_mutex_lock(lock);
     if(!p->empty())
     {
         header = p->front();
         p->pop();
     }
-    pthread_mutex_unlock(&lock);
+    pthread_mutex_unlock(lock);
 
     if(!header)
         return -1;
@@ -254,9 +252,108 @@ static int ptr_queue_pop(queue<ptr_queue_node*> *p, ptr_queue_node *out,  pthrea
     return 0;
 }
 
+void free_header_node(queue<ptr_queue_node*> *p, pthread_mutex_t *lock)
+{
+    if(!p)
+        return;
+
+    pthread_mutex_lock(lock);
+    if(!p->empty())
+    {
+        //header = p->front();
+        p->pop();
+    }
+    pthread_mutex_unlock(lock);
+}
+
+static int read_header_node(queue<ptr_queue_node*> *p, SendStatus *out, pthread_mutex_t *lock)
+{
+    ptr_queue_node *header = NULL;
+    int ret;
+
+    if(!p)
+        return 1;
+
+    pthread_mutex_lock(lock);
+
+    if(!p->empty())
+    {
+        header = p->front();
+        memcpy(out, &header->pkg, sizeof(header->pkg));
+        ret = 0;
+        goto out;
+    }
+    else
+    {
+        ret = 1;
+        goto out;
+    }
+
+out:
+    pthread_mutex_unlock(lock);
+    return ret;
+}
+
+static int write_header_node(queue<ptr_queue_node*> *p, SendStatus *in, pthread_mutex_t *lock)
+{
+    ptr_queue_node *header = NULL;
+    int ret;
+
+    if(!p)
+        return 1;
+
+    pthread_mutex_lock(lock);
+
+    if(!p->empty())
+    {
+        header = p->front();
+        memcpy(&header->pkg, in, sizeof(header->pkg));
+        ret = 0;
+        goto out;
+    }
+    else
+    {
+        ret = 1;
+        goto out;
+    }
+
+out:
+    pthread_mutex_unlock(lock);
+    return ret;
+}
+
+static int get_node_buf(queue<ptr_queue_node*> *p, uint8_t *out, int *len, pthread_mutex_t *lock)
+{
+    ptr_queue_node *header = NULL;
+    uint8_t buf[PTR_QUEUE_BUF_SIZE];
+    int ret = 0;
+
+    if(!p)
+        return -1;
+
+    pthread_mutex_lock(lock);
+    if(!p->empty())
+    {
+        header = p->front();
+        //p->pop();
+        memcpy(out, header->buf, header->len);
+        *len = header->len;
+
+        ret = 0;
+        goto out;
+    }
+    else
+    {
+        ret = 1;
+        goto out;
+    }
+out:
+    pthread_mutex_unlock(lock);
+    return ret;
+}
 
 //return 0, 超时，单位是毫秒 
-int is_timeout(struct timeval *tv, int ms)
+int timeout_trigger(struct timeval *tv, int ms)
 {
     struct timeval tv_cur;
     int timeout_sec, timeout_usec;
@@ -270,10 +367,10 @@ int is_timeout(struct timeval *tv, int ms)
             ((tv_cur.tv_sec == tv->tv_sec + timeout_sec) && (tv_cur.tv_usec > tv->tv_usec + timeout_usec)))
     {
         printf("timeout! %d ms\n", ms);
-        return 0;
+        return 1;
     }
     else
-        return 1;
+        return 0;
 }
 
 #define RECORD_START 0
@@ -339,7 +436,6 @@ static int unblock_write(int sock, uint8_t *buf, int len)
     return offset;
 }
 
-
 //insert mm info 
 void push_mm_queue(mm_header_info *mm)
 {
@@ -349,7 +445,7 @@ void push_mm_queue(mm_header_info *mm)
 
     memcpy(&header.mm, mm, sizeof(*mm));
 
-    ptr_queue_push(g_photo_queue_p, &header, photo_queue_lock);
+    ptr_queue_push(g_image_queue_p, &header, &photo_queue_lock);
 }
 
 //pull node ,the info use to record the avi or jpeg
@@ -358,7 +454,7 @@ int pull_mm_queue(mm_header_info *mm)
     ptr_queue_node header;
     header.buf = NULL;
     header.len = 0;
-    if(!ptr_queue_pop(g_photo_queue_p, &header, photo_queue_lock))
+    if(!ptr_queue_pop(g_image_queue_p, &header, &photo_queue_lock))
     {
         memcpy(mm, &header.mm, sizeof(*mm));
         return 0;
@@ -507,151 +603,65 @@ int do_record_warning_info(int type, warningtext *uploadmsg)
 #define SEND_PKG_TIME_OUT_1S    1000
 static int send_pkg_to_host(int sock)
 {
-    static uint8_t s_buf[PTR_QUEUE_BUF_SIZE];
-    ptr_queue_node msgack;
+    uint8_t buf[PTR_QUEUE_BUF_SIZE];
     int ret = 0;
+    int len = 0;
+    SendStatus pkg;
 
-    if(g_pkg_status_p->start_wait_ack == 0)
+    //no message
+    if(read_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock))
+        return 1;
+
+    if(pkg.ack_status == MSG_ACK_READY)
     {
-        g_pkg_status_p->msgsend.buf = s_buf;
-        g_pkg_status_p->msgsend.len = sizeof(s_buf);
-        if(ptr_queue_pop(g_ptr_queue_p, &g_pkg_status_p->msgsend, ptr_queue_lock))
+        if(pkg.send_repeat == 0)
         {
-            return 1;
+            if(!get_node_buf(g_ptr_queue_p, buf, &len, &ptr_queue_lock))
+                ret = unblock_write(sock, buf, len);
+            //如果发送失败，比如断网的情况，怎么处理
         }
+        //发送成功，释放头节点
+        free_header_node(g_ptr_queue_p, &ptr_queue_lock);
+        return 0;
     }
-    if(g_pkg_status_p->msgsend.len > sizeof(s_buf))
+    else if(pkg.ack_status == MSG_ACK_WAITING)
     {
-        printf("queue pop buf len too long! [%d]/[%ld]\n", g_pkg_status_p->msgsend.len, sizeof(s_buf));
-        g_pkg_status_p->msgsend.len = sizeof(s_buf);
-    }
-    if(g_pkg_status_p->msgsend.need_ack)// deal ack
-    {
-        if(g_pkg_status_p->repeat_cnt < REPEAT_SEND_TIMES_MAX) 
+        if(pkg.send_repeat == 0)
         {
-            if(g_pkg_status_p->start_wait_ack == 0)
-            {
-                ret = unblock_write(sock, g_pkg_status_p->msgsend.buf,\
-                        g_pkg_status_p->msgsend.len);
-                g_pkg_status_p->repeat_cnt++;
-                gettimeofday(&g_pkg_status_p->msg_sendtime, NULL);
-                g_pkg_status_p->start_wait_ack = 1;
-            }
-            if(!is_timeout(&g_pkg_status_p->msg_sendtime, SEND_PKG_TIME_OUT_1S))//timeout
-            {
-                printf("timeout ,repeat send!\n");
-                g_pkg_status_p->repeat_cnt++;
-                ret = unblock_write(sock, g_pkg_status_p->msgsend.buf,\
-                        g_pkg_status_p->msgsend.len);
-                gettimeofday(&g_pkg_status_p->msg_sendtime, NULL);
-            }
-            else//poll ack
-            {
-                msgack.buf = NULL;
-                msgack.len = 0;
-                if(!ptr_queue_pop(g_ack_queue_p, &msgack, ack_queue_lock))
-                {
-                    //printf("get ack!!!");
-                    if(msgack.cmd == g_pkg_status_p->msgsend.cmd)//send cmd and recv cmd match
-                    {
-                        //printf("get ack ok!\n");
-                        g_pkg_status_p->repeat_cnt = 0;
-                        g_pkg_status_p->start_wait_ack = 0;//reset pop
-                        return 0;
-                    }
-                    else
-                    {
-                        printf("get ack cmd dismathch: ack cmd = 0x%x, send cmd = 0x%x\n", msgack.cmd, g_pkg_status_p->msgsend.cmd);
-                    }
-                }
-                else
-                {
-                    //usleep(10000);
-                    usleep(10);
-                }
-            }
+            if(get_node_buf(g_ptr_queue_p, buf, &len, &ptr_queue_lock))
+                return 1;
+
+            ret = unblock_write(sock, buf, len);
+            gettimeofday(&pkg.send_time, NULL);
+            pkg.send_repeat++;
+            write_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
         }
-        else//repeat 3 times over
+        else if(pkg.send_repeat > 0 && pkg.send_repeat < 3)
         {
-            if(g_pkg_status_p->msgsend.cmd == SAMPLE_CMD_UPLOAD_MM_DATA)//repeat over, trans over
+            if(timeout_trigger(&pkg.send_time, SEND_PKG_TIME_OUT_1S))
             {
-                g_pkg_status_p->mm_data_trans_waiting = 0;
+                if(get_node_buf(g_ptr_queue_p, buf, &len, &ptr_queue_lock))
+                    return 1;
+
+                ret = unblock_write(sock, buf, len);
+                gettimeofday(&pkg.send_time, NULL);
+                pkg.send_repeat++;
+                write_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
             }
-            g_pkg_status_p->repeat_cnt = 0;
-            g_pkg_status_p->start_wait_ack = 0;
-        }
-    }
-    else
-    {
-        ret = unblock_write(sock, g_pkg_status_p->msgsend.buf, g_pkg_status_p->msgsend.len);
-        if(ret >0)
-        {
-            //     printf("tcp write ret = %d, over\n", ret);
-            //     printbuf(g_pkg_status_p->msgsend.buf, ret);
+            else
+            {
+                usleep(20);
+            }
         }
         else
         {
-            printf("tcp write fail:");
+            //3次都已经重发，释放头节点
+            free_header_node(g_ptr_queue_p, &ptr_queue_lock);
         }
     }
+
     return 0;
 }
-#if 0
-static int tcpsend_pkg_to_host(int sock)
-{
-    static uint8_t s_buf[PTR_QUEUE_BUF_SIZE];
-    ptr_queue_node msgack;
-
-    g_pkg_status_p->msgsend.buf = s_buf;
-    g_pkg_status_p->msgsend.len = sizeof(s_buf);
-
-    if(ptr_queue_pop(g_ptr_queue_p, &g_pkg_status_p->msgsend, ptr_queue_lock))
-        return -1;
-
-    //send one pkg first
-    unblock_write(sock, g_pkg_status_p->msgsend.buf,\
-            g_pkg_status_p->msgsend.len);
-    g_pkg_status_p->repeat_cnt = 1;
-    gettimeofday(&g_pkg_status_p->msg_sendtime, NULL);
-
-    if(g_pkg_status_p->msgsend.need_ack)// deal ack
-    {
-        do{
-            //poll ack
-            do{
-                msgack.buf = NULL;
-                msgack.len = 0;
-                if(!ptr_queue_pop(g_ack_queue_p, &msgack, ack_queue_lock))
-                {
-                    //printf("get ack!!!");
-                    if(msgack.cmd == g_pkg_status_p->msgsend.cmd)//send cmd and recv cmd match
-                    {
-                        //printf("get ack ok!\n");
-                        return 0;
-                    }
-                    else
-                    {
-                        printf("get ack cmd dismathch: ack cmd = 0x%x, send cmd = 0x%x\n", msgack.cmd, g_pkg_status_p->msgsend.cmd);
-                    }
-                }
-                else
-                {
-                    usleep(10);
-                }
-            }while(is_timeout(&g_pkg_status_p->msg_sendtime, SEND_PKG_TIME_OUT_1S));
-
-            printf("timeout ,repeat send!\n");
-            g_pkg_status_p->repeat_cnt++;
-            unblock_write(sock, g_pkg_status_p->msgsend.buf,\
-                    g_pkg_status_p->msgsend.len);
-            gettimeofday(&g_pkg_status_p->msg_sendtime, NULL);
-
-        }while(g_pkg_status_p->repeat_cnt <= REPEAT_SEND_TIMES_MAX);
-
-    }
-    return 0;
-}
-#endif
 
 static int uchar_queue_push(uint8_t *ch)
 {
@@ -749,11 +759,12 @@ static int32_t sample_escaple_msg(sample_prot_header *pHeader, int32_t msg_len)
     return escaped_len;
 }
 
+//push到发送队列
 static int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t cmd,
         uint8_t *payload, int32_t payload_len)
 {
     uint16_t serial_num = 0;
-    char master_is_me = 0;
+    char MasterIsMe = 0;
     ptr_queue_node msg;
     int32_t msg_len = sizeof(*pHeader) + 1 + payload_len;
     uint8_t *data = ((uint8_t*) pHeader + sizeof(*pHeader));
@@ -770,35 +781,31 @@ static int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t 
         case SAMPLE_CMD_SET_PARAM:
         case SAMPLE_CMD_REQ_STATUS:
         case SAMPLE_CMD_REQ_MM_DATA:
-            msg.need_ack = 0;
-            master_is_me = 0;
+            msg.pkg.ack_status = MSG_ACK_READY;
+            MasterIsMe = 0;
             break;
 
             //send as master
         case SAMPLE_CMD_WARNING_REPORT:
         case SAMPLE_CMD_UPLOAD_MM_DATA:
         case SAMPLE_CMD_UPLOAD_STATUS:
-            master_is_me = 1;
-            msg.need_ack = 1;
-
+            MasterIsMe = 1;
+            msg.pkg.ack_status = MSG_ACK_WAITING;
             break;
 
         default:
-            msg.need_ack = 0;
+            msg.pkg.ack_status = MSG_ACK_READY;
             break;
-
     }
 
     memset(pHeader, 0, sizeof(*pHeader));
     pHeader->magic = SAMPLE_PROT_MAGIC;
-    if(master_is_me)
-    {
+
+    //如果当前发送的数据是主动发送，即需要ACK的，序列号就直接累加
+    if(MasterIsMe)
         do_serial_num(&serial_num, GET_NEXT_SEND_NUM);
-    }
     else
-    {
         do_serial_num(&serial_num, GET_RECV_NUM);
-    }
 
     pHeader->serial_num= MY_HTONS(serial_num); //used as message cnt
     pHeader->vendor_id= MY_HTONS(VENDOR_ID);
@@ -812,14 +819,13 @@ static int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t 
     tail[0] = SAMPLE_PROT_MAGIC;
 
     pHeader->checksum = sample_calc_sum(pHeader, msg_len);
-
     msg_len = sample_escaple_msg(pHeader, msg_len);
 
-    msg.cmd = cmd;
+    msg.pkg.send_repeat = 0;
     msg.len = msg_len;
     msg.buf = (uint8_t *)pHeader;
     //    printf("sendpackage cmd = 0x%x,msg.need_ack = %d, len=%d, push!\n",msg.cmd, msg.need_ack, msg.len);
-    ptr_queue_push(g_ptr_queue_p, &msg, ptr_queue_lock);
+    ptr_queue_push(g_ptr_queue_p, &msg, &ptr_queue_lock);
 
     return msg_len;
 }
@@ -1004,28 +1010,76 @@ int can_message_send(can_data_type *sourcecan)
     return 0;
 }
 
+int find_local_image_name(uint8_t type, uint32_t id, char *filepath)
+{
+    mm_node node;
+
+    //查找本地多媒体文件
+    if(find_mm_resource(id, &node))
+    {
+        printf("find id[0x%x] fail!\n", id);
+        return -1;
+    }
+
+    if(type == MM_PHOTO)
+        sprintf(filepath,"%s%s-%08d.jpg", SNAP_SHOT_JPEG_PATH, warning_type_to_str(node.warn_type), id);
+    else if(type == MM_AUDIO)
+        sprintf(filepath,"%s%s-%08d.wav", SNAP_SHOT_JPEG_PATH, warning_type_to_str(node.warn_type), id);
+    else if(type == MM_VIDEO)
+        sprintf(filepath,"%s%s-%08d.avi", SNAP_SHOT_JPEG_PATH, warning_type_to_str(node.warn_type), id);
+    else
+    {
+        printf("mm type not valid, val=%d\n", type);
+        return -1;
+    }
+
+    return 0;
+}
+
+int GetFileSize(char *filename)
+{
+    int filesize = 0;
+    FILE *fp = NULL;
+
+    printf("try open image filename: %s\n", filename);
+    fp = fopen(filename, "rb");
+    if(fp == NULL)
+    {
+        printf("open %s fail\n", filename);
+        return -1;
+    }
+    else
+    {
+        printf("open %s ok\n", filename);
+    }
+
+    fseek(fp, 0, SEEK_SET);
+    fseek(fp, 0, SEEK_END);
+    filesize = ftell(fp);
+    fclose(fp);
+
+    return filesize;
+}
+
+//发送多媒体请求应答
 static int32_t send_mm_req_ack(sample_prot_header *pHeader, int len)
 {
-
-    mm_node node;
     uint32_t mm_id = 0;
     uint8_t warn_type = 0;
     size_t filesize = 0;
-    FILE *fp = NULL;
     sample_mm_info *mm_ptr = NULL;
 
     if(pHeader->cmd == SAMPLE_CMD_REQ_MM_DATA && !g_pkg_status_p->mm_data_trans_waiting) //recv req
     {
         printf("------------req mm-------------\n");
         printbuf((uint8_t *)pHeader, len);
+
+        //检查接收幀的完整性
         if(len == sizeof(sample_mm_info) + sizeof(sample_prot_header) + 1)
         {
             mm_ptr = (sample_mm_info *)(pHeader + 1);
             printf("req mm_type = 0x%x\n", mm_ptr->type);
             printf("req mm_id = 0x%08x\n", MY_HTONL(mm_ptr->id));
-
-            g_pkg_status_p->mm.type = mm_ptr->type;
-            g_pkg_status_p->mm.id = mm_ptr->id;
         }
         else
         {
@@ -1035,61 +1089,22 @@ static int32_t send_mm_req_ack(sample_prot_header *pHeader, int len)
             return -1;
         }
 
-        //find file
         mm_id = MY_HTONL(mm_ptr->id);
-        if(find_mm_resource(mm_id, &node))
-        {
-            printf("find id[0x%x] fail!\n", mm_id);
+        if(find_local_image_name(mm_id, mm_ptr->type, g_pkg_status_p->filepath))
             return -1;
-        }
 
-        sprintf(g_pkg_status_p->filepath, SNAP_SHOT_JPEG_PATH);
-        if(mm_ptr->type == MM_PHOTO)
-        {
-            sprintf(&g_pkg_status_p->filepath[strlen(SNAP_SHOT_JPEG_PATH)],\
-                    "%s-%08d.jpg", warning_type_to_str(node.warn_type), mm_id);
-        }
-        else if(mm_ptr->type == MM_AUDIO)
-        {
-            sprintf(&g_pkg_status_p->filepath[strlen(SNAP_SHOT_JPEG_PATH)], \
-                    "%s-%08d.wav", warning_type_to_str(node.warn_type), mm_id);
-        }
-        else if(mm_ptr->type == MM_VIDEO)
-        {
-            sprintf(&g_pkg_status_p->filepath[strlen(SNAP_SHOT_JPEG_PATH)],\
-                    "%s-%08d.avi", warning_type_to_str(node.warn_type), mm_id);
-        }
-        else
-        {
-            printf("mm type not valid, val=%d\n", mm_ptr->type);
+        if((filesize = GetFileSize(g_pkg_status_p->filepath)) < 0)
             return -1;
-        }
-        printf("try open filename: %s\n", g_pkg_status_p->filepath);
-        fp = fopen(g_pkg_status_p->filepath, "rb");
-        if(fp == NULL)
-        {
-            printf("open %s fail\n", g_pkg_status_p->filepath);
-            return -1;
-        }
-        else
-        {
-            printf("open %s ok\n", g_pkg_status_p->filepath);
-        }
 
-        fseek(fp, 0, SEEK_SET);
-        fseek(fp, 0, SEEK_END);
-        filesize = ftell(fp);
-        fclose(fp);
-
+        //记录当前包的信息, 发送应答
+        g_pkg_status_p->mm.type = mm_ptr->type;
+        g_pkg_status_p->mm.id = mm_ptr->id;
         g_pkg_status_p->mm.packet_index = 0;
         g_pkg_status_p->mm.packet_total_num = MY_HTONS((filesize + IMAGE_SIZE_PER_PACKET - 1)/IMAGE_SIZE_PER_PACKET);
-
         g_pkg_status_p->mm_data_trans_waiting = 1;
         sample_assemble_msg_to_push(pHeader, SAMPLE_CMD_REQ_MM_DATA, NULL, 0);
 
-
         record_time(RECORD_START);
-        sample_send_image();
     }
     else
     {
@@ -1107,9 +1122,9 @@ static int recv_ack_and_send_image(sample_prot_header *pHeader, int32_t len)
             sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64)*2];
     size_t filesize = 0;
     FILE *fp = NULL;
+    SendStatus pkg;
 
     sample_mm_ack mmack;
-    ptr_queue_node msg;
 
     //printf("recv ack...........!\n");
     if(pHeader->cmd == SAMPLE_CMD_UPLOAD_MM_DATA)//recv ack
@@ -1122,17 +1137,17 @@ static int recv_ack_and_send_image(sample_prot_header *pHeader, int32_t len)
         }
         else
         {
-            msg.cmd = SAMPLE_CMD_UPLOAD_MM_DATA;
-            msg.len = 0;
-            msg.buf = NULL;
-
             //printf("index = 0x%08x, index2 = 0x%08x\n", g_pkg_status_p->mm.packet_index, mmack.packet_index);
 
             if(MY_HTONS(g_pkg_status_p->mm.packet_index) == \
                     (MY_HTONS(mmack.packet_index) + 1)) //recv ack index is correct
             {
-                ptr_queue_push(g_ack_queue_p, &msg, ack_queue_lock);//notice ack recv
+                //改变发送包，接收ACK状态为ready
+                read_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
+                pkg.ack_status = MSG_ACK_READY;
+                write_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
 
+                //最后一个ACK
                 if(MY_HTONS(g_pkg_status_p->mm.packet_total_num) == \
                         MY_HTONS(g_pkg_status_p->mm.packet_index)) //the last pkg ack
                 {
@@ -1142,12 +1157,11 @@ static int recv_ack_and_send_image(sample_prot_header *pHeader, int32_t len)
                     delete_mm_resource(MY_HTONL(g_pkg_status_p->mm.id));
                     //display_mm_resource();
                 }
-                else //send next
+                else
                 {
                     sample_send_image();
                 }
             }
-
         }
     }
     return 0;
@@ -1210,7 +1224,6 @@ void do_factory_reset()
     write_local_para_file(LOCAL_PRAR_FILE);
 }
 
-
 void recv_para_setting(sample_prot_header *pHeader, int32_t len)
 {
     para_setting recv_para;
@@ -1218,43 +1231,48 @@ void recv_para_setting(sample_prot_header *pHeader, int32_t len)
     char cmd[100];
     uint8_t txbuf[128] = {0};
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
+    int ret = 0;
 
     if(len == sizeof(sample_prot_header) + 1 + sizeof(recv_para))
     {
-
         memcpy(&recv_para, pHeader+1, sizeof(recv_para));
 
         //大端传输
-        recv_para.auto_photo_time_period = \
-                                           MY_HTONS(recv_para.auto_photo_time_period);
-        recv_para.auto_photo_distance_period = \
-                                               MY_HTONS(recv_para.auto_photo_distance_period);
+        recv_para.auto_photo_time_period = MY_HTONS(recv_para.auto_photo_time_period);
+        recv_para.auto_photo_distance_period = MY_HTONS(recv_para.auto_photo_distance_period);
 
         write_warn_para(&recv_para);
         write_local_para_file(LOCAL_PRAR_FILE);
-
-        ack = 0;
-        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_SET_PARAM, \
-                (uint8_t*)&ack, 1);
 
 #if 1
         printf("start to kill algo!\n");
         //set alog detect.flag
         system("busybox killall -9 split_detect"); //killall
-        sprintf(cmd, "busybox sed -i 's/^.*--output_lane_info_speed_thresh.*$/--output_lane_info_speed_thresh=%d/' /data/xiao/install/detect.flag",\
-                recv_para.warning_speed_val);
-        system(cmd);
+        sprintf(cmd, "busybox sed -i 's/^.*--output_lane_info_speed_thresh.*$/--output_lane_info_speed_thresh=%d/' \
+                /data/xiao/install/detect.flag",recv_para.warning_speed_val);
+        ret = system(cmd);
+        printf("setting para ret = %d\n", ret);
         usleep(100000);
         printf("restart algo!\n");
         system("/data/algo.sh & >/dev/null");//restart
 #endif
+        
+        //设置参数成功
+        if(!ret)
+        {
+            ack = 0;
+            sample_assemble_msg_to_push(pSend, SAMPLE_CMD_SET_PARAM, (uint8_t*)&ack, 1);
+        }
+        else
+        {
+            ack = 1;
+            sample_assemble_msg_to_push(pSend, SAMPLE_CMD_SET_PARAM, \
+                    (uint8_t*)&ack, 1);
+        }
     }
     else
     {
         printf("recv cmd:0x%x, data len maybe error!\n", pHeader->cmd);
-        ack = 1;
-        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_SET_PARAM, \
-                (uint8_t*)&ack, 1);
     }
 }
 
@@ -1266,12 +1284,9 @@ void send_para_setting(sample_prot_header *pHeader, int32_t len)
 
     if(len == sizeof(sample_prot_header) + 1)
     {
-
         read_warn_para(&send_para);
-        send_para.auto_photo_time_period = \
-                                           MY_HTONS(send_para.auto_photo_time_period);
-        send_para.auto_photo_distance_period = \
-                                               MY_HTONS(send_para.auto_photo_distance_period);
+        send_para.auto_photo_time_period = MY_HTONS(send_para.auto_photo_time_period);
+        send_para.auto_photo_distance_period = MY_HTONS(send_para.auto_photo_distance_period);
 
         sample_assemble_msg_to_push(pSend, SAMPLE_CMD_GET_PARAM, \
                 (uint8_t*)&send_para, sizeof(send_para));
@@ -1284,14 +1299,13 @@ void send_para_setting(sample_prot_header *pHeader, int32_t len)
 
 void recv_warning_ack(sample_prot_header *pHeader, int32_t len)
 {
-    ptr_queue_node msg;
+    SendStatus pkg;
 
     if(len == sizeof(sample_prot_header) + 1)
     {
-        msg.cmd = SAMPLE_CMD_WARNING_REPORT;
-        msg.buf = NULL;
-        msg.len = 0;
-        ptr_queue_push(g_ack_queue_p, &msg, ack_queue_lock);//send
+        read_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
+        pkg.ack_status = MSG_ACK_READY;
+        write_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
     }
     else
     {
@@ -1333,14 +1347,13 @@ void send_work_status()
 
 void recv_upload_status_cmd_ack(sample_prot_header *pHeader, int32_t len)
 {
-    ptr_queue_node msg;
+    SendStatus pkg;
 
     if(len == sizeof(sample_prot_header) + 1)
     {
-        msg.cmd = SAMPLE_CMD_UPLOAD_STATUS;
-        msg.buf = NULL;
-        msg.len = 0;
-        ptr_queue_push(g_ack_queue_p, &msg, ack_queue_lock);//send
+        read_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
+        pkg.ack_status = MSG_ACK_READY;
+        write_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
     }
     else
     {
@@ -1548,7 +1561,9 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
             break;
 
         case SAMPLE_CMD_REQ_MM_DATA:
-            send_mm_req_ack(pHeader,len);
+            //发送多媒体请求应答 和 多媒体包
+            if(!send_mm_req_ack(pHeader,len))
+                sample_send_image();
             break;
 
         case SAMPLE_CMD_UPLOAD_MM_DATA:
@@ -1841,7 +1856,7 @@ void *pthread_snap_shot(void *p)
             }
             if(start == 1)
             {
-                if(!is_timeout(&record_time, tmp.auto_photo_time_period*1000))//timeout
+                if(timeout_trigger(&record_time, tmp.auto_photo_time_period*1000))//timeout
                 {
                     start = 0;
                     do_snap_shot();

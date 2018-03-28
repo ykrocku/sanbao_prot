@@ -813,7 +813,7 @@ void store_warn_jpeg(CRingBuf* pRB, mm_header_info *mm)
     gettimeofday(&record_time, NULL);
     while(jpeg_index < mm->photo_num)
     {
-        if(!is_timeout(&record_time, force_exit_time))//timeout
+        if(timeout_trigger(&record_time, force_exit_time))//timeout
         {
             printf("store jpeg force exit!\n");
             break;
@@ -883,7 +883,7 @@ void store_one_avi(CRingBuf* pRB, mm_header_info *mm, int jpeg_flag)
     gettimeofday(&record_time, NULL);
     while(1)
     {
-        if(!is_timeout(&record_time, force_exit_time))
+        if(timeout_trigger(&record_time, force_exit_time))
         {
             printf("avi timeout break\n");
             break;
@@ -1125,7 +1125,7 @@ void *pthread_sav_warning_jpg(void *p)
     sleep(3);
     while(1)
     {
-#if 0        
+#if 1        
         if(pull_mm_queue(&mm))
         {
             usleep(10000);
@@ -1197,7 +1197,7 @@ void *pthread_sav_warning_jpg(void *p)
             }
             else
             {
-                if(!is_timeout(&time_begin[i], mm.video_time*1000)) //we can record again
+                if(timeout_trigger(&time_begin[i], mm.video_time*1000)) //we can record again
                 {
                     gettimeofday(&time_begin[i], NULL);
                 }

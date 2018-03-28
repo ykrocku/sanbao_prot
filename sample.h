@@ -474,10 +474,25 @@ uint32_t video_id[2];
 #define UCHAR_QUEUE_SIZE    (2048)
 
 
+
+#define MSG_ACK_READY           0
+#define MSG_ACK_WAITING         1
+
+#define NO_MESSAGE_TO_SEND      1
+#define NO_MESSAGE_TO_SEND      1
+
+typedef struct queue_node_status{
+    uint8_t ack_status;
+    uint8_t send_repeat;
+    struct timeval send_time;
+    sample_mm mm;
+    bool mm_data_trans_waiting;
+}SendStatus;
+
 typedef struct _ptr_queue_node{
     uint8_t cmd;
-    uint8_t need_ack;
-
+    
+    SendStatus pkg;
     mm_header_info mm;
 
     uint32_t len;
@@ -525,7 +540,7 @@ void display_mm_resource();
 int32_t find_mm_resource(uint32_t id, mm_node *m);
 int32_t delete_mm_resource(uint32_t id);
 char *warning_type_to_str(uint8_t type);
-int is_timeout(struct timeval *tv, int ms);
+int timeout_trigger(struct timeval *tv, int ms);
 void repeat_send_pkg_status_init();
 void printbuf(uint8_t *buf, int len);
 void *communicate_with_host(void *para);
