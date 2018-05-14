@@ -238,6 +238,7 @@ int read_local_para_file(const char* filename) {
             para.warning_speed_val);
 #endif
 
+#if 0
     //set alog detect.flag
     sprintf(cmd, "busybox sed -i 's/^.*--output_lane_info_speed_thresh.*$/--output_lane_info_speed_thresh=%d/' /data/xiao/install/detect.flag",\
             para.warning_speed_val);
@@ -245,19 +246,21 @@ int read_local_para_file(const char* filename) {
 
     system(cmd);
 
+#endif
     print_para(&para);
 
     fclose(fp);
     return 0;
 }
 int write_local_para_file(const char* filename) {
+    int ret = 0;
     para_setting para;
 
     read_warn_para(&para);
     print_para(&para);
-    write_file(filename, &para, sizeof(para));
+    ret = write_file(filename, &para, sizeof(para));
 
-    return 0;
+    return ret;
 }
 
 std::vector<uint8_t> jpeg_encode(uint8_t* data,\
@@ -1081,8 +1084,11 @@ int read_local_file_to_list()
 
 void global_var_init()
 {
+    char cmd[100];
     read_local_para_file(LOCAL_PRAR_FILE);
 
+    sprintf(cmd, "busybox mkdir -p %s", SNAP_SHOT_JPEG_PATH);
+    system(cmd);
 
     //    system(DO_DELETE_SNAP_SHOT_FILES);
     //    printf("do %s\n", DO_DELETE_SNAP_SHOT_FILES);

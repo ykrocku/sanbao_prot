@@ -18,8 +18,8 @@
 #define MM_VIDEO 2
 
 #define DO_DELETE_SNAP_SHOT_FILES "rm -r /data/snap/*"
-#define SNAP_SHOT_JPEG_PATH "/data/snap/"
-//#define SNAP_SHOT_JPEG_PATH "/mnt/obb/"
+//#define SNAP_SHOT_JPEG_PATH "/data/snap/"
+#define SNAP_SHOT_JPEG_PATH "/mnt/obb/"
 #define LOCAL_PRAR_FILE     "/data/para"
 #define UPGRADE_FILE_PATH     "/data/upgrade.mpk"
 #define UPGRADE_FILE_CMD     "/data/upgrade.sh /data/upgrade.mpk"

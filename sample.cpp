@@ -1090,7 +1090,7 @@ static int32_t send_mm_req_ack(sample_prot_header *pHeader, int len)
         }
 
         mm_id = MY_HTONL(mm_ptr->id);
-        if(find_local_image_name(mm_id, mm_ptr->type, g_pkg_status_p->filepath))
+        if(find_local_image_name(mm_ptr->type, mm_id,  g_pkg_status_p->filepath))
             return -1;
 
         if((filesize = GetFileSize(g_pkg_status_p->filepath)) < 0)
@@ -1242,9 +1242,9 @@ void recv_para_setting(sample_prot_header *pHeader, int32_t len)
         recv_para.auto_photo_distance_period = MY_HTONS(recv_para.auto_photo_distance_period);
 
         write_warn_para(&recv_para);
-        write_local_para_file(LOCAL_PRAR_FILE);
+        ret = write_local_para_file(LOCAL_PRAR_FILE);
 
-#if 1
+#if 0
         printf("start to kill algo!\n");
         //set alog detect.flag
         system("busybox killall -9 split_detect"); //killall
