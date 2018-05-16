@@ -325,7 +325,6 @@ out:
 static int get_node_buf(queue<ptr_queue_node*> *p, uint8_t *out, int *len, pthread_mutex_t *lock)
 {
     ptr_queue_node *header = NULL;
-    uint8_t buf[PTR_QUEUE_BUF_SIZE];
     int ret = 0;
 
     if(!p)
@@ -603,14 +602,27 @@ int do_record_warning_info(int type, warningtext *uploadmsg)
 #define SEND_PKG_TIME_OUT_1S    1000
 static int send_pkg_to_host(int sock)
 {
-    uint8_t buf[PTR_QUEUE_BUF_SIZE];
+    //uint8_t buf[PTR_QUEUE_BUF_SIZE];
+    uint8_t *buf = NULL;
     int ret = 0;
+    int retval = 0;
     int len = 0;
     SendStatus pkg;
 
+    buf = (uint8_t *)malloc(PTR_QUEUE_BUF_SIZE);
+    if(!buf)
+    {
+        perror("send pkg malloc");
+        retval = 1;
+        goto out;
+    }
+
     //no message
     if(read_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock))
-        return 1;
+    {
+        retval = 1;
+        goto out;
+    }
 
     if(pkg.ack_status == MSG_ACK_READY)
     {
@@ -622,14 +634,18 @@ static int send_pkg_to_host(int sock)
         }
         //发送成功，释放头节点
         free_header_node(g_ptr_queue_p, &ptr_queue_lock);
-        return 0;
+        retval = 0;
+        goto out;
     }
     else if(pkg.ack_status == MSG_ACK_WAITING)
     {
         if(pkg.send_repeat == 0)
         {
             if(get_node_buf(g_ptr_queue_p, buf, &len, &ptr_queue_lock))
-                return 1;
+            {
+                retval = 0;
+                goto out;
+            }
 
             ret = unblock_write(sock, buf, len);
             gettimeofday(&pkg.send_time, NULL);
@@ -641,7 +657,10 @@ static int send_pkg_to_host(int sock)
             if(timeout_trigger(&pkg.send_time, SEND_PKG_TIME_OUT_1S))
             {
                 if(get_node_buf(g_ptr_queue_p, buf, &len, &ptr_queue_lock))
-                    return 1;
+                {
+                    retval = 1;
+                    goto out;
+                }
 
                 ret = unblock_write(sock, buf, len);
                 gettimeofday(&pkg.send_time, NULL);
@@ -660,7 +679,10 @@ static int send_pkg_to_host(int sock)
         }
     }
 
-    return 0;
+out:
+    if(buf)
+        free(buf);
+    return retval;
 }
 
 static int uchar_queue_push(uint8_t *ch)
@@ -1116,14 +1138,7 @@ static int32_t send_mm_req_ack(sample_prot_header *pHeader, int len)
 
 static int recv_ack_and_send_image(sample_prot_header *pHeader, int32_t len)
 {
-    uint8_t data[IMAGE_SIZE_PER_PACKET + \
-        sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64];
-    uint8_t txbuf[(IMAGE_SIZE_PER_PACKET + \
-            sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64)*2];
-    size_t filesize = 0;
-    FILE *fp = NULL;
     SendStatus pkg;
-
     sample_mm_ack mmack;
 
     //printf("recv ack...........!\n");
@@ -1171,19 +1186,52 @@ static int32_t sample_send_image()
 {
     int ret=0;
     int offset=0;
+    uint32_t retval = 0;
+    uint8_t *data=NULL;
+    uint8_t *txbuf=NULL;
+    uint32_t datalen=0;
+    uint32_t txbuflen=0;
+
+    size_t filesize = 0;
+    FILE *fp = NULL;
+    sample_prot_header *pSend = NULL;
+
+
+#if 0
     uint8_t data[IMAGE_SIZE_PER_PACKET + \
         sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64];
     uint8_t txbuf[(IMAGE_SIZE_PER_PACKET + \
             sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64)*2];
-    size_t filesize = 0;
-    FILE *fp = NULL;
-    sample_prot_header *pSend = (sample_prot_header *) txbuf;
+#endif
+
+    datalen = IMAGE_SIZE_PER_PACKET + \
+        sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64;
+    txbuflen = (IMAGE_SIZE_PER_PACKET + \
+            sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64)*2;
+
+    data = (uint8_t *)malloc(datalen);
+    if(!data)
+    {
+        perror("send image malloc");
+        retval = 1;
+        goto out;
+    }
+    txbuf = (uint8_t *)malloc(txbuflen);
+    if(!txbuf)
+    {
+        perror("send image malloc");
+        retval = 1;
+        goto out;
+    }
+
+    pSend = (sample_prot_header *) txbuf;
 
     fp = fopen(g_pkg_status_p->filepath, "rb");
     if(fp ==NULL)
     {
         printf("open %s fail\n", g_pkg_status_p->filepath);
-        return -1;
+        retval = -1;
+        goto out;
     }
     memcpy(data, &g_pkg_status_p->mm, sizeof(g_pkg_status_p->mm));
     offset = MY_HTONS(g_pkg_status_p->mm.packet_index) * IMAGE_SIZE_PER_PACKET;
@@ -1202,7 +1250,14 @@ static int32_t sample_send_image()
     {
         printf("read file ret <=0\n");
     }
-    return 0;
+
+out:
+    if(data)
+        free(data);
+    if(txbuf)
+        free(txbuf);
+
+    return retval;
 }
 
 void write_real_time_data(sample_prot_header *pHeader, int32_t len)
@@ -1493,14 +1548,13 @@ int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
 static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
 {
     ptr_queue_node msgack;
-    uint8_t buf[PTR_QUEUE_BUF_SIZE];
     uint16_t serial_num = 0;
 
     sample_dev_info dev_info = {
         15, "MINIEYE",
         15, "M3",
         15, "1.0.0.1",
-        15, "1.0.1.2",
+        15, "1.0.1.2", //soft version
         15, "0xF0321564",
         15, "SAMPLE",
     };
@@ -1630,7 +1684,6 @@ static int try_connect()
 void *communicate_with_host(void *para)
 {
     uint8_t readbuf[1024];
-    uint8_t sendbuf[PTR_QUEUE_BUF_SIZE];
     int32_t ret = 0;
     int retval = 0;;
     int hostsock = -1;
