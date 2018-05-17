@@ -472,7 +472,7 @@ uint32_t video_id[2];
 
 #define PTR_QUEUE_BUF_SIZE   (2*(IMAGE_SIZE_PER_PACKET + 64)) //加64, 大于 header + tail, 
 #define PTR_QUEUE_BUF_CNT    (16)
-#define UCHAR_QUEUE_SIZE    (2048)
+#define UCHAR_QUEUE_SIZE    (128*1024)
 
 
 

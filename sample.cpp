@@ -1110,6 +1110,8 @@ static int32_t send_mm_req_ack(sample_prot_header *pHeader, int len)
                     sizeof(sample_mm_info) + sizeof(sample_prot_header) + 1);
             return -1;
         }
+        //先应答请求，视频录制完成后在主动发送
+        sample_assemble_msg_to_push(pHeader, SAMPLE_CMD_REQ_MM_DATA, NULL, 0);
 
         mm_id = MY_HTONL(mm_ptr->id);
         if(find_local_image_name(mm_ptr->type, mm_id,  g_pkg_status_p->filepath))
@@ -1124,7 +1126,6 @@ static int32_t send_mm_req_ack(sample_prot_header *pHeader, int len)
         g_pkg_status_p->mm.packet_index = 0;
         g_pkg_status_p->mm.packet_total_num = MY_HTONS((filesize + IMAGE_SIZE_PER_PACKET - 1)/IMAGE_SIZE_PER_PACKET);
         g_pkg_status_p->mm_data_trans_waiting = 1;
-        sample_assemble_msg_to_push(pHeader, SAMPLE_CMD_REQ_MM_DATA, NULL, 0);
 
         record_time(RECORD_START);
     }
@@ -1647,6 +1648,8 @@ static int try_connect()
     int enable = 1;
     const char *server_ip = "192.168.100.100";
     struct sockaddr_in host_serv_addr;
+    socklen_t optlen;
+    int bufsize = 0;
 
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
@@ -1654,6 +1657,41 @@ static int try_connect()
         return -2;
     }
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable));
+
+    bufsize = 0;
+    optlen = sizeof(bufsize);
+    getsockopt(sock, SOL_SOCKET, SO_RCVBUF, &bufsize, &optlen);
+    printf("get recv buf size = %d\n", bufsize);
+    getsockopt(sock, SOL_SOCKET, SO_SNDBUF, &bufsize, &optlen);
+    printf("get send buf size = %d\n", bufsize);
+    //int setsockopt(int sockfd, int level, int optname,const void *optval, socklen_t optlen);
+
+    printf("set buf size = %d\n", bufsize);
+    bufsize = 64*1024;
+    optlen = sizeof(bufsize);
+    ret = setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &bufsize, optlen);
+    if(ret == -1)
+    {
+        printf("%s:%d error\n", __FILE__, __LINE__);
+        return -1;
+    }
+    bufsize = 64*1024;
+    optlen = sizeof(bufsize);
+    ret = setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &bufsize, optlen);
+    if(ret == -1)
+    {
+        printf("%s:%d error\n", __FILE__, __LINE__);
+        return -1;
+    }
+
+    bufsize = 0;
+    optlen = sizeof(bufsize);
+    getsockopt(sock, SOL_SOCKET, SO_RCVBUF, &bufsize, &optlen);
+    printf("get recv buf size = %d\n", bufsize);
+    getsockopt(sock, SOL_SOCKET, SO_SNDBUF, &bufsize, &optlen);
+    printf("get send buf size = %d\n", bufsize);
+
+
 
     memset(&host_serv_addr, 0, sizeof(host_serv_addr));
     host_serv_addr.sin_family = AF_INET;
@@ -1683,7 +1721,8 @@ static int try_connect()
 
 void *communicate_with_host(void *para)
 {
-    uint8_t readbuf[1024];
+#define TCP_READ_BUF_SIZE (64*1024)
+
     int32_t ret = 0;
     int retval = 0;;
     int hostsock = -1;
@@ -1691,8 +1730,16 @@ void *communicate_with_host(void *para)
     struct timeval tv;
     int i=0;
     static int tcprecvcnt = 0;
+    uint8_t *readbuf = NULL;
 
     repeat_send_pkg_status_init();
+
+    readbuf = (uint8_t *)malloc(TCP_READ_BUF_SIZE);
+    if(!readbuf)
+    {
+        perror("tcp readbuf malloc");
+        return NULL;
+    }
 
 connect_again:
     hostsock = try_connect();
@@ -1718,8 +1765,8 @@ connect_again:
         {
             if(FD_ISSET(hostsock, &rfds))
             {
-                memset(readbuf, 0, sizeof(readbuf));
-                ret = read(hostsock, readbuf, sizeof(readbuf));
+                memset(readbuf, 0, TCP_READ_BUF_SIZE);
+                ret = read(hostsock, readbuf, TCP_READ_BUF_SIZE);
                 if (ret <= 0) {
                     printf("read failed %d %s\n", ret, strerror(errno));
                     close(hostsock);
@@ -1757,6 +1804,10 @@ connect_again:
             printf("No data within 2 seconds.\n");
         }
     }
+
+    if(readbuf)
+        free(readbuf);
+
     return NULL;
 }
 
@@ -1855,12 +1906,21 @@ void *parse_host_cmd(void *para)
     int32_t ret = 0;
     uint8_t sum = 0;
     uint32_t framelen = 0;
-    unsigned char msgbuf[2048];
-    sample_prot_header *pHeader = (sample_prot_header *) msgbuf;
+    uint8_t *msgbuf = NULL;
+#define RECV_HOST_DATA_BUF_SIZE (128*1024)
+    sample_prot_header *pHeader = NULL;
 
+    msgbuf = (uint8_t *)malloc(RECV_HOST_DATA_BUF_SIZE);
+    if(!msgbuf)
+    {
+        perror("parse_host_cmd malloc");
+        return NULL;
+    }
+
+    pHeader = (sample_prot_header *) msgbuf;
     while(1)
     {
-        ret = unescaple_msg(msgbuf, sizeof(msgbuf));
+        ret = unescaple_msg(msgbuf, RECV_HOST_DATA_BUF_SIZE);
         if(ret>0)
         {
             framelen = ret;
@@ -1878,6 +1938,9 @@ void *parse_host_cmd(void *para)
         else
             ;
     }
+
+    if(msgbuf)
+        free(msgbuf);
 }
 
 #define SNAP_SHOT_CLOSE            0
