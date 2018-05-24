@@ -32,6 +32,10 @@ static int32_t sample_send_image();
 #define WRITE_REAL_TIME_MSG 0
 #define READ_REAL_TIME_MSG  1
 
+
+int GetFileSize(char *filename);
+
+
 //实时数据处理
 void RealTimeDdata_process(real_time_data *data, int mode)
 {
@@ -124,6 +128,12 @@ void do_serial_num(uint16_t *num, int mode)
 pthread_mutex_t photo_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 queue<ptr_queue_node *> g_image_queue;
 queue<ptr_queue_node *> *g_image_queue_p = &g_image_queue;
+
+
+
+pthread_mutex_t req_cmd_queue_lock = PTHREAD_MUTEX_INITIALIZER;
+queue<ptr_queue_node *> g_req_cmd_queue;
+queue<ptr_queue_node *> *g_req_cmd_queue_p = &g_req_cmd_queue;
 
 pthread_mutex_t ptr_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 queue<ptr_queue_node *> g_ptr_queue;
@@ -462,6 +472,34 @@ int pull_mm_queue(mm_header_info *mm)
     return -1;
 }
 
+//store req mm cmd
+void push_mm_req_cmd_queue(sample_mm_info *mm_info)
+{
+    ptr_queue_node header;
+    header.buf = NULL;
+    header.len = 0;
+
+    memcpy(&header.mm_info, mm_info, sizeof(*mm_info));
+
+    printf("push id = 0x%08x, type=%x\n", mm_info->id, mm_info->type);
+    ptr_queue_push(g_req_cmd_queue_p, &header, &req_cmd_queue_lock);
+}
+//pull req cmd
+int pull_mm_req_cmd_queue(sample_mm_info *mm_info)
+{
+    ptr_queue_node header;
+    header.buf = NULL;
+    header.len = 0;
+    if(!ptr_queue_pop(g_req_cmd_queue_p, &header, &req_cmd_queue_lock))
+    {
+        memcpy(mm_info, &header.mm_info, sizeof(*mm_info));
+        printf("id = 0x%08x, type=%x\n", header.mm_info.id, header.mm_info.type);
+        return 0;
+    }
+
+    return -1;
+}
+
 //填写报警信息的一些实时数据
 void get_real_time_msg(warningtext *uploadmsg)
 {
@@ -476,6 +514,35 @@ void get_real_time_msg(warningtext *uploadmsg)
     memcpy(uploadmsg->time, tmp.time, sizeof(uploadmsg->time));
     memcpy(&uploadmsg->car_status, &tmp.car_status, sizeof(uploadmsg->car_status));
 }
+
+#if 0
+void filter_warning_10s()
+{
+
+        //上一个报警视频没有获取完成，当有新的同类型报警,视频不再获取。
+        if(mm.video_enable)
+        {
+            if(first_record_time[i])
+            {
+                first_record_time[i] = 0;
+                gettimeofday(&time_begin[i], NULL);
+            }
+            else
+            {
+                if(timeout_trigger(&time_begin[i], mm.video_time*1000)) //we can record again
+                {
+                    gettimeofday(&time_begin[i], NULL);
+                }
+                else
+                {
+                    printf("new warning video ignore!\n");
+                    continue;
+                }
+            }
+        }
+}
+#endif
+
 
 //填写和can数据不相关的字段
 int do_record_warning_info(int type, warningtext *uploadmsg)
@@ -527,7 +594,13 @@ int do_record_warning_info(int type, warningtext *uploadmsg)
             uploadmsg->sound_type = type;
             uploadmsg->car_speed = 0;
             uploadmsg->mm_num = 0;
-
+#if 0
+            if(pthread_is_not_idle)
+            {
+                printf("pthread busying, ignore record avi!");
+                break;         
+            }
+#endif
             mm.warn_type = type;
             mm.video_time = video_time;
             mm.photo_time_period = photo_time_period;
@@ -986,7 +1059,8 @@ int can_message_send(can_data_type *sourcecan)
 
             if (HW_LEVEL_RED_CAR == can.headway_warning_level) {
                 mm_num = do_record_warning_info(SW_TYPE_HW, uploadmsg);
-                uploadmsg->start_flag = SW_STATUS_BEGIN;
+                //uploadmsg->start_flag = SW_STATUS_BEGIN;
+                uploadmsg->start_flag = SW_STATUS_EVENT;
                 uploadmsg->sound_type = SW_TYPE_HW;
 
                 sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT,\
@@ -996,7 +1070,8 @@ int can_message_send(can_data_type *sourcecan)
             } else if (HW_LEVEL_RED_CAR == \
                     g_last_warning_data.headway_warning_level) {
                 mm_num = do_record_warning_info(SW_TYPE_HW, uploadmsg);
-                uploadmsg->start_flag = SW_STATUS_END;
+                //uploadmsg->start_flag = SW_STATUS_END;
+                uploadmsg->start_flag = SW_STATUS_EVENT;
                 uploadmsg->sound_type = SW_TYPE_HW;
 
                 sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT,\
@@ -1032,7 +1107,19 @@ int can_message_send(can_data_type *sourcecan)
     return 0;
 }
 
-int find_local_image_name(uint8_t type, uint32_t id, char *filepath)
+void mmid_to_filename(uint32_t id, uint8_t type, char *filepath)
+{
+    if(type == MM_PHOTO)
+        sprintf(filepath,"%s%08d.jpg", SNAP_SHOT_JPEG_PATH, id);
+    else if(type == MM_AUDIO)
+        sprintf(filepath,"%s%08d.wav", SNAP_SHOT_JPEG_PATH, id);
+    else if(type == MM_VIDEO)
+        sprintf(filepath,"%s%08d.avi", SNAP_SHOT_JPEG_PATH, id);
+    else
+        ;
+}
+
+int find_local_image_name(uint8_t type, uint32_t id, char *filepath, uint32_t *filesize)
 {
     mm_node node;
 
@@ -1042,7 +1129,14 @@ int find_local_image_name(uint8_t type, uint32_t id, char *filepath)
         printf("find id[0x%x] fail!\n", id);
         return -1;
     }
+    if(node.mm_type != type)
+    {
+        printf("find id[0x%x] fail, type error!\n", id);
+        return -1;
+    }
 
+
+#if 0
     if(type == MM_PHOTO)
         sprintf(filepath,"%s%s-%08d.jpg", SNAP_SHOT_JPEG_PATH, warning_type_to_str(node.warn_type), id);
     else if(type == MM_AUDIO)
@@ -1054,6 +1148,12 @@ int find_local_image_name(uint8_t type, uint32_t id, char *filepath)
         printf("mm type not valid, val=%d\n", type);
         return -1;
     }
+#endif
+
+    mmid_to_filename(id, type, filepath);
+
+    if((*filesize = GetFileSize(filepath)) < 0)
+        return -1;
 
     return 0;
 }
@@ -1111,23 +1211,10 @@ static int32_t send_mm_req_ack(sample_prot_header *pHeader, int len)
             return -1;
         }
         //先应答请求，视频录制完成后在主动发送
+        printf("send mm req ack!\n");
+        push_mm_req_cmd_queue(mm_ptr);
+
         sample_assemble_msg_to_push(pHeader, SAMPLE_CMD_REQ_MM_DATA, NULL, 0);
-
-        mm_id = MY_HTONL(mm_ptr->id);
-        if(find_local_image_name(mm_ptr->type, mm_id,  g_pkg_status_p->filepath))
-            return -1;
-
-        if((filesize = GetFileSize(g_pkg_status_p->filepath)) < 0)
-            return -1;
-
-        //记录当前包的信息, 发送应答
-        g_pkg_status_p->mm.type = mm_ptr->type;
-        g_pkg_status_p->mm.id = mm_ptr->id;
-        g_pkg_status_p->mm.packet_index = 0;
-        g_pkg_status_p->mm.packet_total_num = MY_HTONS((filesize + IMAGE_SIZE_PER_PACKET - 1)/IMAGE_SIZE_PER_PACKET);
-        g_pkg_status_p->mm_data_trans_waiting = 1;
-
-        record_time(RECORD_START);
     }
     else
     {
@@ -1197,14 +1284,6 @@ static int32_t sample_send_image()
     FILE *fp = NULL;
     sample_prot_header *pSend = NULL;
 
-
-#if 0
-    uint8_t data[IMAGE_SIZE_PER_PACKET + \
-        sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64];
-    uint8_t txbuf[(IMAGE_SIZE_PER_PACKET + \
-            sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64)*2];
-#endif
-
     datalen = IMAGE_SIZE_PER_PACKET + \
         sizeof(sample_prot_header) + sizeof(sample_mm_ack) + 64;
     txbuflen = (IMAGE_SIZE_PER_PACKET + \
@@ -1227,6 +1306,8 @@ static int32_t sample_send_image()
 
     pSend = (sample_prot_header *) txbuf;
 
+    mmid_to_filename(MY_HTONL(g_pkg_status_p->mm.id), g_pkg_status_p->mm.type, g_pkg_status_p->filepath);
+
     fp = fopen(g_pkg_status_p->filepath, "rb");
     if(fp ==NULL)
     {
@@ -1234,6 +1315,7 @@ static int32_t sample_send_image()
         retval = -1;
         goto out;
     }
+
     memcpy(data, &g_pkg_status_p->mm, sizeof(g_pkg_status_p->mm));
     offset = MY_HTONS(g_pkg_status_p->mm.packet_index) * IMAGE_SIZE_PER_PACKET;
     fseek(fp, offset, SEEK_SET);
@@ -1469,13 +1551,15 @@ int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
 
         if(message_id == UPGRADE_CMD_CLEAN)
         {
+            system(CLEAN_MPK);
             //do clean
         }
         if(message_id == UPGRADE_CMD_RUN)
         {
             //do run, do upgrade
             printf("upgrade...\n");
-            //system(UPGRADE_FILE_CMD);
+            system(UPGRADE_FILE_CMD);
+            //system("stop bootanim;echo 'restart...';/system/bin/main.sh");
 
         }
         ack[0] = message_id;
@@ -1555,7 +1639,7 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
         15, "MINIEYE",
         15, "M3",
         15, "1.0.0.1",
-        15, "1.0.1.2", //soft version
+        15, "1.0.1.4", //soft version
         15, "0xF0321564",
         15, "SAMPLE",
     };
@@ -1616,9 +1700,8 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
             break;
 
         case SAMPLE_CMD_REQ_MM_DATA:
-            //发送多媒体请求应答 和 多媒体包
-            if(!send_mm_req_ack(pHeader,len))
-                sample_send_image();
+            //发送多媒体请求应答
+            send_mm_req_ack(pHeader,len);
             break;
 
         case SAMPLE_CMD_UPLOAD_MM_DATA:
@@ -1690,8 +1773,6 @@ static int try_connect()
     printf("get recv buf size = %d\n", bufsize);
     getsockopt(sock, SOL_SOCKET, SO_SNDBUF, &bufsize, &optlen);
     printf("get send buf size = %d\n", bufsize);
-
-
 
     memset(&host_serv_addr, 0, sizeof(host_serv_addr));
     host_serv_addr.sin_family = AF_INET;
@@ -2007,5 +2088,68 @@ void *pthread_snap_shot(void *p)
         }
     }
 }
+
+
+void *pthread_req_cmd_process(void *para)
+{
+
+    uint32_t mm_id = 0;
+    uint8_t mm_type = 0;
+    uint8_t warn_type = 0;
+    uint32_t filesize = 0;
+    sample_mm_info mm_info;
+    sample_mm_info *mm_ptr = &mm_info;
+    struct timeval req_time;  
+    int ret = 0;
+
+    while(1)
+    {
+        if(!pull_mm_req_cmd_queue(&mm_info))
+        {
+            printf("pull mm_info!\n");
+
+            gettimeofday(&req_time, NULL);
+            while(1){
+
+                mm_id = MY_HTONL(mm_ptr->id);
+                mm_type = mm_ptr->type;
+                ret = find_local_image_name(mm_type, mm_id,  g_pkg_status_p->filepath, &filesize);
+                if(ret != 0)
+                {
+                    if(timeout_trigger(&req_time, 8*1000))//timeout
+                        break;
+
+                    printf("try find mm file!\n");
+                    sleep(1);
+                    continue;
+                }
+
+                //记录当前包的信息, 发送应答
+                g_pkg_status_p->mm.type = mm_type;
+                g_pkg_status_p->mm.id = mm_ptr->id;
+                g_pkg_status_p->mm.packet_index = 0;
+                g_pkg_status_p->mm.packet_total_num = MY_HTONS((filesize + IMAGE_SIZE_PER_PACKET - 1)/IMAGE_SIZE_PER_PACKET);
+                g_pkg_status_p->mm_data_trans_waiting = 1;
+
+                //send first package
+                printf("send first package!\n");
+                sample_send_image();
+                break;
+            }
+        }
+        else
+        {
+            usleep(10000);
+            continue;
+        }
+        record_time(RECORD_START);
+    }
+}
+
+
+
+
+
+
 
 

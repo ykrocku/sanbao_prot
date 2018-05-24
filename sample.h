@@ -22,6 +22,8 @@
 #define SNAP_SHOT_JPEG_PATH "/mnt/obb/"
 #define LOCAL_PRAR_FILE     "/data/para"
 #define UPGRADE_FILE_PATH     "/data/upgrade.mpk"
+#define CLEAN_MPK " rm /data/upgrade.mpk"
+
 #define UPGRADE_FILE_CMD     "/data/upgrade.sh /data/upgrade.mpk"
 
 //protocol
@@ -98,9 +100,9 @@ typedef struct _sample_dev_info
     uint8_t     custom_code[15];
 } __attribute__((packed)) sample_dev_info;
 
-#define SW_STATUS_BEGIN (0x0)
-#define SW_STATUS_END   (0x1)
-#define SW_STATUS_EVENT (0x10)
+#define SW_STATUS_BEGIN (0x1)
+#define SW_STATUS_END   (0x2)
+#define SW_STATUS_EVENT (0x0)
 
 #define WARN_TYPE_NUM       (8)
 
@@ -493,6 +495,7 @@ typedef struct queue_node_status{
 typedef struct _ptr_queue_node{
     uint8_t cmd;
     
+    sample_mm_info mm_info;
     SendStatus pkg;
     mm_header_info mm;
 
@@ -548,6 +551,12 @@ void *communicate_with_host(void *para);
 void *parse_host_cmd(void *para);
 int can_message_send(can_data_type *sourcecan);
 void warn_para_check(para_setting *para);
+
+void *pthread_req_cmd_process(void *para);
+
+int pthread_is_not_idle();
+
+
 
 #define DEBUG_BUF
 

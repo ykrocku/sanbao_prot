@@ -447,6 +447,11 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
+    if(pthread_create(&pth[6], NULL, pthread_req_cmd_process, NULL))
+    {
+        printf("pthread_create fail!\n");
+        return -1;
+    }
 
     pthread_join(pth[1], NULL);
     printf("join pthread 1\n");

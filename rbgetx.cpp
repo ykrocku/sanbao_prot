@@ -34,6 +34,7 @@
 
 using namespace std;
 
+int pthread_status[8];
 
 
 #define  ADAS_JPEG_SIZE (4* 1024 * 1024)
@@ -138,8 +139,11 @@ int32_t delete_mm_resource(uint32_t id)
         {
             if(it->mm_type == MM_PHOTO)
             {
+#if 0
                 sprintf(filepath, "%s%s-%08d.jpg",SNAP_SHOT_JPEG_PATH,\
                         warning_type_to_str(it->warn_type), id);
+#endif
+                sprintf(filepath, "%s%08d.jpg",SNAP_SHOT_JPEG_PATH,id);
                 printf("rm jpeg %s\n", filepath);
                 remove(filepath);
                 it = mmlist.erase(it);  
@@ -148,8 +152,13 @@ int32_t delete_mm_resource(uint32_t id)
             }
             if(it->mm_type == MM_VIDEO)
             {
+#if 0
                 sprintf(filepath,"%s%s-%08d.avi",SNAP_SHOT_JPEG_PATH,\
                         warning_type_to_str(it->warn_type), id);
+#endif
+
+                sprintf(filepath,"%s%08d.avi",SNAP_SHOT_JPEG_PATH,id);
+
                 printf("rm avi %s\n", filepath);
                 remove(filepath);
                 it = mmlist.erase(it);  
@@ -759,10 +768,10 @@ int str_to_warning_type(char *type, uint8_t *val)
 void store_one_jpeg(mm_header_info *mm, RBFrame* pFrame, int index)
 {
     char filepath[100];
+    char writefile_link[100];
     mm_node node;
 
-    sprintf(filepath,"%s%s-%08d.jpg",SNAP_SHOT_JPEG_PATH,\
-            warning_type_to_str(mm->warn_type), mm->photo_id[index]);
+    sprintf(filepath,"%s%08d.jpg", SNAP_SHOT_JPEG_PATH,mm->photo_id[index]);
 
     fprintf(stdout, "Saving image file...%s\n", filepath);
     int rc = write_file(filepath, pFrame->data, pFrame->dataLen);
@@ -771,6 +780,10 @@ void store_one_jpeg(mm_header_info *mm, RBFrame* pFrame, int index)
     } else {
         fprintf(stderr, "Cannot save image to %s\n", filepath);
     }
+
+    sprintf(writefile_link,"ln -s %s %s%s-%08d.jpg",filepath, SNAP_SHOT_JPEG_PATH,\
+            warning_type_to_str(mm->warn_type), mm->photo_id[index]);
+    //system(writefile_link);
 
     node.warn_type = mm->warn_type;
     node.mm_type = MM_PHOTO;
@@ -842,6 +855,7 @@ void store_warn_jpeg(CRingBuf* pRB, mm_header_info *mm)
     }
 }
 
+
 #define RECORD_JPEG_NEED 1
 #define RECORD_JPEG_NO_NEED 0
 
@@ -850,6 +864,7 @@ void store_one_avi(CRingBuf* pRB, mm_header_info *mm, int jpeg_flag)
 #define VIDEO_FRAMES_PER_SECOND   15
     RBFrame* pFrame = nullptr;
     char avifilepath[100];
+    char writefile_link[100];
     MjpegWriter mjpeg;
     mm_node node;
     struct timeval record_time;  
@@ -873,8 +888,7 @@ void store_one_avi(CRingBuf* pRB, mm_header_info *mm, int jpeg_flag)
         store_one_jpeg(mm, pFrame, jpeg_index++);
     }
 
-    sprintf(avifilepath,"%s%s-%08d.avi", SNAP_SHOT_JPEG_PATH,\
-            warning_type_to_str(mm->warn_type), mm->video_id[0]);
+    sprintf(avifilepath,"%s%08d.avi", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
 
     printf("seek time:%d\n", 0-mm->video_time);
     pRB->SeekIndexByTime((0-mm->video_time));
@@ -914,6 +928,9 @@ void store_one_avi(CRingBuf* pRB, mm_header_info *mm, int jpeg_flag)
         pRB->CommitRead();
     }
     mjpeg.Close();
+    sprintf(writefile_link,"ln -s %s %s%s-%08d.avi", avifilepath, SNAP_SHOT_JPEG_PATH,\
+            warning_type_to_str(mm->warn_type), mm->video_id[0]);
+    //system(writefile_link);
     printf("%s avi done!\n", warning_type_to_str(mm->warn_type));
 
     node.warn_type = mm->warn_type;
@@ -925,7 +942,7 @@ void store_one_avi(CRingBuf* pRB, mm_header_info *mm, int jpeg_flag)
 }
 
 //修改为同时获取jpg 和 avi
-void record_jpeg(CRingBuf* pRB, mm_header_info info)
+void record_mm_infor(CRingBuf* pRB, mm_header_info info, int *status)
 {
     int i=0;
     RBFrame* pFrame = nullptr;
@@ -937,6 +954,7 @@ void record_jpeg(CRingBuf* pRB, mm_header_info info)
     struct timeval record_time;  
     int cnt = 1;
 
+    *status = 1;
     memcpy(&mm, &info, sizeof(mm));
 
     if(mm.photo_enable && !mm.video_enable)
@@ -955,6 +973,7 @@ void record_jpeg(CRingBuf* pRB, mm_header_info info)
     {
         ;
     }
+    *status = 1;
 }
 
 int get_mm_type(char *file_type, uint8_t *val)
@@ -989,13 +1008,15 @@ void parse_filename(char *filename)
     mm_node node;
     uint32_t i=0, j=0;
     int ret = 0;
-    char *pos = &warn_name[0];
+    char *pos = NULL;
 
+    pos = &mm_id[0];
     memset(warn_name, 0, sizeof(warn_name));
     memset(mm_id, 0, sizeof(mm_id));
     memset(file_type, 0, sizeof(file_type));
     for(i=0; i<strlen(filename); i++)
     {
+#if 0
         if(filename[i] == '-')
         {
             j=0;
@@ -1009,12 +1030,23 @@ void parse_filename(char *filename)
             continue;
         }
         pos[j++] = filename[i];
-    }
+#else
+        if(filename[i] == '.')
+        {
+            j=0;
+            pos = &file_type[0];
+            continue;
+        }
+        pos[j++] = filename[i];
 
+#endif
+
+    }
+#if 0
     ret = str_to_warning_type(warn_name, &node.warn_type);
     if(ret < 0)
         return;
-
+#endif
     ret = get_mm_type(file_type, &node.mm_type);
     if(ret < 0)
         return;
@@ -1097,13 +1129,30 @@ void global_var_init()
     read_local_file_to_list();
 }
 
+
+int pthread_is_not_idle()
+{
+    int i=0;
+
+    for(i=0; i<8; i++)
+    {
+        if(pthread_status[i] == 0)
+            return 0;
+    }
+
+    return 1;
+}
+
+
+
 void *pthread_sav_warning_jpg(void *p)
 {
 #define CUSTOMER_NUM   8 
     int cnt = 0;
-    int i = 0;
+    uint32_t i = 0;
     int index = 0;
     mm_header_info mm;
+    struct timeval rec_time;
     struct timeval time_begin[WARN_TYPE_NUM];
     char first_record_time[WARN_TYPE_NUM] = {1, 1, 1, 1, 1, 1, 1, 1};
     CRingBuf* pr[WARN_TYPE_NUM];
@@ -1118,6 +1167,7 @@ void *pthread_sav_warning_jpg(void *p)
 #endif
     };
 
+    memset(pthread_status, 0, sizeof(pthread_status));
     //for(i=0; i<WARN_TYPE_NUM; i++)
     for(i=0; i<CUSTOMER_NUM; i++)
     {
@@ -1126,7 +1176,7 @@ void *pthread_sav_warning_jpg(void *p)
     }
 
     ThreadPool pool; // 0 - cpu member
-    pool.SetMinThreads(4);
+    pool.SetMinThreads(8);
 
     sleep(3);
     while(1)
@@ -1160,6 +1210,7 @@ void *pthread_sav_warning_jpg(void *p)
         printf("video_time: 0x%x, num: 0x%x\n", mm.video_time, mm.photo_num);
 #endif
 
+#if 0
         i = 0;
         switch(mm.warn_type)
         {
@@ -1192,7 +1243,6 @@ void *pthread_sav_warning_jpg(void *p)
                 break;
 
         }
-        
         //上一个报警视频没有获取完成，当有新的同类型报警,视频不再获取。
         if(mm.video_enable)
         {
@@ -1214,8 +1264,31 @@ void *pthread_sav_warning_jpg(void *p)
                 }
             }
         }
-        // printf("Thread pool enter! i = %d\n", i);
-        cls[i] = NewClosure(record_jpeg, pr[i], mm);
+#endif   
+
+#if 1        
+        i++;
+        i = i % 8;
+#endif
+
+#if 0
+    struct Stats
+    {
+        size_t NumThreads;
+        size_t NumBusyThreads;
+        size_t NumPendingTasks;
+    };
+#endif
+
+    //struct Stats pstat;
+    //pool.Stats pstat;
+    ThreadPool::Stats pstat;
+    pool.GetStats(&pstat);
+    printf(" i =%d, Num = %ld, busy = %ld, pending = %ld\n", i, pstat.NumThreads, pstat.NumBusyThreads, pstat.NumPendingTasks);
+
+        gettimeofday(&rec_time, NULL);
+        printf("Thread pool enter! i = %d, time = %ld.%ld\n", i, rec_time.tv_sec, rec_time.tv_usec);
+        cls[i] = NewClosure(record_mm_infor, pr[i], mm, &pthread_status[i]);
         pool.AddTask(cls[i]);
     }
 
