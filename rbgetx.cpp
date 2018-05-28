@@ -17,7 +17,7 @@
 #include "common/ringbuf/CRingBuf.h"
 #include "common/time/timestamp.h"
 
-#include "sample.h"
+#include "prot.h"
 #include "MjpegWriter.h"
 
 #include <cstddef>
@@ -33,62 +33,16 @@
 #endif
 
 using namespace std;
-
 int pthread_status[8];
-
 
 #define  ADAS_JPEG_SIZE (4* 1024 * 1024)
 #define  ADAS_IMAGE_SIZE (100* 1024 * 1024)
-
-
-void print_para(para_setting *para);
 
 // global variables
 static const char* version = "1.1.0";
 
 static list<mm_node> mmlist;
 static pthread_mutex_t mm_resource_lock = PTHREAD_MUTEX_INITIALIZER;
-
-static para_setting warn_para;
-static pthread_mutex_t para_lock = PTHREAD_MUTEX_INITIALIZER;
-void read_warn_para(para_setting *para)
-{
-    pthread_mutex_lock(&para_lock);
-    memcpy(para, &warn_para, sizeof(warn_para));
-    pthread_mutex_unlock(&para_lock);
-}
-void write_warn_para(para_setting *para)
-{
-    uint32_t i;
-    uint8_t *in8 = NULL;
-    uint8_t *out8 = NULL;
-
-    in8 = (uint8_t *)&para->warning_speed_val;
-    out8 = (uint8_t *)&warn_para.warning_speed_val;
-
-    pthread_mutex_lock(&para_lock);
-    if(para->auto_photo_time_period != 0xFFFF)
-        warn_para.auto_photo_time_period = para->auto_photo_time_period;
-    if(para->auto_photo_distance_period != 0xFFFF)
-        warn_para.auto_photo_distance_period = para->auto_photo_distance_period;
-
-    for(i=0; i< sizeof(para_setting); i++)
-    {
-        if(i==3)
-        {
-            i+=4;
-        }
-
-        if(in8[i] != 0xFF)
-        {
-            out8[i] = in8[i];
-        }
-    }
-
-    warn_para_check(&warn_para);
-
-    pthread_mutex_unlock(&para_lock);
-}
 
 void display_mm_resource()
 {
@@ -214,64 +168,6 @@ int write_file(const char* filename, const void* data, size_t size) {
     return 0;
 }
 
-
-int read_local_para_file(const char* filename) {
-    para_setting para;
-    char cmd[512];
-
-    FILE* fp = fopen(filename, "r");
-    if (!fp) {
-        fprintf(stderr, "Cannot open for write: %s, so create\n", filename);
-        fp = fopen(filename, "w+");
-        if (!fp) {
-            fprintf(stderr, "create: %s, file\n", filename);
-            return 1;
-        }
-        fclose(fp);
-
-        //no para file ,so set default to file
-        set_para_setting_default();
-        write_local_para_file(filename);
-    }
-    size_t nb = fread(&para, 1, sizeof(para), fp);
-    if (nb != sizeof(para)) {
-        fprintf(stderr, "Error: didn't read enough bytes (%zd/%zd)\n", nb, sizeof(para));
-        fclose(fp);
-        return 2;
-    }
-    write_warn_para(&para);
-
-#if 0
-    //set alog detect.flag
-    sprintf(cmd, "busybox sed -i 's/^.*--test_speed.*$/--test_speed=%d/' /data/xiao/install/detect.flag",\
-            para.warning_speed_val);
-#endif
-
-#if 0
-    //set alog detect.flag
-    sprintf(cmd, "busybox sed -i 's/^.*--output_lane_info_speed_thresh.*$/--output_lane_info_speed_thresh=%d/' /data/xiao/install/detect.flag",\
-            para.warning_speed_val);
-
-
-    system(cmd);
-
-#endif
-    print_para(&para);
-
-    fclose(fp);
-    return 0;
-}
-int write_local_para_file(const char* filename) {
-    int ret = 0;
-    para_setting para;
-
-    read_warn_para(&para);
-    print_para(&para);
-    ret = write_file(filename, &para, sizeof(para));
-
-    return ret;
-}
-
 std::vector<uint8_t> jpeg_encode(uint8_t* data,\
         int cols, int rows, int out_cols, int out_rows, int quality) {
     std::vector<uint8_t> jpg_vec(512 * 1024);
@@ -373,7 +269,7 @@ void *pthread_encode_jpeg(void *p)
     int start_record=1;
     struct timeval ta, tb, record_time;  
     int cnt = 0;
-    mm_header_info mm;
+    InfoForStore mm;
 
     CRingBuf* pRB = new CRingBuf("encode_jpeg", "adas_image", ADAS_IMAGE_SIZE, CRB_PERSONALITY_READER);
     CRingBuf* pwjpg = new CRingBuf("producer", "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_WRITER);
@@ -384,302 +280,7 @@ void *pthread_encode_jpeg(void *p)
             usleep(500000);
     }
 };
-void print_para(para_setting *para)
-{
-    printf("para->warning_speed_val       = %d\n", para->warning_speed_val);
-    printf("para->warning_volume          = %d\n", para->warning_volume);
-    printf("para->auto_photo_mode         = %d\n", para->auto_photo_mode);
-    printf("para->auto_photo_time_period  = %d\n", (para->auto_photo_time_period));
-    printf("para->auto_photo_distance_peri= %d\n", (para->auto_photo_distance_period));
-    printf("para->photo_num               = %d\n", para->photo_num);
-    printf("para->photo_time_period       = %d\n", para->photo_time_period);
-    printf("para->image_Resolution        = %d\n", para->image_Resolution);
-    printf("para->video_Resolution        = %d\n", para->video_Resolution);
-    //printf("para->reserve[9]);            = %d\n", para->reserve[9]);
-    printbuf(para->reserve, 9);
-    printf("para->obstacle_distance_thresh= %d\n", para->obstacle_distance_threshold);
-    printf("para->obstacle_video_time     = %d\n", para->obstacle_video_time);
-    printf("para->obstacle_photo_num      = %d\n", para->obstacle_photo_num);
-    printf("para->obstacle_photo_time_peri= %d\n", para->obstacle_photo_time_period);
-    printf("para->FLC_time_threshold      = %d\n", para->FLC_time_threshold);
-    printf("para->FLC_times_threshold     = %d\n", para->FLC_times_threshold);
-    printf("para->FLC_video_time          = %d\n", para->FLC_video_time);
-    printf("para->FLC_photo_num           = %d\n", para->FLC_photo_num);
-    printf("para->FLC_photo_time_period   = %d\n", para->FLC_photo_time_period);
-    printf("para->LDW_video_time          = %d\n", para->LDW_video_time);
-    printf("para->LDW_photo_num           = %d\n", para->LDW_photo_num);
-    printf("para->LDW_photo_time_period   = %d\n", para->LDW_photo_time_period);
-    printf("para->FCW_time_threshold      = %d\n", para->FCW_time_threshold);
-    printf("para->FCW_video_time          = %d\n", para->FCW_video_time);
-    printf("para->FCW_photo_num           = %d\n", para->FCW_photo_num);
-    printf("para->FCW_photo_time_period   = %d\n", para->FCW_photo_time_period);
-    printf("para->PCW_time_threshold      = %d\n", para->PCW_time_threshold);
-    printf("para->PCW_video_time          = %d\n", para->PCW_video_time);
-    printf("para->PCW_photo_num           = %d\n", para->PCW_photo_num);
-    printf("para->PCW_photo_time_period   = %d\n", para->PCW_photo_time_period);
-    printf("para->HW_time_threshold       = %d\n", para->HW_time_threshold);
-    printf("para->HW_video_time           = %d\n", para->HW_video_time);
-    printf("para->HW_photo_num            = %d\n", para->HW_photo_num);
-    printf("para->HW_photo_time_period    = %d\n", para->HW_photo_time_period);
-    printf("para->TSR_photo_num           = %d\n", para->TSR_photo_num);
-    printf("para->TSR_photo_time_period   = %d\n", para->TSR_photo_time_period);
-}
 
-//if para error, set default val
-void warn_para_check(para_setting *p)
-{
-    para_setting *para = (para_setting *)p;
-    
-    if(para->warning_speed_val < 0 || para->warning_speed_val > 60)
-    {
-        para->warning_speed_val = 30;// km/h, 0-60
-        printf("warn speed valid, set to default!\n");
-    }
-    if(para->warning_volume < 0 || para->warning_volume > 8)
-    {
-        para->warning_volume = 6;//0~8
-        printf("warn volume valid, set to default!\n");
-    }
-
-    //initiative
-    if(para->auto_photo_mode < 0 || para->auto_photo_mode > 3)
-    {
-        para->auto_photo_mode = 0;//主动拍照默认关闭
-        printf("warn photo para valid, set to default!\n");
-    }
-    if(para->auto_photo_time_period <0 || para->auto_photo_time_period > 3600)
-    {
-        printf("warn para valid, set to default!\n");
-        para->auto_photo_time_period = 1800; //单位：秒, 0~3600
-    }
-    if(para->auto_photo_distance_period < 0 || para->auto_photo_distance_period > 60000)
-    {
-        printf("warn para valid, set to default!\n");
-        para->auto_photo_distance_period = 100; //单位：米, 0-60000
-    }
-
-    //photo
-    if(para->photo_num < 1 || para->photo_num > 10)
-    {
-        printf("warn photo valid, set to default!\n");
-        para->photo_num = 3;//1-10
-    }
-    if(para->photo_time_period < 1 || para->photo_time_period > 5)
-    {
-        printf("warn photo valid, set to default!\n");
-        para->photo_time_period = 2; //单位：100ms, 1-5
-    }
-    if(para->image_Resolution < 1 || para->image_Resolution > 6)
-    {
-        printf("warn photo valid, set to default!\n");
-        para->image_Resolution = 1;
-    }
-    if(para->video_Resolution < 1 || para->video_Resolution > 7)
-    {
-        printf("warn photo valid, set to default!\n");
-        para->video_Resolution = 1;
-    }
-
-    //obstacle
-    if(para->obstacle_distance_threshold < 10 || para->obstacle_distance_threshold > 50)
-    {
-        printf("warn obstacle valid, set to default!\n");
-        para->obstacle_distance_threshold = 30; // 单位：100ms
-    }
-    if(para->obstacle_video_time < 0 || para->obstacle_video_time > 60)
-    {
-        printf("warn obstacle valid, set to default!\n");
-        para->obstacle_video_time = 5; //单位：秒
-    }
-    if(para->obstacle_photo_num < 0 || para->obstacle_photo_num > 10)
-    {
-        printf("warn obstacle valid, set to default!\n");
-        para->obstacle_photo_num = 3;
-    }
-    if(para->obstacle_photo_time_period < 1 || para->obstacle_photo_time_period > 10)
-    {
-        printf("warn obstacle valid, set to default!\n");
-        para->obstacle_photo_time_period = 2; // 单位：100ms
-    }
-
-    //FLC
-    if(para->FLC_time_threshold < 30 || para->FLC_time_threshold >120)
-    {
-        printf("warn FLC valid, set to default!\n");
-        para->FLC_time_threshold = 60;
-    }
-    if(para->FLC_times_threshold < 3 || para->FLC_times_threshold >10)
-    {
-        printf("warn FLC valid, set to default!\n");
-        para->FLC_times_threshold = 5 ;
-    }
-    if(para->FLC_video_time < 0 || para->FLC_video_time > 60)
-    {
-        printf("warn FLC valid, set to default!\n");
-        para->FLC_video_time = 5;
-    }
-    if(para->FLC_photo_num < 0 || para->FLC_photo_num >10)
-    {
-        printf("warn FLC valid, set to default!\n");
-        para->FLC_photo_num = 3;
-    }
-    if(para->FLC_photo_time_period < 1 || para->FLC_photo_time_period > 10)
-    {
-        printf("warn FLC valid, set to default!\n");
-        para->FLC_photo_time_period = 2;
-    }
-
-    //LDW
-    if(para->LDW_video_time < 0 || para->LDW_video_time > 60)
-    {
-        printf("warn LDW valid, set to default!\n");
-        para->LDW_video_time = 5;
-    }
-    if(para->LDW_photo_num < 0 || para->LDW_photo_num > 10)
-    {
-        printf("warn LDW valid, set to default!\n");
-        para->LDW_photo_num = 3;
-    }
-    if(para->LDW_photo_time_period < 1 || para->LDW_photo_time_period > 10)
-    {
-        printf("warn LDW valid, set to default!\n");
-        para->LDW_photo_time_period = 2;
-    }
-
-    //FCW
-    if(para->FCW_time_threshold < 10 || para->FCW_time_threshold > 50)
-    {
-        printf("warn FCW valid, set to default!\n");
-        para->FCW_time_threshold = 27;
-    }
-    if(para->FCW_video_time < 0 || para->FCW_video_time > 60)
-    {
-        printf("warn FCW valid, set to default!\n");
-        para->FCW_video_time = 5;
-    }
-    if(para->FCW_photo_num < 0 || para->FCW_photo_num > 10)
-    {
-        printf("warn FCW valid, set to default!\n");
-        para->FCW_photo_num = 3;
-    }
-    if(para->FCW_photo_time_period < 1 || para->FCW_photo_time_period > 10)
-    {
-        printf("warn FCW valid, set to default!\n");
-        para->FCW_photo_time_period = 2;
-    }
-
-    //PCW
-    if(para->PCW_time_threshold < 0 || para->PCW_time_threshold > 50)
-    {
-        printf("warn PCW valid, set to default!\n");
-        para->PCW_time_threshold = 30;
-    }
-    if(para->PCW_video_time < 10 || para->PCW_video_time > 60)
-    {
-        printf("warn pcw valid, set to default!\n");
-        para->PCW_video_time = 5;
-    }
-    if(para->PCW_photo_num < 0 || para->PCW_photo_num > 10)
-    {
-        printf("warn PCW valid, set to default!\n");
-        para->PCW_photo_num = 3;
-    }
-    if(para->PCW_photo_time_period < 1 || para->PCW_photo_time_period > 10)
-    {
-        printf("warn PCW valid, set to default!\n");
-        para->PCW_photo_time_period = 2;
-    }
-
-    //HMW
-    if(para->HW_time_threshold < 0 ||  para->HW_time_threshold > 50)
-    {
-        printf("warn HMW valid, set to default!\n");
-        para->HW_time_threshold = 30; // 单位：100ms 
-    }
-    if(para->HW_video_time < 0 || para->HW_video_time > 60)
-    {
-        printf("warn HMW valid, set to default!\n");
-        para->HW_video_time = 5;
-    }
-    if(para->HW_photo_num < 0 || para->HW_photo_num > 10)
-    {
-        printf("warn HMW valid, set to default!\n");
-        para->HW_photo_num = 3;
-    }
-    if(para->HW_photo_time_period < 1 || para->HW_photo_time_period > 10)
-    {
-        printf("warn HMW valid, set to default!\n");
-        para->HW_photo_time_period = 2; // 单位：100ms
-    }
-
-    //TSR
-    if(para->TSR_photo_num < 0 || para->TSR_photo_num > 10)
-    {
-        printf("warn TSR valid, set to default!\n");
-        para->TSR_photo_num = 3;
-    }
-    if(para->TSR_photo_time_period < 1 || para->TSR_photo_time_period > 10)
-    {
-        printf("warn TSR valid, set to default!\n");
-        para->TSR_photo_time_period = 2;
-    }
-}
-
-
-void set_para_setting_default()
-{
-    para_setting para;
-
-    para.warning_speed_val = 30;// km/h, 0-60
-    para.warning_volume = 6;//0~8
-    para.auto_photo_mode = 0;//主动拍照默认关闭
-    para.auto_photo_time_period = 1800; //单位：秒, 0~3600
-    para.auto_photo_distance_period = 100; //单位：米, 0-60000
-    para.photo_num = 3;//1-10
-    para.photo_time_period = 2; //单位：100ms, 1-5
-    para.image_Resolution = 1;
-    para.video_Resolution = 1;
-    memset(&para.reserve[0], 0, sizeof(para.reserve));
-
-    para.obstacle_distance_threshold = 30; // 单位：100ms
-    para.obstacle_video_time = 5; //单位：秒
-    para.obstacle_photo_num = 3;
-    para.obstacle_photo_time_period = 2; // 单位：100ms
-
-    para.FLC_time_threshold = 60;
-    para.FLC_times_threshold = 5 ;
-    para.FLC_video_time = 5;
-    para.FLC_photo_num = 3;
-    para.FLC_photo_time_period = 2;
-
-    para.LDW_video_time = 5;
-    para.LDW_photo_num = 3;
-    para.LDW_photo_time_period = 2;
-
-
-    para.FCW_time_threshold = 27;
-    para.FCW_video_time = 5;
-    para.FCW_photo_num = 3;
-    para.FCW_photo_time_period = 2;
-
-
-    para.PCW_time_threshold = 30;
-    para.PCW_video_time = 5;
-    para.PCW_photo_num = 3;
-    para.PCW_photo_time_period = 2;
-
-    para.HW_time_threshold = 30; // 单位：100ms 
-    para.HW_video_time = 5;
-    para.HW_photo_num = 3;
-    para.HW_photo_time_period = 2; // 单位：100ms
-
-    para.TSR_photo_num = 3;
-    para.TSR_photo_time_period = 2;
-
-    memset(&para.reserve2[0], 0, sizeof(para.reserve2));
-
-    write_warn_para(&para);
-}
 #define FCW_NAME            "FCW"
 #define LDW_NAME            "LDW"
 #define HW_NAME             "HW"
@@ -765,7 +366,7 @@ int str_to_warning_type(char *type, uint8_t *val)
     return 0;
 }
 
-void store_one_jpeg(mm_header_info *mm, RBFrame* pFrame, int index)
+void store_one_jpeg(InfoForStore *mm, RBFrame* pFrame, int index)
 {
     char filepath[100];
     char writefile_link[100];
@@ -814,8 +415,7 @@ RBFrame* request_jpeg_frame(CRingBuf* pRB, uint32_t repeat_times)
     return pFrame;
 }
 
-
-void store_warn_jpeg(CRingBuf* pRB, mm_header_info *mm)
+void store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
 {
     RBFrame* pFrame = nullptr;
     int jpeg_index = 0;
@@ -855,11 +455,9 @@ void store_warn_jpeg(CRingBuf* pRB, mm_header_info *mm)
     }
 }
 
-
 #define RECORD_JPEG_NEED 1
 #define RECORD_JPEG_NO_NEED 0
-
-void store_one_avi(CRingBuf* pRB, mm_header_info *mm, int jpeg_flag)
+void store_one_avi(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
 {
 #define VIDEO_FRAMES_PER_SECOND   15
     RBFrame* pFrame = nullptr;
@@ -942,12 +540,12 @@ void store_one_avi(CRingBuf* pRB, mm_header_info *mm, int jpeg_flag)
 }
 
 //修改为同时获取jpg 和 avi
-void record_mm_infor(CRingBuf* pRB, mm_header_info info, int *status)
+void record_mm_infor(CRingBuf* pRB, InfoForStore info, int *status)
 {
     int i=0;
     RBFrame* pFrame = nullptr;
     char avifilepath[100];
-    mm_header_info mm;
+    InfoForStore mm;
     MjpegWriter mjpeg;
     mm_node node;
     uint64_t timestart = 0;
@@ -1117,7 +715,8 @@ int read_local_file_to_list()
 void global_var_init()
 {
     char cmd[100];
-    read_local_para_file(LOCAL_PRAR_FILE);
+    read_local_adas_para_file(LOCAL_ADAS_PRAR_FILE);
+    read_local_dsm_para_file(LOCAL_DSM_PRAR_FILE);
 
     sprintf(cmd, "busybox mkdir -p %s", SNAP_SHOT_JPEG_PATH);
     system(cmd);
@@ -1129,21 +728,26 @@ void global_var_init()
     read_local_file_to_list();
 }
 
-
-int pthread_is_not_idle()
+ThreadPool pool; // 0 - cpu member
+void read_pthread_num(uint32_t i)
 {
-    int i=0;
-
-    for(i=0; i<8; i++)
+#if 0
+    struct Stats
     {
-        if(pthread_status[i] == 0)
-            return 0;
-    }
+        size_t NumThreads;
+        size_t NumBusyThreads;
+        size_t NumPendingTasks;
+    };
+#endif
 
-    return 1;
+    //struct Stats pstat;
+    //pool.Stats pstat;
+    struct timeval rec_time;
+    ThreadPool::Stats pstat;
+    pool.GetStats(&pstat);
+    gettimeofday(&rec_time, NULL);
+    printf(" i =%d, Num = %ld, busy = %ld, pending = %ld, time = %ld.%ld\n", i, pstat.NumThreads, pstat.NumBusyThreads, pstat.NumPendingTasks, rec_time.tv_sec, rec_time.tv_usec);
 }
-
-
 
 void *pthread_sav_warning_jpg(void *p)
 {
@@ -1151,7 +755,7 @@ void *pthread_sav_warning_jpg(void *p)
     int cnt = 0;
     uint32_t i = 0;
     int index = 0;
-    mm_header_info mm;
+    InfoForStore mm;
     struct timeval rec_time;
     struct timeval time_begin[WARN_TYPE_NUM];
     char first_record_time[WARN_TYPE_NUM] = {1, 1, 1, 1, 1, 1, 1, 1};
@@ -1175,33 +779,39 @@ void *pthread_sav_warning_jpg(void *p)
         pr[i] = new CRingBuf(user_name[i], "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
     }
 
-    ThreadPool pool; // 0 - cpu member
-    pool.SetMinThreads(8);
+    //pool.SetMinThreads(8);
+    pool.SetMaxThreads(4);
+
+    printf("min pthread = %d\n", pool.GetMinThreads());
+    printf("max pthread = %d\n", pool.GetMaxThreads());
+    printf("GetIdleTime = %d\n", pool.GetIdleTime());
 
     sleep(3);
     while(1)
     {
+        //read_pthread_num(i);
 #if 1        
         if(pull_mm_queue(&mm))
         {
             usleep(10000);
+           // sleep(1);
             continue;
         }
 
 #else//debug
 
-        mm.video_time = 3;
+        mm.video_time = 4;
         mm.warn_type = 1;
         mm.video_id[0] = cnt++;
         mm.video_enable = 1;
         mm.photo_enable = 0;
- //       sleep(2);
+        sleep(1);
 
-        if(cnt >= 2)
-            sleep(2);
+        //if(cnt >= 2)
+        //    sleep(2);
 
-        if(cnt >= 4)
-            sleep(2000000);
+        //if(cnt >= 4)
+        //    sleep(2000000);
 #endif
 
 #if 0
@@ -1210,89 +820,15 @@ void *pthread_sav_warning_jpg(void *p)
         printf("video_time: 0x%x, num: 0x%x\n", mm.video_time, mm.photo_num);
 #endif
 
-#if 0
-        i = 0;
-        switch(mm.warn_type)
-        {
-            case SW_TYPE_FCW:
-                i=0;
-                break;
-            case SW_TYPE_LDW:
-                i=1;
-                break;
-            case SW_TYPE_HW:
-                i=2;
-                break;
-            case SW_TYPE_PCW:
-                i=3;
-                break;
-            case SW_TYPE_FLC:
-                i=4;
-                break;
-            case SW_TYPE_TSRW:
-                i=5;
-                break;
-            case SW_TYPE_TSR:
-                i=6;
-                break;
-            case SW_TYPE_SNAP:
-                i=7;
-                break;
-            default:
-                i=6;
-                break;
-
-        }
-        //上一个报警视频没有获取完成，当有新的同类型报警,视频不再获取。
-        if(mm.video_enable)
-        {
-            if(first_record_time[i])
-            {
-                first_record_time[i] = 0;
-                gettimeofday(&time_begin[i], NULL);
-            }
-            else
-            {
-                if(timeout_trigger(&time_begin[i], mm.video_time*1000)) //we can record again
-                {
-                    gettimeofday(&time_begin[i], NULL);
-                }
-                else
-                {
-                    printf("new warning video ignore!\n");
-                    continue;
-                }
-            }
-        }
-#endif   
-
-#if 1        
-        i++;
         i = i % 8;
-#endif
 
-#if 0
-    struct Stats
-    {
-        size_t NumThreads;
-        size_t NumBusyThreads;
-        size_t NumPendingTasks;
-    };
-#endif
-
-    //struct Stats pstat;
-    //pool.Stats pstat;
-    ThreadPool::Stats pstat;
-    pool.GetStats(&pstat);
-    printf(" i =%d, Num = %ld, busy = %ld, pending = %ld\n", i, pstat.NumThreads, pstat.NumBusyThreads, pstat.NumPendingTasks);
-
-        gettimeofday(&rec_time, NULL);
-        printf("Thread pool enter! i = %d, time = %ld.%ld\n", i, rec_time.tv_sec, rec_time.tv_usec);
         cls[i] = NewClosure(record_mm_infor, pr[i], mm, &pthread_status[i]);
         pool.AddTask(cls[i]);
+
+        read_pthread_num(i);
+        i++;
     }
 
     return NULL;
 }
-
 

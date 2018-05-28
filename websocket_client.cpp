@@ -11,7 +11,7 @@
 
 #include <libwebsockets.h>
 #include <msgpack.h>
-#include "sample.h"
+#include "prot.h"
 #include "rbgetx.h"
 
 #include <queue>
@@ -452,6 +452,13 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
+#ifdef ENABLE_ADAS_AND_DSM
+    if(pthread_create(&pth[7], NULL, pthread_send_dsm, NULL))
+    {
+        printf("pthread_create fail!\n");
+        return -1;
+    }
+#endif
 
     pthread_join(pth[1], NULL);
     printf("join pthread 1\n");

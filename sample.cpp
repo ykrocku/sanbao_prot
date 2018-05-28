@@ -22,19 +22,18 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "sample.h"
+#include "prot.h"
 #include <stdbool.h>
 
 #include <queue>
 using namespace std;
 
-static int32_t sample_send_image();
+static int32_t sample_send_image(uint8_t devid);
 #define WRITE_REAL_TIME_MSG 0
 #define READ_REAL_TIME_MSG  1
 
 
 int GetFileSize(char *filename);
-
 
 //实时数据处理
 void RealTimeDdata_process(real_time_data *data, int mode)
@@ -128,8 +127,6 @@ void do_serial_num(uint16_t *num, int mode)
 pthread_mutex_t photo_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 queue<ptr_queue_node *> g_image_queue;
 queue<ptr_queue_node *> *g_image_queue_p = &g_image_queue;
-
-
 
 pthread_mutex_t req_cmd_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 queue<ptr_queue_node *> g_req_cmd_queue;
@@ -446,7 +443,7 @@ static int unblock_write(int sock, uint8_t *buf, int len)
 }
 
 //insert mm info 
-void push_mm_queue(mm_header_info *mm)
+void push_mm_queue(InfoForStore *mm)
 {
     ptr_queue_node header;
     header.buf = NULL;
@@ -458,7 +455,7 @@ void push_mm_queue(mm_header_info *mm)
 }
 
 //pull node ,the info use to record the avi or jpeg
-int pull_mm_queue(mm_header_info *mm)
+int pull_mm_queue(InfoForStore *mm)
 {
     ptr_queue_node header;
     header.buf = NULL;
@@ -473,7 +470,7 @@ int pull_mm_queue(mm_header_info *mm)
 }
 
 //store req mm cmd
-void push_mm_req_cmd_queue(sample_mm_info *mm_info)
+void push_mm_req_cmd_queue(send_mm_info *mm_info)
 {
     ptr_queue_node header;
     header.buf = NULL;
@@ -485,7 +482,7 @@ void push_mm_req_cmd_queue(sample_mm_info *mm_info)
     ptr_queue_push(g_req_cmd_queue_p, &header, &req_cmd_queue_lock);
 }
 //pull req cmd
-int pull_mm_req_cmd_queue(sample_mm_info *mm_info)
+int pull_mm_req_cmd_queue(send_mm_info *mm_info)
 {
     ptr_queue_node header;
     header.buf = NULL;
@@ -506,8 +503,8 @@ void get_real_time_msg(warningtext *uploadmsg)
     real_time_data tmp;
     RealTimeDdata_process(&tmp, READ_REAL_TIME_MSG);
 
-    uploadmsg->height = tmp.height;
     uploadmsg->altitude = tmp.altitude;
+    uploadmsg->latitude = tmp.latitude;
     uploadmsg->longitude = tmp.longitude;
     uploadmsg->car_speed = tmp.car_speed;
 
@@ -515,50 +512,13 @@ void get_real_time_msg(warningtext *uploadmsg)
     memcpy(&uploadmsg->car_status, &tmp.car_status, sizeof(uploadmsg->car_status));
 }
 
-#if 0
-void filter_warning_10s()
+
+void get_adas_Info_for_store(uint8_t type, InfoForStore *mm_store)
 {
+    adas_para_setting para;
 
-        //上一个报警视频没有获取完成，当有新的同类型报警,视频不再获取。
-        if(mm.video_enable)
-        {
-            if(first_record_time[i])
-            {
-                first_record_time[i] = 0;
-                gettimeofday(&time_begin[i], NULL);
-            }
-            else
-            {
-                if(timeout_trigger(&time_begin[i], mm.video_time*1000)) //we can record again
-                {
-                    gettimeofday(&time_begin[i], NULL);
-                }
-                else
-                {
-                    printf("new warning video ignore!\n");
-                    continue;
-                }
-            }
-        }
-}
-#endif
-
-
-//填写和can数据不相关的字段
-int do_record_warning_info(int type, warningtext *uploadmsg)
-{
-    uint8_t video_time=0;
-    uint8_t photo_num=0;
-    uint8_t photo_time_period=0;
-    int i=0;
-    mm_header_info mm;
-    para_setting para;
-
-    read_warn_para(&para);
-    memset(&mm, 0, sizeof(mm));
-
-    get_real_time_msg(uploadmsg);
-
+    read_dev_para(&para, SAMPLE_DEVICE_ID_ADAS);
+    mm_store->warn_type = type;
     switch(type)
     {
         case SW_TYPE_FCW:
@@ -567,70 +527,156 @@ int do_record_warning_info(int type, warningtext *uploadmsg)
         case SW_TYPE_PCW:
         case SW_TYPE_FLC:
             if(type == SW_TYPE_FCW){
-                photo_num = para.FCW_photo_num;
-                photo_time_period = para.FCW_photo_time_period;
-                video_time = para.FCW_video_time;
+                mm_store->photo_num = para.FCW_photo_num;
+                mm_store->photo_time_period = para.FCW_photo_time_period;
+                mm_store->video_time = para.FCW_video_time;
             }else if(type == SW_TYPE_LDW){
-                photo_num = para.LDW_photo_num;
-                photo_time_period = para.LDW_photo_time_period;
-                video_time = para.LDW_video_time;
+                mm_store->photo_num = para.LDW_photo_num;
+                mm_store->photo_time_period = para.LDW_photo_time_period;
+                mm_store->video_time = para.LDW_video_time;
             }else if(type == SW_TYPE_HW){
-                photo_num = para.HW_photo_num;
-                photo_time_period = para.HW_photo_time_period;
-                video_time = para.HW_video_time;
+                mm_store->photo_num = para.HW_photo_num;
+                mm_store->photo_time_period = para.HW_photo_time_period;
+                mm_store->video_time = para.HW_video_time;
             }else if(type == SW_TYPE_PCW){
-                photo_num = para.PCW_photo_num;
-                photo_time_period = para.PCW_photo_time_period;
-                video_time = para.PCW_video_time;
+                mm_store->photo_num = para.PCW_photo_num;
+                mm_store->photo_time_period = para.PCW_photo_time_period;
+                mm_store->video_time = para.PCW_video_time;
             }else if(type == SW_TYPE_FLC){
-                photo_num = para.FLC_photo_num;
-                photo_time_period = para.FLC_photo_time_period;
-                video_time = para.FLC_video_time;
+                mm_store->photo_num = para.FLC_photo_num;
+                mm_store->photo_time_period = para.FLC_photo_time_period;
+                mm_store->video_time = para.FLC_video_time;
             }else{
                 ;
             }
-            //printf("---------------------type=%d\n", type);
-            uploadmsg->warning_id = MY_HTONL(get_next_id(WARNING_ID_MODE, NULL, 0));
-            uploadmsg->sound_type = type;
-            uploadmsg->car_speed = 0;
-            uploadmsg->mm_num = 0;
-#if 0
-            if(pthread_is_not_idle)
-            {
-                printf("pthread busying, ignore record avi!");
-                break;         
-            }
-#endif
-            mm.warn_type = type;
-            mm.video_time = video_time;
-            mm.photo_time_period = photo_time_period;
-            mm.photo_num = photo_num;
-            if((photo_num != 0 && photo_num < WARN_SNAP_NUM_MAX) || (video_time != 0))
-            {
-                if(photo_num != 0 && photo_num < WARN_SNAP_NUM_MAX)
-                {
-                    mm.photo_enable = 1; 
-                    get_next_id(MM_ID_MODE, mm.photo_id, photo_num);
-                    for(i=0; i<photo_num; i++)
-                    {
-                        //printf("mm.photo_id[%d] = %d\n", i, mm.photo_id[i]);
-                        uploadmsg->mm_num++;
-                        uploadmsg->mm[i].type = MM_PHOTO;
-                        uploadmsg->mm[i].id = MY_HTONL(mm.photo_id[i]);
-                    }
-                }
-                if(video_time != 0)
-                {
-                    mm.video_enable = 1; 
-                    get_next_id(MM_ID_MODE, mm.video_id, 1);
+            if(mm_store->video_time != 0)
+                mm_store->video_enable = 1; 
+            else
+                mm_store->video_enable = 0; 
 
+            if((mm_store->photo_num != 0 && mm_store->photo_num < WARN_SNAP_NUM_MAX))
+                mm_store->photo_enable = 1; 
+            else
+                mm_store->photo_enable = 0; 
+        case SW_TYPE_TSRW:
+        case SW_TYPE_TSR:
+            break;
+
+        case SW_TYPE_SNAP:
+            mm_store->photo_num = para.photo_num;
+            mm_store->photo_time_period = para.photo_time_period;
+            mm_store->photo_enable = 1; 
+
+        default:
+            break;
+    }
+}
+
+void get_dsm_Info_for_store(uint8_t type, InfoForStore *mm_store)
+{
+    dsm_para_setting para;
+
+    read_dev_para(&para, SAMPLE_DEVICE_ID_DSM);
+    mm_store->warn_type = type;
+    switch(type)
+    {
+        case DSM_FATIGUE_WARN:
+        case DSM_CALLING_WARN:
+        case DSM_SMOKING_WARN:
+        case DSM_DISTRACT_WARN:
+        case DSM_ABNORMAL_WARN:
+
+            if(type == DSM_FATIGUE_WARN){
+                mm_store->photo_num = para.FatigueDriv_PhotoNum;
+                mm_store->photo_time_period = para.FatigueDriv_PhotoInterval;
+                mm_store->video_time = para.FatigueDriv_VideoTime;
+            }else if(type == DSM_CALLING_WARN){
+                mm_store->photo_num = para.CallingDriv_PhotoNum;
+                mm_store->photo_time_period = para.CallingDriv_PhotoInterval;
+                mm_store->video_time = para.CallingDriv_VideoTime;
+            }else if(type == DSM_SMOKING_WARN){
+                mm_store->photo_num = para.SmokingDriv_PhotoNum;
+                mm_store->photo_time_period = para.SmokingDriv_PhotoInterval;
+                mm_store->video_time = para.SmokingDriv_VideoTime;
+            }else if(type == DSM_DISTRACT_WARN){
+                mm_store->photo_num = para.DistractionDriv_PhotoNum;
+                mm_store->photo_time_period = para.DistractionDriv_PhotoInterval;
+                mm_store->video_time = para.DistractionDriv_VideoTime;
+            }else if(type == DSM_ABNORMAL_WARN){
+                mm_store->photo_num = para.AbnormalDriv_PhotoNum;
+                mm_store->photo_time_period = para.AbnormalDriv_PhotoInterval;
+                mm_store->video_time = para.AbnormalDriv_VideoTime;
+            }else{
+                ;
+            }
+            if(mm_store->video_time != 0)
+                mm_store->video_enable = 1; 
+            else
+                mm_store->video_enable = 0; 
+
+            if((mm_store->photo_num != 0 && mm_store->photo_num < WARN_SNAP_NUM_MAX))
+                mm_store->photo_enable = 1; 
+            else
+                mm_store->photo_enable = 0; 
+        case SW_TYPE_TSRW:
+        case SW_TYPE_TSR:
+            break;
+
+        case SW_TYPE_SNAP:
+            mm_store->photo_num = para.photo_num;
+            mm_store->photo_time_period = para.photo_time_period;
+            mm_store->photo_enable = 1; 
+
+        default:
+            break;
+    }
+}
+
+
+/*********************************
+* func: build adas warning package
+* return: framelen
+*********************************/
+int build_adas_warn_frame(int type, warningtext *uploadmsg)
+{
+    int i=0;
+    InfoForStore mm;
+    adas_para_setting para;
+
+    read_dev_para(&para, SAMPLE_DEVICE_ID_ADAS);
+    memset(&mm, 0, sizeof(mm));
+    get_adas_Info_for_store(type, &mm);
+
+    uploadmsg->warning_id = MY_HTONL(get_next_id(WARNING_ID_MODE, NULL, 0));
+    uploadmsg->sound_type = type;
+    uploadmsg->mm_num = 0;
+    get_real_time_msg(uploadmsg);
+    switch(type)
+    {
+        case SW_TYPE_FCW:
+        case SW_TYPE_LDW:
+        case SW_TYPE_HW:
+        case SW_TYPE_PCW:
+        case SW_TYPE_FLC:
+            if(mm.photo_enable)
+            {
+                get_next_id(MM_ID_MODE, mm.photo_id, mm.photo_num);
+                for(i=0; i<mm.photo_num; i++)
+                {
+                    //printf("mm.photo_id[%d] = %d\n", i, mm.photo_id[i]);
                     uploadmsg->mm_num++;
-                    uploadmsg->mm[i].type = MM_VIDEO;
-                    uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
+                    uploadmsg->mm[i].type = MM_PHOTO;
+                    uploadmsg->mm[i].id = MY_HTONL(mm.photo_id[i]);
                 }
-                push_mm_queue(&mm);
             }
-
+            if(mm.video_enable)
+            {
+                get_next_id(MM_ID_MODE, mm.video_id, 1);
+                uploadmsg->mm_num++;
+                uploadmsg->mm[i].type = MM_VIDEO;
+                uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
+            }
+            push_mm_queue(&mm);
             break;
 
         case SW_TYPE_TSRW:
@@ -638,24 +684,11 @@ int do_record_warning_info(int type, warningtext *uploadmsg)
             break;
 
         case SW_TYPE_SNAP:
-            //case SW_TYPE_TIMER_SNAP:
-
-            photo_num = para.photo_num;
-            photo_time_period = para.photo_time_period;
-
-            uploadmsg->warning_id = MY_HTONL(get_next_id(WARNING_ID_MODE, NULL, 0));
-            uploadmsg->sound_type = type;
-            uploadmsg->car_speed = 0;
-            uploadmsg->mm_num = 0;
-            // printf("snap shot num = %d\n", photo_num);
-            if(photo_num != 0 && photo_num < WARN_SNAP_NUM_MAX)
+            if(mm.photo_enable)
             {
                 mm.warn_type = type;
-                mm.photo_enable = 1; 
-                mm.photo_num = photo_num;
-                mm.photo_time_period = photo_time_period;
-                get_next_id(MM_ID_MODE, mm.photo_id, photo_num);
-                for(i=0; i<photo_num; i++)
+                get_next_id(MM_ID_MODE, mm.photo_id, mm.photo_num);
+                for(i=0; i<mm.photo_num; i++)
                 {
                     uploadmsg->mm_num++;
                     uploadmsg->mm[i].type = MM_PHOTO;
@@ -668,8 +701,87 @@ int do_record_warning_info(int type, warningtext *uploadmsg)
         default:
             break;
     }
+    return (sizeof(*uploadmsg) + uploadmsg->mm_num*sizeof(sample_mm_info));
+}
 
-    return uploadmsg->mm_num;
+/*********************************
+* func: build dsm warning package
+* return: framelen
+*********************************/
+int build_dsm_warn_frame(int type, dsm_warningtext *uploadmsg)
+{
+    int i=0;
+    InfoForStore mm;
+    adas_para_setting para;
+    real_time_data tmp;
+
+    read_dev_para(&para, SAMPLE_DEVICE_ID_ADAS);
+    memset(&mm, 0, sizeof(mm));
+    get_dsm_Info_for_store(type, &mm);
+
+    uploadmsg->warning_id = MY_HTONL(get_next_id(WARNING_ID_MODE, NULL, 0));
+    uploadmsg->sound_type = type;
+    uploadmsg->mm_num = 0;
+
+    RealTimeDdata_process(&tmp, READ_REAL_TIME_MSG);
+    uploadmsg->altitude = tmp.altitude;
+    uploadmsg->latitude = tmp.latitude;
+    uploadmsg->longitude = tmp.longitude;
+    uploadmsg->car_speed = tmp.car_speed;
+    memcpy(uploadmsg->time, tmp.time, sizeof(uploadmsg->time));
+    memcpy(&uploadmsg->car_status, &tmp.car_status, sizeof(uploadmsg->car_status));
+
+    switch(type)
+    {
+        case DSM_FATIGUE_WARN:
+        case DSM_CALLING_WARN:
+        case DSM_SMOKING_WARN:
+        case DSM_DISTRACT_WARN:
+        case DSM_ABNORMAL_WARN:
+            
+            if(mm.photo_enable)
+            {
+                get_next_id(MM_ID_MODE, mm.photo_id, mm.photo_num);
+                for(i=0; i<mm.photo_num; i++)
+                {
+                    //printf("mm.photo_id[%d] = %d\n", i, mm.photo_id[i]);
+                    uploadmsg->mm_num++;
+                    uploadmsg->mm[i].type = MM_PHOTO;
+                    uploadmsg->mm[i].id = MY_HTONL(mm.photo_id[i]);
+                }
+            }
+            if(mm.video_enable)
+            {
+                get_next_id(MM_ID_MODE, mm.video_id, 1);
+                uploadmsg->mm_num++;
+                uploadmsg->mm[i].type = MM_VIDEO;
+                uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
+            }
+            push_mm_queue(&mm);
+            break;
+
+        case DSM_DRIVER_CHANGE:
+            break;
+
+        case DSM_SANPSHOT_EVENT:
+            if(mm.photo_enable)
+            {
+                mm.warn_type = type;
+                get_next_id(MM_ID_MODE, mm.photo_id, mm.photo_num);
+                for(i=0; i<mm.photo_num; i++)
+                {
+                    uploadmsg->mm_num++;
+                    uploadmsg->mm[i].type = MM_PHOTO;
+                    uploadmsg->mm[i].id = MY_HTONL(mm.photo_id[i]);
+                }
+                push_mm_queue(&mm);
+            }
+            break;
+
+        default:
+            break;
+    }
+    return (sizeof(*uploadmsg) + uploadmsg->mm_num*sizeof(sample_mm_info));
 }
 
 #define SEND_PKG_TIME_OUT_1S    1000
@@ -855,7 +967,7 @@ static int32_t sample_escaple_msg(sample_prot_header *pHeader, int32_t msg_len)
 }
 
 //push到发送队列
-static int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t cmd,
+static int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t devid, uint8_t cmd,
         uint8_t *payload, int32_t payload_len)
 {
     uint16_t serial_num = 0;
@@ -904,7 +1016,8 @@ static int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t 
 
     pHeader->serial_num= MY_HTONS(serial_num); //used as message cnt
     pHeader->vendor_id= MY_HTONS(VENDOR_ID);
-    pHeader->device_id= SAMPLE_DEVICE_ID_ADAS;
+    //pHeader->device_id= SAMPLE_DEVICE_ID_ADAS;
+    pHeader->device_id= devid;
     pHeader->cmd = cmd;
 
     if (payload_len > 0) 
@@ -933,7 +1046,7 @@ void send_snap_shot_ack(sample_prot_header *pHeader, int32_t len)
 
     if(len == sizeof(sample_prot_header) + 1)
     {
-        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_SNAP_SHOT, (uint8_t *)&ack, 1);
+        sample_assemble_msg_to_push(pSend, pHeader->device_id, SAMPLE_CMD_SNAP_SHOT, (uint8_t *)&ack, 1);
     }
     else
     {
@@ -943,18 +1056,19 @@ void send_snap_shot_ack(sample_prot_header *pHeader, int32_t len)
 
 int do_snap_shot()
 {
-    uint8_t mm_num = 0;
+    uint32_t playloadlen = 0;
     uint8_t msgbuf[512];
     warningtext *uploadmsg = (warningtext *)&msgbuf[0];
     uint8_t txbuf[512];
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
 
-    mm_num = do_record_warning_info(SW_TYPE_SNAP, uploadmsg);
+    playloadlen = build_adas_warn_frame(SW_TYPE_SNAP, uploadmsg);
 
     sample_assemble_msg_to_push(pSend, \
+            SAMPLE_DEVICE_ID_ADAS,\
             SAMPLE_CMD_WARNING_REPORT,\
             (uint8_t *)uploadmsg,\
-            sizeof(*uploadmsg) + mm_num*sizeof(sample_mm_info));
+            playloadlen);
 
     return 0;
 }
@@ -984,12 +1098,11 @@ int can_message_send(can_data_type *sourcecan)
 {
     uint32_t warning_id = 0;
     uint8_t msgbuf[512];
-    uint8_t mm_num = 0;
+    uint32_t playloadlen = 0;
     warningtext *uploadmsg = (warningtext *)&msgbuf[0];
     MECANWarningMessage can;
     car_info carinfo;
     uint8_t txbuf[512];
-    char image_name[50];
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
 
     uint32_t i = 0;
@@ -1030,7 +1143,7 @@ int can_message_send(can_data_type *sourcecan)
 
             if (can.left_ldw || can.right_ldw) {
                 memset(uploadmsg, 0, sizeof(*uploadmsg));
-                mm_num = do_record_warning_info(SW_TYPE_LDW, uploadmsg);
+                playloadlen = build_adas_warn_frame(SW_TYPE_LDW, uploadmsg);
                 uploadmsg->start_flag = SW_STATUS_EVENT;
 
                 if(can.left_ldw)
@@ -1038,17 +1151,17 @@ int can_message_send(can_data_type *sourcecan)
                 if(can.right_ldw)
                     uploadmsg->ldw_type = SOUND_TYPE_RLDW;
 
-                sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT,\
+                sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
                         (uint8_t *)uploadmsg, \
-                        sizeof(*uploadmsg) + mm_num*sizeof(sample_mm_info));
+                        playloadlen);
             }
             if (can.fcw_on) {
-                mm_num = do_record_warning_info(SW_TYPE_FCW, uploadmsg);
+                playloadlen = build_adas_warn_frame(SW_TYPE_FCW, uploadmsg);
                 uploadmsg->start_flag = SW_STATUS_EVENT;
                 uploadmsg->sound_type = SW_TYPE_FCW;
-                sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT,\
+                sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
                         (uint8_t *)uploadmsg, \
-                        sizeof(*uploadmsg) + mm_num*sizeof(sample_mm_info));
+                        playloadlen);
             }
         }
         //Headway
@@ -1058,25 +1171,25 @@ int can_message_send(can_data_type *sourcecan)
             printf("headway_measurement:%d\n", can.headway_measurement);
 
             if (HW_LEVEL_RED_CAR == can.headway_warning_level) {
-                mm_num = do_record_warning_info(SW_TYPE_HW, uploadmsg);
+                playloadlen = build_adas_warn_frame(SW_TYPE_HW, uploadmsg);
                 //uploadmsg->start_flag = SW_STATUS_BEGIN;
                 uploadmsg->start_flag = SW_STATUS_EVENT;
                 uploadmsg->sound_type = SW_TYPE_HW;
 
-                sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT,\
+                sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
                         (uint8_t *)uploadmsg, \
-                        sizeof(*uploadmsg) + mm_num*sizeof(sample_mm_info));
+                        playloadlen);
 
             } else if (HW_LEVEL_RED_CAR == \
                     g_last_warning_data.headway_warning_level) {
-                mm_num = do_record_warning_info(SW_TYPE_HW, uploadmsg);
+                playloadlen = build_adas_warn_frame(SW_TYPE_HW, uploadmsg);
                 //uploadmsg->start_flag = SW_STATUS_END;
                 uploadmsg->start_flag = SW_STATUS_EVENT;
                 uploadmsg->sound_type = SW_TYPE_HW;
 
-                sample_assemble_msg_to_push(pSend, SAMPLE_CMD_WARNING_REPORT,\
+                sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
                         (uint8_t *)uploadmsg,\
-                        sizeof(*uploadmsg) + mm_num*sizeof(sample_mm_info));
+                        playloadlen);
             }
         }
 
@@ -1105,6 +1218,88 @@ int can_message_send(can_data_type *sourcecan)
 #endif
     }
     return 0;
+}
+
+void produce_dsm_image(uint32_t mmid, uint8_t warn)
+{
+    char produce_file[50];
+    
+    if(warn == DSM_CALLING_WARN){
+        snprintf(produce_file, sizeof(produce_file), "cp /data/dsm_video1.avi /mnt/obb/%08d.avi", mmid);
+        system(produce_file);
+    }
+    else if(warn == DSM_SMOKING_WARN){
+        snprintf(produce_file, sizeof(produce_file), "cp /data/dsm_video2.avi /mnt/obb/%08d.avi", mmid);
+        system(produce_file);
+    }
+
+}
+
+void send_dsm_warning(uint8_t warn_type)
+{
+    uint32_t warning_id = 0;
+    uint32_t mm_id[3] = {0};
+    uint8_t msgbuf[512];
+    uint8_t mm_num = 0;
+    MECANWarningMessage can;
+    car_info carinfo;
+    uint8_t txbuf[512];
+    sample_prot_header *pSend = (sample_prot_header *) txbuf;
+    
+    time_t timep;
+    struct tm *p = NULL; 
+    car_status_s	car_status;	
+    mm_node node;
+
+    uint32_t i = 0;
+    dsm_warningtext *DsmWarnMsg = (dsm_warningtext *)msgbuf;
+
+    DsmWarnMsg->warning_id = MY_HTONL(get_next_id(WARNING_ID_MODE, NULL, 0));
+
+    DsmWarnMsg->status_flag = 0;
+    DsmWarnMsg->sound_type = warn_type;
+    //DsmWarnMsg->warn_type = DSM_CALLING_WARN;
+    DsmWarnMsg->FatigueVal = 2;
+    memset(DsmWarnMsg->resv, 0, sizeof(DsmWarnMsg->resv));
+
+    DsmWarnMsg->car_speed = 0;
+    DsmWarnMsg->altitude = 0; //海拔
+    DsmWarnMsg->latitude = 0; //纬度
+    DsmWarnMsg->longitude = 0; //经度
+
+    ctime(&timep);
+    p = localtime(&timep);
+    DsmWarnMsg->time[0] = p->tm_year;
+    DsmWarnMsg->time[1] = p->tm_mon+1;
+    DsmWarnMsg->time[2] = p->tm_mday;
+    DsmWarnMsg->time[3] = p->tm_hour;
+    DsmWarnMsg->time[4] = p->tm_min;
+    DsmWarnMsg->time[5] = p->tm_sec;
+
+    DsmWarnMsg->mm_num = 1;
+    get_next_id(MM_ID_MODE, mm_id, 1);
+    DsmWarnMsg->mm->id = MY_HTONL(mm_id[0]);
+    DsmWarnMsg->mm->type = MM_VIDEO;
+
+    sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_DSM, SAMPLE_CMD_WARNING_REPORT,\
+            (uint8_t *)DsmWarnMsg,\
+            sizeof(*DsmWarnMsg) + mm_num*sizeof(sample_mm_info));
+
+    node.mm_type = MM_VIDEO;
+    node.mm_id = mm_id[0];
+
+    insert_mm_resouce(node);
+
+    produce_dsm_image(mm_id[0], DsmWarnMsg->sound_type);
+}
+
+void *pthread_send_dsm(void *para)
+{
+    while(1)
+    {
+        sleep(10);
+        //send_dsm_warning(DSM_CALLING_WARN);
+    }
 }
 
 void mmid_to_filename(uint32_t id, uint8_t type, char *filepath)
@@ -1190,6 +1385,7 @@ static int32_t send_mm_req_ack(sample_prot_header *pHeader, int len)
     uint8_t warn_type = 0;
     size_t filesize = 0;
     sample_mm_info *mm_ptr = NULL;
+    send_mm_info send_mm;
 
     if(pHeader->cmd == SAMPLE_CMD_REQ_MM_DATA && !g_pkg_status_p->mm_data_trans_waiting) //recv req
     {
@@ -1212,9 +1408,12 @@ static int32_t send_mm_req_ack(sample_prot_header *pHeader, int len)
         }
         //先应答请求，视频录制完成后在主动发送
         printf("send mm req ack!\n");
-        push_mm_req_cmd_queue(mm_ptr);
+        send_mm.devid = pHeader->device_id;
+        send_mm.id = mm_ptr->id;
+        send_mm.type = mm_ptr->type;
+        push_mm_req_cmd_queue(&send_mm);
 
-        sample_assemble_msg_to_push(pHeader, SAMPLE_CMD_REQ_MM_DATA, NULL, 0);
+        sample_assemble_msg_to_push(pHeader,pHeader->device_id, SAMPLE_CMD_REQ_MM_DATA, NULL, 0);
     }
     else
     {
@@ -1262,7 +1461,7 @@ static int recv_ack_and_send_image(sample_prot_header *pHeader, int32_t len)
                 }
                 else
                 {
-                    sample_send_image();
+                    sample_send_image(pHeader->device_id);
                 }
             }
         }
@@ -1270,7 +1469,7 @@ static int recv_ack_and_send_image(sample_prot_header *pHeader, int32_t len)
     return 0;
 }
 
-static int32_t sample_send_image()
+static int32_t sample_send_image(uint8_t devid)
 {
     int ret=0;
     int offset=0;
@@ -1323,7 +1522,7 @@ static int32_t sample_send_image()
     fclose(fp);
     if(ret>0)
     {
-        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_UPLOAD_MM_DATA, \
+        sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_UPLOAD_MM_DATA, \
                 data, (sizeof(g_pkg_status_p->mm) + ret));
         printf("send...[%d/%d]\n", MY_HTONS(g_pkg_status_p->mm.packet_total_num),\
                 MY_HTONS(g_pkg_status_p->mm.packet_index));
@@ -1355,32 +1554,48 @@ void write_real_time_data(sample_prot_header *pHeader, int32_t len)
     }
 }
 
-void do_factory_reset()
+void do_factory_reset(uint8_t dev_id)
 {
-    set_para_setting_default();
+    if(dev_id == SAMPLE_DEVICE_ID_ADAS){
+        set_adas_para_setting_default();
+        write_local_adas_para_file(LOCAL_ADAS_PRAR_FILE);
 
-    write_local_para_file(LOCAL_PRAR_FILE);
+    }else if(dev_id == SAMPLE_DEVICE_ID_DSM){
+        set_dsm_para_setting_default();
+        write_local_dsm_para_file(LOCAL_DSM_PRAR_FILE);
+    }
 }
 
 void recv_para_setting(sample_prot_header *pHeader, int32_t len)
 {
-    para_setting recv_para;
+    adas_para_setting recv_adas_para;
+    dsm_para_setting recv_dsm_para;
     uint8_t ack = 0;
     char cmd[100];
     uint8_t txbuf[128] = {0};
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
     int ret = 0;
 
-    if(len == sizeof(sample_prot_header) + 1 + sizeof(recv_para))
+    if(len == sizeof(sample_prot_header) + 1 + sizeof(recv_adas_para))
     {
-        memcpy(&recv_para, pHeader+1, sizeof(recv_para));
+        memcpy(&recv_adas_para, pHeader+1, sizeof(recv_adas_para));
 
-        //大端传输
-        recv_para.auto_photo_time_period = MY_HTONS(recv_para.auto_photo_time_period);
-        recv_para.auto_photo_distance_period = MY_HTONS(recv_para.auto_photo_distance_period);
+        if(pHeader->device_id == SAMPLE_DEVICE_ID_ADAS){
+            //大端传输
+            recv_adas_para.auto_photo_time_period = MY_HTONS(recv_adas_para.auto_photo_time_period);
+            recv_adas_para.auto_photo_distance_period = MY_HTONS(recv_adas_para.auto_photo_distance_period);
+            write_dev_para(&recv_adas_para, SAMPLE_DEVICE_ID_ADAS);
+            ret = write_local_adas_para_file(LOCAL_ADAS_PRAR_FILE);
 
-        write_warn_para(&recv_para);
-        ret = write_local_para_file(LOCAL_PRAR_FILE);
+        }else if(pHeader->device_id == SAMPLE_DEVICE_ID_DSM){
+            //大端传输
+            recv_dsm_para.auto_photo_time_period = MY_HTONS(recv_dsm_para.auto_photo_time_period);
+            recv_dsm_para.auto_photo_distance_period = MY_HTONS(recv_dsm_para.auto_photo_distance_period);
+            recv_dsm_para.Smoke_TimeIntervalThreshold = MY_HTONS(recv_dsm_para.Smoke_TimeIntervalThreshold);
+            recv_dsm_para.Call_TimeIntervalThreshold = MY_HTONS(recv_dsm_para.Call_TimeIntervalThreshold);
+            write_dev_para(&recv_dsm_para, SAMPLE_DEVICE_ID_DSM);
+            ret = write_local_dsm_para_file(LOCAL_DSM_PRAR_FILE);
+        }
 
 #if 0
         printf("start to kill algo!\n");
@@ -1399,12 +1614,12 @@ void recv_para_setting(sample_prot_header *pHeader, int32_t len)
         if(!ret)
         {
             ack = 0;
-            sample_assemble_msg_to_push(pSend, SAMPLE_CMD_SET_PARAM, (uint8_t*)&ack, 1);
+            sample_assemble_msg_to_push(pSend, pHeader->device_id, SAMPLE_CMD_SET_PARAM, (uint8_t*)&ack, 1);
         }
         else
         {
             ack = 1;
-            sample_assemble_msg_to_push(pSend, SAMPLE_CMD_SET_PARAM, \
+            sample_assemble_msg_to_push(pSend, pHeader->device_id, SAMPLE_CMD_SET_PARAM, \
                     (uint8_t*)&ack, 1);
         }
     }
@@ -1416,24 +1631,39 @@ void recv_para_setting(sample_prot_header *pHeader, int32_t len)
 
 void send_para_setting(sample_prot_header *pHeader, int32_t len)
 {
-    para_setting send_para;
+    adas_para_setting send_adas_para;
+    dsm_para_setting send_dsm_para;
     uint8_t txbuf[256] = {0};
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
 
     if(len == sizeof(sample_prot_header) + 1)
     {
-        read_warn_para(&send_para);
-        send_para.auto_photo_time_period = MY_HTONS(send_para.auto_photo_time_period);
-        send_para.auto_photo_distance_period = MY_HTONS(send_para.auto_photo_distance_period);
+        if(pHeader->device_id == SAMPLE_DEVICE_ID_ADAS){
+            read_dev_para(&send_adas_para, SAMPLE_DEVICE_ID_ADAS);
+            send_adas_para.auto_photo_time_period = MY_HTONS(send_adas_para.auto_photo_time_period);
+            send_adas_para.auto_photo_distance_period = MY_HTONS(send_adas_para.auto_photo_distance_period);
+            sample_assemble_msg_to_push(pSend,pHeader->device_id, SAMPLE_CMD_GET_PARAM, \
+                    (uint8_t*)&send_adas_para, sizeof(send_adas_para));
 
-        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_GET_PARAM, \
-                (uint8_t*)&send_para, sizeof(send_para));
+        }else if(pHeader->device_id == SAMPLE_DEVICE_ID_DSM){
+            read_dev_para(&send_dsm_para, SAMPLE_DEVICE_ID_ADAS);
+
+            send_dsm_para.auto_photo_time_period = MY_HTONS(send_dsm_para.auto_photo_time_period);
+            send_dsm_para.auto_photo_distance_period = MY_HTONS(send_dsm_para.auto_photo_distance_period);
+            send_dsm_para.Smoke_TimeIntervalThreshold = MY_HTONS(send_dsm_para.Smoke_TimeIntervalThreshold);
+            send_dsm_para.Call_TimeIntervalThreshold = MY_HTONS(send_dsm_para.Call_TimeIntervalThreshold);
+
+            sample_assemble_msg_to_push(pSend, pHeader->device_id, SAMPLE_CMD_GET_PARAM, \
+                    (uint8_t*)&send_dsm_para, sizeof(send_dsm_para));
+
+        }
     }
     else
     {
         printf("recv cmd:0x%x, data len maybe error!\n", pHeader->cmd);
     }
 }
+
 
 void recv_warning_ack(sample_prot_header *pHeader, int32_t len)
 {
@@ -1462,7 +1692,7 @@ void send_work_status_req_ack(sample_prot_header *pHeader, int32_t len)
     if(len == sizeof(sample_prot_header) + 1)
     {
         module.work_status = MODULE_WORKING;
-        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_REQ_STATUS, \
+        sample_assemble_msg_to_push(pSend, pHeader->device_id, SAMPLE_CMD_REQ_STATUS, \
                 (uint8_t*)&module, sizeof(module));
     }
     else
@@ -1470,7 +1700,7 @@ void send_work_status_req_ack(sample_prot_header *pHeader, int32_t len)
         printf("recv cmd:0x%x, data len maybe error!\n", pHeader->cmd);
     }
 }
-void send_work_status()
+void send_work_status(uint8_t devid)
 {
     module_status module;
     uint8_t txbuf[256] = {0};
@@ -1478,7 +1708,7 @@ void send_work_status()
 
     memset(&module, 0, sizeof(module));
     module.work_status = MODULE_WORKING;
-    sample_assemble_msg_to_push(pSend, SAMPLE_CMD_REQ_STATUS, \
+    sample_assemble_msg_to_push(pSend, devid, SAMPLE_CMD_REQ_STATUS, \
             (uint8_t*)&module, sizeof(module));
 }
 
@@ -1564,7 +1794,7 @@ int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
         }
         ack[0] = message_id;
         ack[1] = 0;
-        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_UPGRADE, \
+        sample_assemble_msg_to_push(pSend,pHeader->device_id, SAMPLE_CMD_UPGRADE, \
                 ack, sizeof(ack));
     }
     else if(message_id == UPGRADE_CMD_TRANS) //recv file
@@ -1610,7 +1840,7 @@ int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
                     printf("sun check ok!\n");
 
                     memcpy(data_ack, pchar, sizeof(data_ack));
-                    sample_assemble_msg_to_push(pSend, SAMPLE_CMD_UPGRADE, \
+                    sample_assemble_msg_to_push(pSend,pHeader->device_id, SAMPLE_CMD_UPGRADE, \
                             data_ack, sizeof(data_ack));
 
                     return 0;
@@ -1622,7 +1852,7 @@ int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
             }
         }
         memcpy(data_ack, pchar, sizeof(data_ack));
-        sample_assemble_msg_to_push(pSend, SAMPLE_CMD_UPGRADE, \
+        sample_assemble_msg_to_push(pSend,pHeader->device_id, SAMPLE_CMD_UPGRADE, \
                 data_ack, sizeof(data_ack));
     }
     else
@@ -1646,10 +1876,8 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
     uint8_t txbuf[128] = {0};
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
 
-    //do myself cmd
-    if (SAMPLE_DEVICE_ID_ADAS != pHeader->device_id) {
+    if(!MESSAGE_DEVID_IS_ME(pHeader->device_id))
         return 0;
-    }
 
     serial_num = MY_HTONS(pHeader->serial_num);
     do_serial_num(&serial_num, RECORD_RECV_NUM);
@@ -1658,12 +1886,12 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
     switch (pHeader->cmd)
     {
         case SAMPLE_CMD_QUERY:
-            sample_assemble_msg_to_push(pHeader, SAMPLE_CMD_QUERY, NULL, 0);
+            sample_assemble_msg_to_push(pHeader,pHeader->device_id, SAMPLE_CMD_QUERY, NULL, 0);
             break;
 
         case SAMPLE_CMD_FACTORY_RESET:
-            sample_assemble_msg_to_push(pHeader, SAMPLE_CMD_FACTORY_RESET, NULL, 0);
-            do_factory_reset();
+            sample_assemble_msg_to_push(pHeader,pHeader->device_id, SAMPLE_CMD_FACTORY_RESET, NULL, 0);
+            do_factory_reset(pHeader->device_id);
             break;
 
         case SAMPLE_CMD_SPEED_INFO: //不需要应答
@@ -1671,7 +1899,7 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
             break;
 
         case SAMPLE_CMD_DEVICE_INFO:
-            sample_assemble_msg_to_push(pSend, SAMPLE_CMD_DEVICE_INFO,
+            sample_assemble_msg_to_push(pSend,pHeader->device_id, SAMPLE_CMD_DEVICE_INFO,
                     (uint8_t*)&dev_info, sizeof(dev_info));
             break;
 
@@ -2029,17 +2257,18 @@ void *parse_host_cmd(void *para)
 #define SNAP_SHOT_BY_DISTANCE      2
 void *pthread_snap_shot(void *p)
 {
-    para_setting tmp;
+    adas_para_setting tmp;
     real_time_data rt_data;;
     uint32_t mileage = 0;
     int start = 0;
     int mileage_start = 0;
     struct timeval record_time;  
 
-    send_work_status();
+    send_work_status(SAMPLE_DEVICE_ID_ADAS);
+    send_work_status(SAMPLE_DEVICE_ID_DSM);
     while(1)
     {
-        read_warn_para(&tmp);
+        read_dev_para(&tmp, SAMPLE_DEVICE_ID_ADAS);
         if(tmp.auto_photo_mode == SNAP_SHOT_CLOSE)
         {
             sleep(2);
@@ -2097,22 +2326,22 @@ void *pthread_req_cmd_process(void *para)
     uint8_t mm_type = 0;
     uint8_t warn_type = 0;
     uint32_t filesize = 0;
-    sample_mm_info mm_info;
-    sample_mm_info *mm_ptr = &mm_info;
+    send_mm_info send_mm;
+    send_mm_info *send_mm_ptr = &send_mm;
     struct timeval req_time;  
     int ret = 0;
 
     while(1)
     {
-        if(!pull_mm_req_cmd_queue(&mm_info))
+        if(!pull_mm_req_cmd_queue(&send_mm))
         {
             printf("pull mm_info!\n");
 
             gettimeofday(&req_time, NULL);
             while(1){
 
-                mm_id = MY_HTONL(mm_ptr->id);
-                mm_type = mm_ptr->type;
+                mm_id = MY_HTONL(send_mm_ptr->id);
+                mm_type = send_mm_ptr->type;
                 ret = find_local_image_name(mm_type, mm_id,  g_pkg_status_p->filepath, &filesize);
                 if(ret != 0)
                 {
@@ -2126,14 +2355,14 @@ void *pthread_req_cmd_process(void *para)
 
                 //记录当前包的信息, 发送应答
                 g_pkg_status_p->mm.type = mm_type;
-                g_pkg_status_p->mm.id = mm_ptr->id;
+                g_pkg_status_p->mm.id = send_mm_ptr->id;
                 g_pkg_status_p->mm.packet_index = 0;
                 g_pkg_status_p->mm.packet_total_num = MY_HTONS((filesize + IMAGE_SIZE_PER_PACKET - 1)/IMAGE_SIZE_PER_PACKET);
                 g_pkg_status_p->mm_data_trans_waiting = 1;
 
                 //send first package
                 printf("send first package!\n");
-                sample_send_image();
+                sample_send_image(send_mm_ptr->devid);
                 break;
             }
         }
@@ -2145,11 +2374,5 @@ void *pthread_req_cmd_process(void *para)
         record_time(RECORD_START);
     }
 }
-
-
-
-
-
-
 
 
