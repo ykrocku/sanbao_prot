@@ -6,9 +6,9 @@
 
 #include <queue>
 
-//#define ONLY_ENABLE_ADAS
+#define ONLY_ENABLE_ADAS
 //#define ONLY_ENABLE_DSM
-#define ENABLE_ADAS_AND_DSM
+//#define ENABLE_ADAS_AND_DSM
 
 #if defined ENABLE_ADAS_AND_DSM
     #define MESSAGE_DEVID_IS_ME(id)  (SAMPLE_DEVICE_ID_ADAS == (id) || SAMPLE_DEVICE_ID_DSM == (id))

@@ -32,6 +32,8 @@ static int32_t sample_send_image(uint8_t devid);
 #define WRITE_REAL_TIME_MSG 0
 #define READ_REAL_TIME_MSG  1
 
+#define ADAS_CHANNEL    0
+#define DSM_CHANNEL     1
 
 int GetFileSize(char *filename);
 
@@ -136,8 +138,19 @@ pthread_mutex_t ptr_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 queue<ptr_queue_node *> g_ptr_queue;
 queue<ptr_queue_node *> *g_ptr_queue_p = &g_ptr_queue;
 
-pthread_mutex_t uchar_queue_lock = PTHREAD_MUTEX_INITIALIZER;
-queue<uint8_t> g_uchar_queue;
+
+pthread_mutex_t adas_uchar_queue_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t *adas_uchar_q_lock_p = &adas_uchar_queue_lock;
+queue<uint8_t> g_adas_uchar_queue;
+queue<uint8_t> *g_adas_uchar_queue_p = &g_adas_uchar_queue;
+
+
+pthread_mutex_t dsm_uchar_queue_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t *dsm_uchar_q_lock_p = &dsm_uchar_queue_lock;
+queue<uint8_t> g_dsm_uchar_queue;
+queue<uint8_t> *g_dsm_uchar_queue_p = &g_dsm_uchar_queue;
+
+
 
 pkg_repeat_status g_pkg_status;
 pkg_repeat_status *g_pkg_status_p = &g_pkg_status;
@@ -870,41 +883,43 @@ out:
     return retval;
 }
 
-static int uchar_queue_push(uint8_t *ch)
+
+
+static int uchar_queue_push(uint8_t *ch, queue<uint8_t> *uchar_queue, pthread_mutex_t *lock)
 {
     int ret = -1;
     if(!ch)
         return ret;
 
-    pthread_mutex_lock(&uchar_queue_lock);
-    if((int)g_uchar_queue.size() == UCHAR_QUEUE_SIZE)
+    pthread_mutex_lock(lock);
+    if((int)uchar_queue->size() == UCHAR_QUEUE_SIZE)
     {
-        printf("g_uchar_queue full flow\n");
+        printf("uchar queue full flow\n");
         ret = -1;
         goto out;
     }
     else
     {
-        g_uchar_queue.push(ch[0]);
+        uchar_queue->push(ch[0]);
         ret = 0;
         goto out;
     }
 out:
-    pthread_mutex_unlock(&uchar_queue_lock);
+    pthread_mutex_unlock(lock);
     return ret;
 }
 
-static int8_t uchar_queue_pop(uint8_t *ch)
+static int8_t uchar_queue_pop(uint8_t *ch, queue<uint8_t> *uchar_queue, pthread_mutex_t *lock)
 {
     int ret = -1;
     if(!ch)
         return ret;
 
-    pthread_mutex_lock(&uchar_queue_lock);
-    if(!g_uchar_queue.empty())
+    pthread_mutex_lock(lock);
+    if(!uchar_queue->empty())
     {
-        *ch = g_uchar_queue.front();
-        g_uchar_queue.pop();
+        *ch = uchar_queue->front();
+        uchar_queue->pop();
         ret = 0;
         goto out;
     }
@@ -914,7 +929,7 @@ static int8_t uchar_queue_pop(uint8_t *ch)
         goto out;
     }
 out:
-    pthread_mutex_unlock(&uchar_queue_lock);
+    pthread_mutex_unlock(lock);
     return ret;
 }
 
@@ -1758,7 +1773,7 @@ int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
     static uint32_t sum = 0;
     static uint32_t sum_new = 0;
     uint8_t data[4];
-    uint8_t data_ack[5];
+    uint8_t data_ack[6];
     uint8_t ack[2];
     int32_t datalen = 0;
     uint8_t *pchar=NULL;
@@ -1839,7 +1854,8 @@ int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
                 {
                     printf("sun check ok!\n");
 
-                    memcpy(data_ack, pchar, sizeof(data_ack));
+                    memcpy(data_ack, pchar, 5);
+                    data_ack[5] = 0;
                     sample_assemble_msg_to_push(pSend,pHeader->device_id, SAMPLE_CMD_UPGRADE, \
                             data_ack, sizeof(data_ack));
 
@@ -1851,7 +1867,8 @@ int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
                 }
             }
         }
-        memcpy(data_ack, pchar, sizeof(data_ack));
+        memcpy(data_ack, pchar, 5);
+        data_ack[5] = 0;
         sample_assemble_msg_to_push(pSend,pHeader->device_id, SAMPLE_CMD_UPGRADE, \
                 data_ack, sizeof(data_ack));
     }
@@ -2028,16 +2045,60 @@ static int try_connect()
     }
 }
 
+int recv_tcp_message(int sock, uint8_t *readbuf, int len, char channel)
+{
+    int readlen = 0;
+    int retval = 0;
+    int i = 0;
+
+    memset(readbuf, 0, len);
+    readlen = read(sock, readbuf, len);
+    if (readlen <= 0) {
+        printf("read failed %d %s\n", readlen, strerror(errno));
+        close(sock);
+        sock = -1;
+        return sock;
+
+        //continue;
+    }
+    else//write to buf
+    {
+        i=0;
+        while(readlen--)
+        {
+            if(channel == ADAS_CHANNEL)
+                retval = uchar_queue_push(&readbuf[i], g_adas_uchar_queue_p, adas_uchar_q_lock_p);
+            else if(channel == DSM_CHANNEL)
+                retval = uchar_queue_push(&readbuf[i], g_dsm_uchar_queue_p, dsm_uchar_q_lock_p);
+            else
+                return 0;
+
+            if(!retval)
+            {
+                i++;
+                //printf("i = %d\n", i);
+                continue;
+            }else
+                usleep(10);
+        }
+    }
+    return 0;
+}
+
 void *communicate_with_host(void *para)
 {
 #define TCP_READ_BUF_SIZE (64*1024)
 
     int32_t ret = 0;
     int retval = 0;;
-    int hostsock = -1;
+    int SockAdas = -1;
+    int Sockfd = -1;
+    int i = 0;
+    int socknum = 2;
+    int SockDsm = -1;
+    int SockFdMax = 0;
     fd_set rfds, wfds;
     struct timeval tv;
-    int i=0;
     static int tcprecvcnt = 0;
     uint8_t *readbuf = NULL;
 
@@ -2051,20 +2112,30 @@ void *communicate_with_host(void *para)
     }
 
 connect_again:
-    hostsock = try_connect();
-    if(hostsock < 0)
-        goto connect_again;
+    if(SockAdas < 0)
+        SockAdas = try_connect();
+    //if(SockDsm < 0)
+    //    SockDsm = try_connect();
+
+    //if(SockAdas < 0)
+    //    goto connect_again;
 
     while (1) {
 
         FD_ZERO(&rfds);
         FD_ZERO(&wfds);
-        FD_SET(hostsock, &rfds);
-        FD_SET(hostsock, &wfds);
+
+        FD_SET(SockAdas, &rfds);
+        FD_SET(SockAdas, &wfds);
+
+        //FD_SET(SockDsm, &rfds);
+        //FD_SET(SockDsm, &wfds);
+
+        SockFdMax = SockAdas > SockDsm ? SockAdas : SockDsm;
 
         tv.tv_sec = 2;
         tv.tv_usec = 0;
-        retval = select((hostsock + 1), &rfds, &wfds, NULL, &tv);
+        retval = select((SockFdMax + 1), &rfds, &wfds, NULL, &tv);
         if (retval == -1)
         {
             perror("select()");
@@ -2072,40 +2143,15 @@ connect_again:
         }
         else if (retval)
         {
-            if(FD_ISSET(hostsock, &rfds))
+            if(FD_ISSET(SockAdas, &rfds))
             {
-                memset(readbuf, 0, TCP_READ_BUF_SIZE);
-                ret = read(hostsock, readbuf, TCP_READ_BUF_SIZE);
-                if (ret <= 0) {
-                    printf("read failed %d %s\n", ret, strerror(errno));
-                    close(hostsock);
-                    hostsock = -1;
+                ret = recv_tcp_message(SockAdas, readbuf, TCP_READ_BUF_SIZE, i);
+                if(ret < 0)
                     goto connect_again;
-
-                    //continue;
-                }
-                else//write to buf
-                {
-                    //   MY_DEBUG("recv raw cmd, tcprecvcnt = %d:\n", tcprecvcnt++);
-                    //     printbuf(readbuf, ret);
-                    i=0;
-                    while(ret--)
-                    {
-                        if(!uchar_queue_push(&readbuf[i]))
-                        {
-                            i++;
-                            //printf("i = %d\n", i);
-                            continue;
-                        }
-                        else
-                            usleep(10);
-                    }
-                }
             }
-            if(FD_ISSET(hostsock, &wfds))
+            if(FD_ISSET(SockAdas, &wfds))
             {
-                send_pkg_to_host(hostsock);
-                //tcpsend_pkg_to_host(hostsock);
+                send_pkg_to_host(SockAdas);
             }
         }
         else
@@ -2120,12 +2166,13 @@ connect_again:
     return NULL;
 }
 
-static int unescaple_msg(uint8_t *msg, int msglen)
+static int unescaple_msg(uint8_t *msg, int msglen, char channel)
 {
     uint8_t ch = 0;
     char get_head = 0;
     char got_esc_char = 0;
     int cnt = 0;
+    int retval = 0;
 
     int i = 0;
 
@@ -2139,7 +2186,15 @@ static int unescaple_msg(uint8_t *msg, int msglen)
             printf("error: msg too long\n");
             return -1;
         }
-        if(!uchar_queue_pop(&ch))//pop success
+    
+        if(channel == ADAS_CHANNEL)
+            retval = uchar_queue_pop(&ch, g_adas_uchar_queue_p, adas_uchar_q_lock_p);
+        else if(channel == DSM_CHANNEL)
+            retval = uchar_queue_pop(&ch, g_dsm_uchar_queue_p, dsm_uchar_q_lock_p);
+        else
+            return -1;
+
+        if(!retval)//pop success
         {
             // printf("data[%d] = 0x%02x\n", i++, ch);
             if(!get_head)//not recv head
@@ -2229,7 +2284,7 @@ void *parse_host_cmd(void *para)
     pHeader = (sample_prot_header *) msgbuf;
     while(1)
     {
-        ret = unescaple_msg(msgbuf, RECV_HOST_DATA_BUF_SIZE);
+        ret = unescaple_msg(msgbuf, RECV_HOST_DATA_BUF_SIZE, ADAS_CHANNEL);
         if(ret>0)
         {
             framelen = ret;
@@ -2265,7 +2320,7 @@ void *pthread_snap_shot(void *p)
     struct timeval record_time;  
 
     send_work_status(SAMPLE_DEVICE_ID_ADAS);
-    send_work_status(SAMPLE_DEVICE_ID_DSM);
+    //send_work_status(SAMPLE_DEVICE_ID_DSM);
     while(1)
     {
         read_dev_para(&tmp, SAMPLE_DEVICE_ID_ADAS);
@@ -2321,7 +2376,6 @@ void *pthread_snap_shot(void *p)
 
 void *pthread_req_cmd_process(void *para)
 {
-
     uint32_t mm_id = 0;
     uint8_t mm_type = 0;
     uint8_t warn_type = 0;
