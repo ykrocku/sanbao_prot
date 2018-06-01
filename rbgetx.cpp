@@ -18,7 +18,11 @@
 #include "common/time/timestamp.h"
 
 #include "prot.h"
-#include "MjpegWriter.h"
+
+
+#include <stdlib.h>
+#include <fstream>
+#include "common/mp4/MP4Writer.h"
 
 #include <cstddef>
 #include "common/base/closure.h"
@@ -33,7 +37,6 @@
 #endif
 
 using namespace std;
-int pthread_status[8];
 
 #define  ADAS_JPEG_SIZE (4* 1024 * 1024)
 #define  ADAS_IMAGE_SIZE (100* 1024 * 1024)
@@ -107,13 +110,13 @@ int32_t delete_mm_resource(uint32_t id)
             if(it->mm_type == MM_VIDEO)
             {
 #if 0
-                sprintf(filepath,"%s%s-%08d.avi",SNAP_SHOT_JPEG_PATH,\
+                sprintf(filepath,"%s%s-%08d.mp4",SNAP_SHOT_JPEG_PATH,\
                         warning_type_to_str(it->warn_type), id);
 #endif
 
-                sprintf(filepath,"%s%08d.avi",SNAP_SHOT_JPEG_PATH,id);
+                sprintf(filepath,"%s%08d.mp4",SNAP_SHOT_JPEG_PATH,id);
 
-                printf("rm avi %s\n", filepath);
+                printf("rm mp4 %s\n", filepath);
                 remove(filepath);
                 it = mmlist.erase(it);  
                 ret = 0;
@@ -457,13 +460,12 @@ void store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
 
 #define RECORD_JPEG_NEED 1
 #define RECORD_JPEG_NO_NEED 0
-void store_one_avi(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
+void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
 {
 #define VIDEO_FRAMES_PER_SECOND   15
     RBFrame* pFrame = nullptr;
-    char avifilepath[100];
+    char mp4filepath[100];
     char writefile_link[100];
-    MjpegWriter mjpeg;
     mm_node node;
     struct timeval record_time;  
     int jpeg_index = 0;
@@ -486,13 +488,14 @@ void store_one_avi(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
         store_one_jpeg(mm, pFrame, jpeg_index++);
     }
 
-    sprintf(avifilepath,"%s%08d.avi", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
+    sprintf(mp4filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
 
     printf("seek time:%d\n", 0-mm->video_time);
     pRB->SeekIndexByTime((0-mm->video_time));
 
-    mjpeg.Open(avifilepath, VIDEO_FRAMES_PER_SECOND, pFrame->video.VWidth, pFrame->video.VHeight);
-    fprintf(stdout, "Saving image file...%s\n", avifilepath);
+    std::ofstream ofs(mp4filepath, std::ofstream::out | std::ofstream::binary);
+    MP4Writer mp4(ofs, VIDEO_FRAMES_PER_SECOND, pFrame->video.VWidth, pFrame->video.VHeight);
+    fprintf(stdout, "Saving image file...%s\n", mp4filepath);
 
     force_exit_time = mm->video_time*1000;
     gettimeofday(&record_time, NULL);
@@ -500,7 +503,7 @@ void store_one_avi(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
     {
         if(timeout_trigger(&record_time, force_exit_time))
         {
-            printf("avi timeout break\n");
+            printf("mp4 timeout break\n");
             break;
         }
 
@@ -512,7 +515,7 @@ void store_one_avi(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
         }
         print_frame("video-read", pFrame);
 
-        mjpeg.Write(pFrame->data, pFrame->dataLen);
+        mp4.Write(pFrame->data, pFrame->dataLen);
 
         if(jpeg_flag)
         {
@@ -525,11 +528,13 @@ void store_one_avi(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
         }
         pRB->CommitRead();
     }
-    mjpeg.Close();
-    sprintf(writefile_link,"ln -s %s %s%s-%08d.avi", avifilepath, SNAP_SHOT_JPEG_PATH,\
+    mp4.End();
+    ofs.close();
+
+    sprintf(writefile_link,"ln -s %s %s%s-%08d.mp4", mp4filepath, SNAP_SHOT_JPEG_PATH,\
             warning_type_to_str(mm->warn_type), mm->video_id[0]);
     //system(writefile_link);
-    printf("%s avi done!\n", warning_type_to_str(mm->warn_type));
+    printf("%s mp4 done!\n", warning_type_to_str(mm->warn_type));
 
     node.warn_type = mm->warn_type;
     node.mm_type = MM_VIDEO;
@@ -539,20 +544,18 @@ void store_one_avi(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
     //display_mm_resource();
 }
 
-//修改为同时获取jpg 和 avi
-void record_mm_infor(CRingBuf* pRB, InfoForStore info, int *status)
+//修改为同时获取jpg 和mp4 
+void record_mm_infor(CRingBuf* pRB, InfoForStore info)
 {
     int i=0;
     RBFrame* pFrame = nullptr;
-    char avifilepath[100];
+    char mp4filepath[100];
     InfoForStore mm;
-    MjpegWriter mjpeg;
     mm_node node;
     uint64_t timestart = 0;
     struct timeval record_time;  
     int cnt = 1;
 
-    *status = 1;
     memcpy(&mm, &info, sizeof(mm));
 
     if(mm.photo_enable && !mm.video_enable)
@@ -561,17 +564,16 @@ void record_mm_infor(CRingBuf* pRB, InfoForStore info, int *status)
     }
     else if(!mm.photo_enable && mm.video_enable)
     {
-        store_one_avi(pRB, &mm, RECORD_JPEG_NO_NEED);
+        store_one_mp4(pRB, &mm, RECORD_JPEG_NO_NEED);
     }
     else if(mm.photo_enable && mm.video_enable)
     {
-        store_one_avi(pRB, &mm, RECORD_JPEG_NEED);
+        store_one_mp4(pRB, &mm, RECORD_JPEG_NEED);
     }
     else //do nothing
     {
         ;
     }
-    *status = 1;
 }
 
 int get_mm_type(char *file_type, uint8_t *val)
@@ -585,7 +587,7 @@ int get_mm_type(char *file_type, uint8_t *val)
     {
         *val = MM_AUDIO;
     }
-    else if(!strncmp("avi", file_type, strlen("avi")))
+    else if(!strncmp("mp4", file_type, strlen("mp4")))
     {
         *val = MM_VIDEO;
     }
@@ -749,6 +751,34 @@ void read_pthread_num(uint32_t i)
     printf(" i =%d, Num = %ld, busy = %ld, pending = %ld, time = %ld.%ld\n", i, pstat.NumThreads, pstat.NumBusyThreads, pstat.NumPendingTasks, rec_time.tv_sec, rec_time.tv_usec);
 }
 
+void produce_dsm_image(InfoForStore *mm)
+{
+    char produce_file[50];
+    int i=0;
+    mm_node node;
+
+
+
+    for(i=0; i<mm->photo_num; i++){
+        printf("photo id = %d\n", mm->photo_id[i]);
+        snprintf(produce_file, sizeof(produce_file), "cp /data/dsm.jpg %s/%08d.jpg",SNAP_SHOT_JPEG_PATH, mm->photo_id[i]);
+        printf("--%s\n", produce_file);
+        system(produce_file);
+        node.mm_type = MM_PHOTO;
+        node.mm_id = mm->photo_id[i];
+        insert_mm_resouce(node);
+    }
+    printf("video id = %d\n", mm->video_id[0]);
+    snprintf(produce_file, sizeof(produce_file), "cp /data/dsm.mp4%s/%08d.mp4",SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
+    system(produce_file);
+    node.mm_type = MM_VIDEO;
+    node.mm_id = mm->video_id[0];
+    insert_mm_resouce(node);
+}
+
+
+
+
 void *pthread_sav_warning_jpg(void *p)
 {
 #define CUSTOMER_NUM   8 
@@ -763,24 +793,26 @@ void *pthread_sav_warning_jpg(void *p)
     Closure<void>* cls[WARN_TYPE_NUM];
     // char user_name[WARN_TYPE_NUM][20]={
     char user_name[CUSTOMER_NUM][20]={
-        "customer_FCW_avi","customer_LDW_avi","customer_HW_avi","customer_PCW_avi",
-        "customer_FLC_avi","customer_TSRW_avi","customer_TSR_avi","customer_SNAP_avi",
+        "customer_FCW_mp4","customer_LDW_mp4","customer_HW_mp4","customer_PCW_mp4",
+        "customer_FLC_mp4","customer_TSRW_mp4","customer_TSR_mp4","customer_SNAP_mp4",
 #if 0
         "customer_FCW_jpg","customer_LDW_jpg","customer_HW_jpg","customer_PCW_jpg",
         "customer_FLC_jpg","customer_TSRW_jpg","customer_TSR_jpg","customer_SNAP_jpg",
 #endif
     };
 
-    memset(pthread_status, 0, sizeof(pthread_status));
     //for(i=0; i<WARN_TYPE_NUM; i++)
     for(i=0; i<CUSTOMER_NUM; i++)
     {
         printf("name:%s\n", user_name[i]);
+
+#ifdef ENABLE_ADAS
         pr[i] = new CRingBuf(user_name[i], "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
+#endif
     }
 
-    //pool.SetMinThreads(8);
-    pool.SetMaxThreads(4);
+    pool.SetMinThreads(8);
+    //pool.SetMaxThreads(4);
 
     printf("min pthread = %d\n", pool.GetMinThreads());
     printf("max pthread = %d\n", pool.GetMaxThreads());
@@ -797,6 +829,15 @@ void *pthread_sav_warning_jpg(void *p)
            // sleep(1);
             continue;
         }
+
+#ifdef ENABLE_DSM
+    printf("photo num: 0x%x\n", mm.photo_num);
+    produce_dsm_image(&mm);
+
+    continue;
+#endif
+
+
 
 #else//debug
 
@@ -822,7 +863,7 @@ void *pthread_sav_warning_jpg(void *p)
 
         i = i % 8;
 
-        cls[i] = NewClosure(record_mm_infor, pr[i], mm, &pthread_status[i]);
+        cls[i] = NewClosure(record_mm_infor, pr[i], mm);
         pool.AddTask(cls[i]);
 
         read_pthread_num(i);

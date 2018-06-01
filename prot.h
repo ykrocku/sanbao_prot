@@ -6,15 +6,17 @@
 
 #include <queue>
 
-//#define ONLY_ENABLE_ADAS
-//#define ONLY_ENABLE_DSM
-#define ENABLE_ADAS_AND_DSM
+#define ENABLE_ADAS
+//#define ENABLE_DSM
+//#define ENABLE_ADAS_AND_DSM
+
+#define IS_BRDCST(id)   (SAMPLE_DEVICE_ID_BRDCST == (id))
 
 #if defined ENABLE_ADAS_AND_DSM
-    #define MESSAGE_DEVID_IS_ME(id)  (SAMPLE_DEVICE_ID_ADAS == (id) || SAMPLE_DEVICE_ID_DSM == (id))
-#elif defined ONLY_ENABLE_ADAS
     #define MESSAGE_DEVID_IS_ME(id)  (SAMPLE_DEVICE_ID_ADAS == (id))
-#elif defined ONLY_ENABLE_DSM
+#elif defined ENABLE_ADAS
+    #define MESSAGE_DEVID_IS_ME(id)  (SAMPLE_DEVICE_ID_ADAS == (id))
+#elif defined ENABLE_DSM
     #define MESSAGE_DEVID_IS_ME(id)  (SAMPLE_DEVICE_ID_DSM == (id))
 #else
     #define MESSAGE_DEVID_IS_ME(id)  (SAMPLE_DEVICE_ID_ADAS == (id))
@@ -31,15 +33,44 @@
 #define MM_AUDIO 1
 #define MM_VIDEO 2
 
-#define DO_DELETE_SNAP_SHOT_FILES "rm -r /data/snap/*"
+
+
+
+
+#if defined ENABLE_ADAS
+#define DO_DELETE_SNAP_SHOT_FILES "rm -r /data/snap/adas/*"
 //#define SNAP_SHOT_JPEG_PATH "/data/snap/"
-#define SNAP_SHOT_JPEG_PATH "/mnt/obb/"
+#define SNAP_SHOT_JPEG_PATH "/mnt/obb/adas/"
+
+#elif defined ENABLE_DSM
+#define DO_DELETE_SNAP_SHOT_FILES "rm -r /data/snap/dsm/*"
+//#define SNAP_SHOT_JPEG_PATH "/data/snap/"
+#define SNAP_SHOT_JPEG_PATH "/mnt/obb/dsm/"
+
+#endif
+
+
+
+
+
+
+
+
+
 #define LOCAL_ADAS_PRAR_FILE     "/data/adas_para"
 #define LOCAL_DSM_PRAR_FILE     "/data/dsm_para"
+
+#if 0
 #define UPGRADE_FILE_PATH     "/data/upgrade.mpk"
 #define CLEAN_MPK " rm /data/upgrade.mpk"
-
 #define UPGRADE_FILE_CMD     "/data/upgrade.sh /data/upgrade.mpk"
+#else
+#define UPGRADE_FILE_PATH     "/data/mnt/obb/package.bin"
+#define CLEAN_MPK             "rm /mnt/obb/package.bin"
+#define UPGRADE_FILE_CMD      "/data/upgrade.sh"
+
+#endif
+
 
 //protocol
 #define PROTOCOL_USING_BIG_ENDIAN
@@ -566,8 +597,9 @@ uint32_t video_id[2];
 
 
 /**********queue and repeat_send struct****************/
-//#define IMAGE_SIZE_PER_PACKET   (1024)
-#define IMAGE_SIZE_PER_PACKET   (64*1024)
+#define IMAGE_SIZE_PER_PACKET   (1024)
+//#define IMAGE_SIZE_PER_PACKET   (64*1024)
+//#define IMAGE_SIZE_PER_PACKET   (2*1024)
 
 #define PTR_QUEUE_BUF_SIZE   (2*(IMAGE_SIZE_PER_PACKET + 64)) //加64, 大于 header + tail, 
 #define PTR_QUEUE_BUF_CNT    (16)
@@ -652,11 +684,13 @@ void *pthread_req_cmd_process(void *para);
 
 int pthread_is_not_idle();
 
+void print_dsm_para(dsm_para_setting *para);
 void print_adas_para(adas_para_setting *para);
 int read_local_adas_para_file(const char* filename);
 int read_local_dsm_para_file(const char* filename);
 
 
+void produce_dsm_image(InfoForStore *mm);
 void set_dsm_para_setting_default();
 
 void *pthread_send_dsm(void *para);

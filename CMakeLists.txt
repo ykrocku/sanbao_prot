@@ -79,6 +79,7 @@ ADD_SUBDIRECTORY(common/memory)
 ADD_SUBDIRECTORY(common/string)
 ADD_SUBDIRECTORY(common/hal)
 ADD_SUBDIRECTORY(common/ringbuf)
+ADD_SUBDIRECTORY(common/mp4)
 IF (ANDROID_ABI)
     ADD_SUBDIRECTORY(thirdparty/miniglog)
 ENDIF()
@@ -92,12 +93,12 @@ ELSEIF(ANDROID_ABI)
     #SET(SRC_LIST RingBufDebug.cpp CRingBuf.cpp)
     #ADD_LIBRARY(ringbuf STATIC ${SRC_LIST})
 
-    ADD_EXECUTABLE(websocket_client websocket_client.cpp sample.cpp rbgetx.cpp MjpegWriter.cpp prot.cpp)
+    ADD_EXECUTABLE(websocket_client websocket_client.cpp sample.cpp rbgetx.cpp prot.cpp)
     #ADD_DEPENDENCIES(websocket_client MINIEYE_VERSION)
     TARGET_LINK_LIBRARIES(websocket_client
         #        halio concurrency
         libmsgpackc.a libwebsockets.a dl
-        ringbuf halio concurrency
+        ringbuf halio concurrency mp4w
         -Wl,--start-group
         -Wl,--end-group
         )

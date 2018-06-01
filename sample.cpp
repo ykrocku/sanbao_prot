@@ -454,7 +454,7 @@ void push_mm_queue(InfoForStore *mm)
     ptr_queue_push(g_image_queue_p, &header, &photo_queue_lock);
 }
 
-//pull node ,the info use to record the avi or jpeg
+//pull node ,the info use to record the mp4 or jpeg
 int pull_mm_queue(InfoForStore *mm)
 {
     ptr_queue_node header;
@@ -618,11 +618,12 @@ void get_dsm_Info_for_store(uint8_t type, InfoForStore *mm_store)
                 mm_store->photo_enable = 1; 
             else
                 mm_store->photo_enable = 0; 
-        case SW_TYPE_TSRW:
-        case SW_TYPE_TSR:
+
+
+        case DSM_DRIVER_CHANGE:
             break;
 
-        case SW_TYPE_SNAP:
+        case DSM_SANPSHOT_EVENT:
             mm_store->photo_num = para.photo_num;
             mm_store->photo_time_period = para.photo_time_period;
             mm_store->photo_enable = 1; 
@@ -631,6 +632,10 @@ void get_dsm_Info_for_store(uint8_t type, InfoForStore *mm_store)
             break;
     }
 }
+
+
+
+
 
 
 /*********************************
@@ -651,6 +656,8 @@ int build_adas_warn_frame(int type, warningtext *uploadmsg)
     uploadmsg->sound_type = type;
     uploadmsg->mm_num = 0;
     get_real_time_msg(uploadmsg);
+    
+
     switch(type)
     {
         case SW_TYPE_FCW:
@@ -677,6 +684,23 @@ int build_adas_warn_frame(int type, warningtext *uploadmsg)
                 uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
             }
             push_mm_queue(&mm);
+
+#if 1
+            //add dsm video
+
+            i++;
+            mm.video_enable = 1; 
+            mm.photo_enable = 0; 
+            if(mm.video_enable)
+            {
+                get_next_id(MM_ID_MODE, mm.video_id, 1);
+                uploadmsg->mm_num++;
+                uploadmsg->mm[i].type = MM_VIDEO;
+                uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
+            }
+            push_mm_queue(&mm);
+#endif
+
             break;
 
         case SW_TYPE_TSRW:
@@ -704,6 +728,9 @@ int build_adas_warn_frame(int type, warningtext *uploadmsg)
     return (sizeof(*uploadmsg) + uploadmsg->mm_num*sizeof(sample_mm_info));
 }
 
+
+
+
 /*********************************
 * func: build dsm warning package
 * return: framelen
@@ -712,10 +739,10 @@ int build_dsm_warn_frame(int type, dsm_warningtext *uploadmsg)
 {
     int i=0;
     InfoForStore mm;
-    adas_para_setting para;
+    dsm_para_setting para;
     real_time_data tmp;
 
-    read_dev_para(&para, SAMPLE_DEVICE_ID_ADAS);
+    read_dev_para(&para, SAMPLE_DEVICE_ID_DSM);
     memset(&mm, 0, sizeof(mm));
     get_dsm_Info_for_store(type, &mm);
 
@@ -833,6 +860,8 @@ static int send_pkg_to_host(int sock)
             }
 
             ret = unblock_write(sock, buf, len);
+            //printf("send buf:\n");
+            //printbuf(buf, len);
             gettimeofday(&pkg.send_time, NULL);
             pkg.send_repeat++;
             write_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
@@ -861,6 +890,7 @@ static int send_pkg_to_host(int sock)
         {
             //3次都已经重发，释放头节点
             free_header_node(g_ptr_queue_p, &ptr_queue_lock);
+            g_pkg_status_p->mm_data_trans_waiting = 0;
         }
     }
 
@@ -1017,7 +1047,12 @@ static int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t 
     pHeader->serial_num= MY_HTONS(serial_num); //used as message cnt
     pHeader->vendor_id= MY_HTONS(VENDOR_ID);
     //pHeader->device_id= SAMPLE_DEVICE_ID_ADAS;
-    pHeader->device_id= devid;
+
+#if defined ENABLE_ADAS
+    pHeader->device_id= SAMPLE_DEVICE_ID_ADAS;
+#elif defined ENABLE_DSM
+    pHeader->device_id= SAMPLE_DEVICE_ID_DSM;
+#endif
     pHeader->cmd = cmd;
 
     if (payload_len > 0) 
@@ -1058,17 +1093,27 @@ int do_snap_shot()
 {
     uint32_t playloadlen = 0;
     uint8_t msgbuf[512];
-    warningtext *uploadmsg = (warningtext *)&msgbuf[0];
     uint8_t txbuf[512];
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
 
-    playloadlen = build_adas_warn_frame(SW_TYPE_SNAP, uploadmsg);
+#if defined ENABLE_DSM
+    dsm_warningtext *uploadmsg = (dsm_warningtext *)&msgbuf[0];
+    playloadlen = build_dsm_warn_frame(DSM_SANPSHOT_EVENT, uploadmsg);
+    sample_assemble_msg_to_push(pSend, \
+            SAMPLE_DEVICE_ID_DSM,\
+            SAMPLE_CMD_WARNING_REPORT,\
+            (uint8_t *)uploadmsg,\
+            playloadlen);
 
+#elif defined ENABLE_ADAS
+    warningtext *uploadmsg = (warningtext *)&msgbuf[0];
+    playloadlen = build_adas_warn_frame(SW_TYPE_SNAP, uploadmsg);
     sample_assemble_msg_to_push(pSend, \
             SAMPLE_DEVICE_ID_ADAS,\
             SAMPLE_CMD_WARNING_REPORT,\
             (uint8_t *)uploadmsg,\
             playloadlen);
+#endif
 
     return 0;
 }
@@ -1090,6 +1135,24 @@ void set_BCD_time(warningtext *uploadmsg, char *second)
 
     printf("%d-%d-%d %d:%d:%d\n", (1900 + p->tm_year), ( 1 + p->tm_mon), p->tm_mday,(p->tm_hour), p->tm_min, p->tm_sec); 
 }
+
+
+int filter_adas_warning()
+{
+    adas_para_setting para;
+    real_time_data tmp;
+
+    RealTimeDdata_process(&tmp, READ_REAL_TIME_MSG);
+    read_dev_para(&para, SAMPLE_DEVICE_ID_ADAS);
+
+    printf("printf car speed = %d\n", tmp.car_speed);
+    if(tmp.car_speed <= para.warning_speed_val){
+        return -1;
+    }else{
+        return 0;
+    }
+}
+
 
 static MECANWarningMessage g_last_warning_data;
 static MECANWarningMessage g_last_can_msg;
@@ -1128,6 +1191,11 @@ int can_message_send(can_data_type *sourcecan)
         if (0 == memcmp(all_warning_data, &g_last_warning_data, sizeof(g_last_warning_data))) {
             return 0;
         }
+
+
+        //if(filter_adas_warning())
+        //    return 0;
+
 #if 1
         if( (g_last_warning_data.headway_warning_level != can.headway_warning_level) || \
                 (0 != memcmp(trigger_data, &g_last_trigger_warning, sizeof(g_last_trigger_warning)) && 0 != trigger_data[4]) )
@@ -1220,23 +1288,27 @@ int can_message_send(can_data_type *sourcecan)
     return 0;
 }
 
-void produce_dsm_image(uint32_t mmid, uint8_t warn)
-{
-    char produce_file[50];
-    
-    if(warn == DSM_CALLING_WARN){
-        snprintf(produce_file, sizeof(produce_file), "cp /data/dsm_video1.avi /mnt/obb/%08d.avi", mmid);
-        system(produce_file);
-    }
-    else if(warn == DSM_SMOKING_WARN){
-        snprintf(produce_file, sizeof(produce_file), "cp /data/dsm_video2.avi /mnt/obb/%08d.avi", mmid);
-        system(produce_file);
-    }
 
+void get_local_time(dsm_warningtext *DsmWarnMsg)
+{
+    time_t timep;
+    struct tm *p = NULL; 
+
+    ctime(&timep);
+    p = localtime(&timep);
+    DsmWarnMsg->time[0] = p->tm_year;
+    DsmWarnMsg->time[1] = p->tm_mon+1;
+    DsmWarnMsg->time[2] = p->tm_mday;
+    DsmWarnMsg->time[3] = p->tm_hour;
+    DsmWarnMsg->time[4] = p->tm_min;
+    DsmWarnMsg->time[5] = p->tm_sec;
+
+    printf("%d-%d-%d %d:%d:%d\n", (1900 + p->tm_year), ( 1 + p->tm_mon), p->tm_mday,(p->tm_hour), p->tm_min, p->tm_sec); 
 }
 
 void send_dsm_warning(uint8_t warn_type)
 {
+    int framelen = 0;
     uint32_t warning_id = 0;
     uint32_t mm_id[3] = {0};
     uint8_t msgbuf[512];
@@ -1245,15 +1317,16 @@ void send_dsm_warning(uint8_t warn_type)
     car_info carinfo;
     uint8_t txbuf[512];
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
+    dsm_warningtext uploadmsg;
     
     time_t timep;
     struct tm *p = NULL; 
     car_status_s	car_status;	
     mm_node node;
-
     uint32_t i = 0;
     dsm_warningtext *DsmWarnMsg = (dsm_warningtext *)msgbuf;
 
+#if 0
     DsmWarnMsg->warning_id = MY_HTONL(get_next_id(WARNING_ID_MODE, NULL, 0));
 
     DsmWarnMsg->status_flag = 0;
@@ -1287,18 +1360,25 @@ void send_dsm_warning(uint8_t warn_type)
 
     node.mm_type = MM_VIDEO;
     node.mm_id = mm_id[0];
-
     insert_mm_resouce(node);
-
-    produce_dsm_image(mm_id[0], DsmWarnMsg->sound_type);
+    //produce_dsm_image(mm_id[0], DsmWarnMsg->sound_type);
+#endif
+    framelen = build_dsm_warn_frame(DSM_CALLING_WARN, &uploadmsg);
+    printf("dsm frame len = %d\n", framelen);
+    get_local_time(&uploadmsg);
+    sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_DSM, SAMPLE_CMD_WARNING_REPORT,\
+            (uint8_t *)&uploadmsg, framelen);
 }
 
 void *pthread_send_dsm(void *para)
 {
+        printf("dsm mesage.....................\n");
+        sleep(5);
     while(1)
     {
-        sleep(10);
-        //send_dsm_warning(DSM_CALLING_WARN);
+        printf("send dsm mesage.....................\n");
+        send_dsm_warning(DSM_CALLING_WARN);
+        sleep(30);
     }
 }
 
@@ -1309,7 +1389,7 @@ void mmid_to_filename(uint32_t id, uint8_t type, char *filepath)
     else if(type == MM_AUDIO)
         sprintf(filepath,"%s%08d.wav", SNAP_SHOT_JPEG_PATH, id);
     else if(type == MM_VIDEO)
-        sprintf(filepath,"%s%08d.avi", SNAP_SHOT_JPEG_PATH, id);
+        sprintf(filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, id);
     else
         ;
 }
@@ -1337,7 +1417,7 @@ int find_local_image_name(uint8_t type, uint32_t id, char *filepath, uint32_t *f
     else if(type == MM_AUDIO)
         sprintf(filepath,"%s%s-%08d.wav", SNAP_SHOT_JPEG_PATH, warning_type_to_str(node.warn_type), id);
     else if(type == MM_VIDEO)
-        sprintf(filepath,"%s%s-%08d.avi", SNAP_SHOT_JPEG_PATH, warning_type_to_str(node.warn_type), id);
+        sprintf(filepath,"%s%s-%08d.mp4", SNAP_SHOT_JPEG_PATH, warning_type_to_str(node.warn_type), id);
     else
     {
         printf("mm type not valid, val=%d\n", type);
@@ -1574,58 +1654,69 @@ void recv_para_setting(sample_prot_header *pHeader, int32_t len)
     char cmd[100];
     uint8_t txbuf[128] = {0};
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
-    int ret = 0;
+    int ret = -1;
 
-    if(len == sizeof(sample_prot_header) + 1 + sizeof(recv_adas_para))
-    {
-        memcpy(&recv_adas_para, pHeader+1, sizeof(recv_adas_para));
+    if(pHeader->device_id == SAMPLE_DEVICE_ID_ADAS){
 
-        if(pHeader->device_id == SAMPLE_DEVICE_ID_ADAS){
+        if(len == sizeof(sample_prot_header) + 1 + sizeof(recv_adas_para)){
+            memcpy(&recv_adas_para, pHeader+1, sizeof(recv_adas_para));
+
             //大端传输
             recv_adas_para.auto_photo_time_period = MY_HTONS(recv_adas_para.auto_photo_time_period);
             recv_adas_para.auto_photo_distance_period = MY_HTONS(recv_adas_para.auto_photo_distance_period);
             write_dev_para(&recv_adas_para, SAMPLE_DEVICE_ID_ADAS);
-            ret = write_local_adas_para_file(LOCAL_ADAS_PRAR_FILE);
 
-        }else if(pHeader->device_id == SAMPLE_DEVICE_ID_DSM){
+            printf("recv adas para...\n");
+            print_adas_para(&recv_adas_para);
+
+            ret = write_local_adas_para_file(LOCAL_ADAS_PRAR_FILE);
+        }else{
+            printf("recv cmd:0x%x, adas data len=%d maybe error!\n",len, pHeader->cmd);
+        }
+    }else if(pHeader->device_id == SAMPLE_DEVICE_ID_DSM){
+        if(len == sizeof(sample_prot_header) + 1 + sizeof(recv_dsm_para)){
+            memcpy(&recv_dsm_para, pHeader+1, sizeof(recv_dsm_para));
+
+
+
             //大端传输
             recv_dsm_para.auto_photo_time_period = MY_HTONS(recv_dsm_para.auto_photo_time_period);
             recv_dsm_para.auto_photo_distance_period = MY_HTONS(recv_dsm_para.auto_photo_distance_period);
             recv_dsm_para.Smoke_TimeIntervalThreshold = MY_HTONS(recv_dsm_para.Smoke_TimeIntervalThreshold);
             recv_dsm_para.Call_TimeIntervalThreshold = MY_HTONS(recv_dsm_para.Call_TimeIntervalThreshold);
+
+            printf("recv dsm para...\n");
+            print_dsm_para(&recv_dsm_para);
+
             write_dev_para(&recv_dsm_para, SAMPLE_DEVICE_ID_DSM);
             ret = write_local_dsm_para_file(LOCAL_DSM_PRAR_FILE);
-        }
 
-#if 0
-        printf("start to kill algo!\n");
-        //set alog detect.flag
-        system("busybox killall -9 split_detect"); //killall
-        sprintf(cmd, "busybox sed -i 's/^.*--output_lane_info_speed_thresh.*$/--output_lane_info_speed_thresh=%d/' \
-                /data/xiao/install/detect.flag",recv_para.warning_speed_val);
-        ret = system(cmd);
-        printf("setting para ret = %d\n", ret);
-        usleep(100000);
-        printf("restart algo!\n");
-        system("/data/algo.sh & >/dev/null");//restart
-#endif
-        
-        //设置参数成功
-        if(!ret)
-        {
-            ack = 0;
-            sample_assemble_msg_to_push(pSend, pHeader->device_id, SAMPLE_CMD_SET_PARAM, (uint8_t*)&ack, 1);
-        }
-        else
-        {
-            ack = 1;
-            sample_assemble_msg_to_push(pSend, pHeader->device_id, SAMPLE_CMD_SET_PARAM, \
-                    (uint8_t*)&ack, 1);
+        }else{
+            printf("recv cmd:0x%x, dsm data len=%d maybe error!\n", len, pHeader->cmd);
         }
     }
-    else
-    {
-        printf("recv cmd:0x%x, data len maybe error!\n", pHeader->cmd);
+
+#if 0
+    printf("start to kill algo!\n");
+    //set alog detect.flag
+    system("busybox killall -9 split_detect"); //killall
+    sprintf(cmd, "busybox sed -i 's/^.*--output_lane_info_speed_thresh.*$/--output_lane_info_speed_thresh=%d/' \
+            /data/xiao/install/detect.flag",recv_para.warning_speed_val);
+    ret = system(cmd);
+    printf("setting para ret = %d\n", ret);
+    usleep(100000);
+    printf("restart algo!\n");
+    system("/data/algo.sh & >/dev/null");//restart
+#endif
+
+    //设置参数成功
+    if(!ret){
+        ack = 0;
+        sample_assemble_msg_to_push(pSend, pHeader->device_id, SAMPLE_CMD_SET_PARAM, (uint8_t*)&ack, 1);
+    }else{
+        ack = 1;
+        sample_assemble_msg_to_push(pSend, pHeader->device_id, SAMPLE_CMD_SET_PARAM, \
+                (uint8_t*)&ack, 1);
     }
 }
 
@@ -1646,37 +1737,28 @@ void send_para_setting(sample_prot_header *pHeader, int32_t len)
                     (uint8_t*)&send_adas_para, sizeof(send_adas_para));
 
         }else if(pHeader->device_id == SAMPLE_DEVICE_ID_DSM){
-            read_dev_para(&send_dsm_para, SAMPLE_DEVICE_ID_ADAS);
-
+            read_dev_para(&send_dsm_para, SAMPLE_DEVICE_ID_DSM);
             send_dsm_para.auto_photo_time_period = MY_HTONS(send_dsm_para.auto_photo_time_period);
             send_dsm_para.auto_photo_distance_period = MY_HTONS(send_dsm_para.auto_photo_distance_period);
             send_dsm_para.Smoke_TimeIntervalThreshold = MY_HTONS(send_dsm_para.Smoke_TimeIntervalThreshold);
             send_dsm_para.Call_TimeIntervalThreshold = MY_HTONS(send_dsm_para.Call_TimeIntervalThreshold);
-
             sample_assemble_msg_to_push(pSend, pHeader->device_id, SAMPLE_CMD_GET_PARAM, \
                     (uint8_t*)&send_dsm_para, sizeof(send_dsm_para));
-
         }
-    }
-    else
-    {
+    }else{
         printf("recv cmd:0x%x, data len maybe error!\n", pHeader->cmd);
     }
 }
-
 
 void recv_warning_ack(sample_prot_header *pHeader, int32_t len)
 {
     SendStatus pkg;
 
-    if(len == sizeof(sample_prot_header) + 1)
-    {
+    if(len == sizeof(sample_prot_header) + 1){
         read_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
         pkg.ack_status = MSG_ACK_READY;
         write_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
-    }
-    else
-    {
+    }else{
         printf("recv cmd:0x%x, data len maybe error!\n", pHeader->cmd);
     }
 }
@@ -1689,14 +1771,11 @@ void send_work_status_req_ack(sample_prot_header *pHeader, int32_t len)
 
     memset(&module, 0, sizeof(module));
 
-    if(len == sizeof(sample_prot_header) + 1)
-    {
+    if(len == sizeof(sample_prot_header) + 1){
         module.work_status = MODULE_WORKING;
         sample_assemble_msg_to_push(pSend, pHeader->device_id, SAMPLE_CMD_REQ_STATUS, \
                 (uint8_t*)&module, sizeof(module));
-    }
-    else
-    {
+    }else{
         printf("recv cmd:0x%x, data len maybe error!\n", pHeader->cmd);
     }
 }
@@ -1712,19 +1791,15 @@ void send_work_status(uint8_t devid)
             (uint8_t*)&module, sizeof(module));
 }
 
-
 void recv_upload_status_cmd_ack(sample_prot_header *pHeader, int32_t len)
 {
     SendStatus pkg;
 
-    if(len == sizeof(sample_prot_header) + 1)
-    {
+    if(len == sizeof(sample_prot_header) + 1){
         read_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
         pkg.ack_status = MSG_ACK_READY;
         write_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
-    }
-    else
-    {
+    }else{
         printf("recv cmd:0x%x, data len maybe error!\n", pHeader->cmd);
     }
 }
@@ -1758,7 +1833,7 @@ int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
     static uint32_t sum = 0;
     static uint32_t sum_new = 0;
     uint8_t data[4];
-    uint8_t data_ack[5];
+    uint8_t data_ack[6];
     uint8_t ack[2];
     int32_t datalen = 0;
     uint8_t *pchar=NULL;
@@ -1787,10 +1862,18 @@ int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
         if(message_id == UPGRADE_CMD_RUN)
         {
             //do run, do upgrade
-            printf("upgrade...\n");
-            system(UPGRADE_FILE_CMD);
+            printf("exe new app...\n");
+           // system(UPGRADE_FILE_CMD);
             //system("stop bootanim;echo 'restart...';/system/bin/main.sh");
 
+            ack[0] = message_id;
+            ack[1] = 0;
+            sample_assemble_msg_to_push(pSend,pHeader->device_id, SAMPLE_CMD_UPGRADE, \
+                    ack, sizeof(ack));
+
+            system("touch /mnt/obb/restart");
+            //system("/data/restart.sh &");
+            //return 0;
         }
         ack[0] = message_id;
         ack[1] = 0;
@@ -1838,20 +1921,23 @@ int recv_upgrade_file(sample_prot_header *pHeader, int32_t len)
                 if(sum_new == sum)
                 {
                     printf("sun check ok!\n");
-
-                    memcpy(data_ack, pchar, sizeof(data_ack));
-                    sample_assemble_msg_to_push(pSend,pHeader->device_id, SAMPLE_CMD_UPGRADE, \
-                            data_ack, sizeof(data_ack));
-
-                    return 0;
+                    data_ack[5] = 0;
+                    printf("upgrade...\n");
+                    system(UPGRADE_FILE_CMD);
                 }
                 else
                 {
                     printf("sun check err!\n");
+                    data_ack[5] = 1;
                 }
+                memcpy(data_ack, pchar, 5);
+                sample_assemble_msg_to_push(pSend,pHeader->device_id, SAMPLE_CMD_UPGRADE, \
+                        data_ack, sizeof(data_ack));
+                return 0;
             }
         }
-        memcpy(data_ack, pchar, sizeof(data_ack));
+        memcpy(data_ack, pchar, 5);
+        data_ack[5] = 0;
         sample_assemble_msg_to_push(pSend,pHeader->device_id, SAMPLE_CMD_UPGRADE, \
                 data_ack, sizeof(data_ack));
     }
@@ -1869,20 +1955,21 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
         15, "MINIEYE",
         15, "M3",
         15, "1.0.0.1",
-        15, "1.0.1.4", //soft version
+        15, "1.0.1.5", //soft version
         15, "0xF0321564",
         15, "SAMPLE",
     };
     uint8_t txbuf[128] = {0};
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
 
-    if(!MESSAGE_DEVID_IS_ME(pHeader->device_id))
+    if(!(MESSAGE_DEVID_IS_ME(pHeader->device_id) ||\
+            (IS_BRDCST(pHeader->device_id) && (pHeader->cmd == SAMPLE_CMD_QUERY))))
         return 0;
 
     serial_num = MY_HTONS(pHeader->serial_num);
     do_serial_num(&serial_num, RECORD_RECV_NUM);
 
-    //printf("------cmd = 0x%x------\n", pHeader->cmd);
+    printf("------cmd = 0x%x------\n", pHeader->cmd);
     switch (pHeader->cmd)
     {
         case SAMPLE_CMD_QUERY:
@@ -1958,6 +2045,7 @@ static int try_connect()
     int32_t ret = 0;
     int enable = 1;
     const char *server_ip = "192.168.100.100";
+    //const char *server_ip = "192.168.100.102";
     struct sockaddr_in host_serv_addr;
     socklen_t optlen;
     int bufsize = 0;
@@ -2054,6 +2142,12 @@ connect_again:
     hostsock = try_connect();
     if(hostsock < 0)
         goto connect_again;
+
+#if defined ENABLE_ADAS
+    send_work_status(SAMPLE_DEVICE_ID_ADAS);
+#elif defined ENABLE_DSM
+    send_work_status(SAMPLE_DEVICE_ID_DSM);
+#endif
 
     while (1) {
 
@@ -2257,67 +2351,39 @@ void *parse_host_cmd(void *para)
 #define SNAP_SHOT_BY_DISTANCE      2
 void *pthread_snap_shot(void *p)
 {
+#ifdef ENABLE_ADAS
     adas_para_setting tmp;
+    uint8_t para_type = SAMPLE_DEVICE_ID_ADAS;
+#else
+    dsm_para_setting tmp;
+    uint8_t para_type = SAMPLE_DEVICE_ID_DSM;
+#endif
     real_time_data rt_data;;
-    uint32_t mileage = 0;
-    int start = 0;
-    int mileage_start = 0;
-    struct timeval record_time;  
+    uint32_t mileage_last = 0;
 
-    send_work_status(SAMPLE_DEVICE_ID_ADAS);
-    send_work_status(SAMPLE_DEVICE_ID_DSM);
     while(1)
     {
-        read_dev_para(&tmp, SAMPLE_DEVICE_ID_ADAS);
-        if(tmp.auto_photo_mode == SNAP_SHOT_CLOSE)
-        {
-            sleep(2);
-        }
-        else if(tmp.auto_photo_mode == SNAP_SHOT_BY_TIME)
-        {
-            if(start == 0 && tmp.auto_photo_time_period != 0)
-            {
-                gettimeofday(&record_time, NULL);
-                start = 1;
-            }
-            if(start == 1)
-            {
-                if(timeout_trigger(&record_time, tmp.auto_photo_time_period*1000))//timeout
-                {
-                    start = 0;
-                    do_snap_shot();
-                }
-            }
-            usleep(600000);//wait 600ms, get new rt_data
-
-        }
-        else if(tmp.auto_photo_mode == SNAP_SHOT_BY_DISTANCE)
-        {
+        read_dev_para(&tmp, para_type);
+        if(tmp.auto_photo_mode == SNAP_SHOT_BY_TIME){
+            if(tmp.auto_photo_time_period != 0)
+                do_snap_shot();
+            sleep(tmp.auto_photo_time_period);
+        }else if(tmp.auto_photo_mode == SNAP_SHOT_BY_DISTANCE){
             RealTimeDdata_process(&rt_data, READ_REAL_TIME_MSG);
-            if(rt_data.mileage != 0)
-            {
-                if(mileage_start == 0)
-                {
-                    mileage_start = 1;
-                    mileage = rt_data.mileage; //单位是0.1km
-                    printf("start snap by mileage!\n");
-                }
-                if((rt_data.mileage - mileage)*100 >= tmp.auto_photo_distance_period)
-                {
+            if((rt_data.mileage - mileage_last)*100 >= tmp.auto_photo_distance_period){
+                if(mileage_last != 0){
                     printf("snap by mileage!\n");
-                    mileage = rt_data.mileage; //单位是0.1km
                     do_snap_shot();
                 }
-                usleep(600000);//wait 600ms, get new rt_data
+                mileage_last = rt_data.mileage; //单位是0.1km
+            }else{
+                sleep(1);
             }
-        }
-        else
-        {
+        }else{
             sleep(2);
         }
     }
 }
-
 
 void *pthread_req_cmd_process(void *para)
 {
@@ -2333,6 +2399,7 @@ void *pthread_req_cmd_process(void *para)
 
     while(1)
     {
+
         if(!pull_mm_req_cmd_queue(&send_mm))
         {
             printf("pull mm_info!\n");

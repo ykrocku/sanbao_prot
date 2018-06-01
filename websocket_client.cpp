@@ -422,17 +422,20 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
+
+#ifdef ENABLE_ADAS
     if(pthread_create(&pth[1], NULL, websocket_client, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
     }
-    if(pthread_create(&pth[2], NULL, parse_host_cmd, NULL))
+    if(pthread_create(&pth[3], NULL, pthread_encode_jpeg, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
     }
-    if(pthread_create(&pth[3], NULL, pthread_encode_jpeg, NULL))
+#endif
+    if(pthread_create(&pth[2], NULL, parse_host_cmd, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
@@ -452,7 +455,7 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
-#ifdef ENABLE_ADAS_AND_DSM
+#ifdef ENABLE_DSM
     if(pthread_create(&pth[7], NULL, pthread_send_dsm, NULL))
     {
         printf("pthread_create fail!\n");
@@ -460,7 +463,7 @@ int main(int argc, char **argv)
     }
 #endif
 
-    pthread_join(pth[1], NULL);
+    pthread_join(pth[0], NULL);
     printf("join pthread 1\n");
 //    pthread_join(pth[1], NULL);
 //    printf("join pthread 2\n");
