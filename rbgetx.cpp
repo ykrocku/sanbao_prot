@@ -19,6 +19,8 @@
 
 #include "prot.h"
 
+#include "common/hal/ma_api.h"
+#include "common/hal/android_api.h"
 
 #include <stdlib.h>
 #include <fstream>
@@ -38,8 +40,7 @@
 
 using namespace std;
 
-#define  ADAS_JPEG_SIZE (4* 1024 * 1024)
-#define  ADAS_IMAGE_SIZE (100* 1024 * 1024)
+#define  ADAS_JPEG_SIZE (8* 1024 * 1024)
 
 // global variables
 static const char* version = "1.1.0";
@@ -177,10 +178,12 @@ std::vector<uint8_t> jpeg_encode(uint8_t* data,\
 
 #ifdef USE_HW_JPEG
     fprintf(stderr, "Using hardware JPEG encoder.\n");
+#if 1
     int32_t bytes = ma_api_hw_jpeg_encode(data,\
             cols, rows, MA_COLOR_FMT_RGB888,\
             jpg_vec.data(), out_cols, out_rows, quality);
     jpg_vec.resize(bytes);
+#endif
 #else
     fprintf(stderr, "Using software JPEG encoder.\n");
 
@@ -199,20 +202,47 @@ std::vector<uint8_t> jpeg_encode(uint8_t* data,\
     return jpg_vec;
 }
 
+RBFrame* request_jpeg_frame(CRingBuf* pRB, uint32_t repeat_times)
+{
+    RBFrame* pFrame = nullptr;
+    uint32_t frameLen = 0;
+    uint32_t try_times = 0;
+
+    do{
+        pFrame = reinterpret_cast<RBFrame*>(pRB->RequestReadFrame(&frameLen));
+        if (!CRB_VALID_ADDRESS(pFrame)) {
+            fprintf(stderr, "Error: RequestReadFrame failed\n");
+            usleep(10000);
+            pFrame = nullptr;
+        }
+        else
+        {
+            break;
+        }
+    }while(try_times++ < repeat_times);
+
+    return pFrame;
+}
 int process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int height) {
 
     static uint32_t mFrameIdx=0;
     uint32_t jpg_size=0;
-
     RBFrame* pFrame = nullptr;
     uint32_t frameLen = 0;
 
     pRB->SeekIndexByTime(0);  // seek to the latest frame
+
+    pFrame = request_jpeg_frame(pRB, 10);
+    if(pFrame == nullptr)
+        return -1;
+
+#if 0
     pFrame = reinterpret_cast<RBFrame*>(pRB->RequestReadFrame(&frameLen));
     if (!CRB_VALID_ADDRESS(pFrame)) {
         fprintf(stderr, "process Error: RequestReadFrame failed\n");
         return -1;
     }
+#endif
 
     if (pFrame->data == nullptr ||
             pFrame->video.VWidth == 0 ||
@@ -263,24 +293,66 @@ int process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int height) {
     return 0;
 }
 
+#include <sys/prctl.h>
 void *pthread_encode_jpeg(void *p)
 {
     int timems;
     int quality = 50;
-    int Vwidth = 640;
-    int Vheight = 360;
-    int start_record=1;
-    struct timeval ta, tb, record_time;  
+    //int Vwidth = 640;
+    //int Vheight = 360;
+
+    int Vwidth = 704;
+    int Vheight = 576;
+
     int cnt = 0;
-    InfoForStore mm;
+    struct timeval t;
 
-    CRingBuf* pRB = new CRingBuf("encode_jpeg", "adas_image", ADAS_IMAGE_SIZE, CRB_PERSONALITY_READER);
-    CRingBuf* pwjpg = new CRingBuf("producer", "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_WRITER);
+    printf("%s enter!\n", __FUNCTION__);
 
+  
+    prctl(PR_SET_NAME, "encode");
+#if defined ENABLE_ADAS 
+    const char *rb_name = ma_api_get_rb_name(MA_RB_TYPE_ADAS_RAW);
+    printf("get rb_name: %s\n", rb_name);
+    int32_t rb_size = ma_api_get_rb_size(MA_RB_TYPE_ADAS_RAW);
+    printf("get rb_size: %d\n", rb_size);
+    ma_api_open_camera(MA_CAMERA_IDX_ADAS);
+    printf("ma_api_open_camera MA_CAMERA_IDX_ADAS\n");
+    ma_api_open_camera(MA_CAMERA_IDX_DRIVER);
+    printf("ma_api_open_camera MA_CAMERA_IDX_DRIVER\n");
+    CRingBuf* pRb = new CRingBuf("adas_encode_jpeg", rb_name, rb_size, CRB_PERSONALITY_READER, true);
+    CRingBuf* pwjpg = new CRingBuf("adas_producer", "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_WRITER);
+#else
+    const char *rb_name = ma_api_get_rb_name(MA_RB_TYPE_DRIVER_RAW);
+    printf("get rb_name: %s\n", rb_name);
+    int32_t rb_size = ma_api_get_rb_size(MA_RB_TYPE_DRIVER_RAW);
+    printf("get rb_size: %d\n", rb_size);
+    ma_api_open_camera(MA_CAMERA_IDX_ADAS);
+    ma_api_open_camera(MA_CAMERA_IDX_DRIVER);
+    CRingBuf* pRb = new CRingBuf("dsm_encode_jpeg", rb_name, rb_size, CRB_PERSONALITY_READER, true);
+    CRingBuf* pwjpg = new CRingBuf("dsm_producer", "dsm_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_WRITER);
+#endif
+
+    if(!pwjpg || !pRb)
+    {
+        printf("new CRingBuf fail!\n");
+        return NULL;
+    }
+    gettimeofday(&t, NULL);
     while(1)
     {
-        if(process(pRB, pwjpg, quality, Vwidth, Vheight))
+ //       sleep(10000000);
+        if(process(pRb, pwjpg, quality, Vwidth, Vheight))
             usleep(500000);
+        else{
+            cnt++;
+            if(timeout_trigger(&t, 2*1000))
+            {
+                gettimeofday(&t, NULL);
+                printf("encdoe speed %d per 2 sec\n", cnt);
+                cnt = 0; 
+            }
+        }
     }
 };
 
@@ -396,28 +468,7 @@ void store_one_jpeg(InfoForStore *mm, RBFrame* pFrame, int index)
     insert_mm_resouce(node);
 }
 
-RBFrame* request_jpeg_frame(CRingBuf* pRB, uint32_t repeat_times)
-{
-    RBFrame* pFrame = nullptr;
-    uint32_t frameLen = 0;
-    uint32_t try_times = 0;
-
-    do{
-        pFrame = reinterpret_cast<RBFrame*>(pRB->RequestReadFrame(&frameLen));
-        if (!CRB_VALID_ADDRESS(pFrame)) {
-            fprintf(stderr, "Error: RequestReadFrame failed\n");
-            usleep(10000);
-            pFrame = nullptr;
-        }
-        else
-        {
-            break;
-        }
-    }while(try_times++ < repeat_times);
-
-    return pFrame;
-}
-
+#if 0
 void store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
 {
     RBFrame* pFrame = nullptr;
@@ -426,9 +477,8 @@ void store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
     struct timeval record_time;
     int force_exit_time;
 
-
     printf("%s enter!\n", __FUNCTION__);
-    force_exit_time = mm->photo_time_period*100*mm->photo_num;
+    force_exit_time = mm->photo_time_period*100*(mm->photo_num+1);
     gettimeofday(&record_time, NULL);
     while(jpeg_index < mm->photo_num)
     {
@@ -439,40 +489,65 @@ void store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
         }
 
         pRB->SeekIndexByTime(0);
-        pFrame = request_jpeg_frame(pRB, 0);
+        pFrame = request_jpeg_frame(pRB, 10);
         if(pFrame == nullptr)
-        {
-            usleep(25000);
             continue;
-        }
-        print_frame("video-read", pFrame);
 
+        print_frame("video-read", pFrame);
         if(jpeg_index == 0 || (uint64_t)pFrame->time > mm->photo_time_period*100 + jpeg_timestart)//record first jpeg
         {
             print_frame("jpeg", pFrame);
             jpeg_timestart = pFrame->time;
             store_one_jpeg(mm, pFrame, jpeg_index++);
         }
-
         pRB->CommitRead();
     }
 }
+#else
+void store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
+{
+    RBFrame* pFrame = nullptr;
+    int jpeg_index = 0;
+    uint32_t interval= 0; //usleep
+    
+    printf("%s enter!\n", __FUNCTION__);
+
+    interval = mm->photo_time_period*100*1000;
+    while(jpeg_index < mm->photo_num)
+    {
+        pRB->SeekIndexByTime(0);
+        pFrame = request_jpeg_frame(pRB, 10);
+        if(pFrame == nullptr)
+            continue;
+
+        usleep(interval);
+        print_frame("jpeg", pFrame);
+        store_one_jpeg(mm, pFrame, jpeg_index++);
+        pRB->CommitRead();
+    }
+}
+#endif
+
 
 #define RECORD_JPEG_NEED 1
 #define RECORD_JPEG_NO_NEED 0
 void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
 {
-#define VIDEO_FRAMES_PER_SECOND   15
+#define VIDEO_FRAMES_PER_SECOND   10
     RBFrame* pFrame = nullptr;
     char mp4filepath[100];
+    char testfilepath[100];
     char writefile_link[100];
     mm_node node;
-    struct timeval record_time;  
+    struct timeval record_time, jpg_time;  
     int jpeg_index = 0;
-    uint64_t jpeg_timestart = 0;
     int force_exit_time;
+    uint32_t interval= 0; //ms
+    uint32_t framecnt = 0;
 
     printf("%s enter!\n", __FUNCTION__);
+
+    interval = mm->photo_time_period*100;
 
     pRB->SeekIndexByTime(0);
     pFrame = request_jpeg_frame(pRB, 10);
@@ -481,12 +556,10 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
 
     if(jpeg_flag)
     {
-
-        print_frame("curtent-read", pFrame);
-        jpeg_timestart = pFrame->time;
-        print_frame("jpeg", pFrame);
+        print_frame("video jpeg", pFrame);
         store_one_jpeg(mm, pFrame, jpeg_index++);
     }
+    gettimeofday(&jpg_time, NULL);
 
     sprintf(mp4filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
 
@@ -503,27 +576,26 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
     {
         if(timeout_trigger(&record_time, force_exit_time))
         {
-            printf("mp4 timeout break\n");
+            printf("mp4 trigger timeout break\n");
             break;
         }
 
-        pFrame = request_jpeg_frame(pRB, 0);
+        pFrame = request_jpeg_frame(pRB, 10);
         if(pFrame == nullptr)
-        {
-            usleep(20000);
             continue;
-        }
+
+
         print_frame("video-read", pFrame);
-
+        //sprintf(testfilepath,"/mnt/obb/adas/%d.jpg", pFrame->frameNo);
+        //write_file(testfilepath, pFrame->data, pFrame->dataLen);
         mp4.Write(pFrame->data, pFrame->dataLen);
-
         if(jpeg_flag)
         {
-            if(jpeg_index < mm->photo_num && ((uint64_t)pFrame->time > mm->photo_time_period*100 + jpeg_timestart))//record first jpeg
+            if((jpeg_index < mm->photo_num)  && timeout_trigger(&jpg_time, interval))
             {
-                print_frame("jpeg", pFrame);
-                jpeg_timestart = pFrame->time;
+                printf("write jpg frame!\n");
                 store_one_jpeg(mm, pFrame, jpeg_index++);
+                gettimeofday(&jpg_time, NULL);
             }
         }
         pRB->CommitRead();
@@ -717,6 +789,16 @@ int read_local_file_to_list()
 void global_var_init()
 {
     char cmd[100];
+
+#if defined ENABLE_ADAS
+    printf("adas device enter!\n");
+#elif defined ENABLE_DSM
+    printf("dsm device enter!\n");
+#else
+    #define ENABLE_ADAS
+    printf("using default, ENABLE_ADAS!\n");
+#endif
+
     read_local_adas_para_file(LOCAL_ADAS_PRAR_FILE);
     read_local_dsm_para_file(LOCAL_DSM_PRAR_FILE);
 
@@ -731,7 +813,7 @@ void global_var_init()
 }
 
 ThreadPool pool; // 0 - cpu member
-void read_pthread_num(uint32_t i)
+int read_pthread_num(uint32_t i)
 {
 #if 0
     struct Stats
@@ -749,6 +831,8 @@ void read_pthread_num(uint32_t i)
     pool.GetStats(&pstat);
     gettimeofday(&rec_time, NULL);
     printf(" i =%d, Num = %ld, busy = %ld, pending = %ld, time = %ld.%ld\n", i, pstat.NumThreads, pstat.NumBusyThreads, pstat.NumPendingTasks, rec_time.tv_sec, rec_time.tv_usec);
+
+    return pstat.NumThreads;
 }
 
 void produce_dsm_image(InfoForStore *mm)
@@ -769,14 +853,13 @@ void produce_dsm_image(InfoForStore *mm)
         insert_mm_resouce(node);
     }
     printf("video id = %d\n", mm->video_id[0]);
-    snprintf(produce_file, sizeof(produce_file), "cp /data/dsm.mp4%s/%08d.mp4",SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
+    snprintf(produce_file, sizeof(produce_file), "cp /data/dsm.mp4 %s/%08d.mp4",SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
+    printf("--%s\n", produce_file);
     system(produce_file);
     node.mm_type = MM_VIDEO;
     node.mm_id = mm->video_id[0];
     insert_mm_resouce(node);
 }
-
-
 
 
 void *pthread_sav_warning_jpg(void *p)
@@ -786,43 +869,47 @@ void *pthread_sav_warning_jpg(void *p)
     uint32_t i = 0;
     int index = 0;
     InfoForStore mm;
-    struct timeval rec_time;
-    struct timeval time_begin[WARN_TYPE_NUM];
-    char first_record_time[WARN_TYPE_NUM] = {1, 1, 1, 1, 1, 1, 1, 1};
     CRingBuf* pr[WARN_TYPE_NUM];
+    CRingBuf* ptest;
     Closure<void>* cls[WARN_TYPE_NUM];
-    // char user_name[WARN_TYPE_NUM][20]={
     char user_name[CUSTOMER_NUM][20]={
         "customer_FCW_mp4","customer_LDW_mp4","customer_HW_mp4","customer_PCW_mp4",
         "customer_FLC_mp4","customer_TSRW_mp4","customer_TSR_mp4","customer_SNAP_mp4",
-#if 0
-        "customer_FCW_jpg","customer_LDW_jpg","customer_HW_jpg","customer_PCW_jpg",
-        "customer_FLC_jpg","customer_TSRW_jpg","customer_TSR_jpg","customer_SNAP_jpg",
-#endif
+    };
+
+    char dsm_user_name[CUSTOMER_NUM][20]={
+        "DSM_FATIGUE_WARN","DSM_CALLING_WARN","DSM_SMOKING_WARN","DSM_DISTRACT_WARN",
+        "DSM_ABNORMAL_WARN","DSM_SANPSHOT_EVENT","DSM_DRIVER_CHANGE","DSM_RESV",
     };
 
     //for(i=0; i<WARN_TYPE_NUM; i++)
     for(i=0; i<CUSTOMER_NUM; i++)
     {
-        printf("name:%s\n", user_name[i]);
 
-#ifdef ENABLE_ADAS
+#if defined ENABLE_ADAS 
+        printf("name:%s\n", user_name[i]);
         pr[i] = new CRingBuf(user_name[i], "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
+        ptest = new CRingBuf("adas_get_dsm", "dsm_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
+#elif defined ENABLE_DSM
+        printf("name:%s\n", dsm_user_name[i]);
+        pr[i] = new CRingBuf(dsm_user_name[i], "dsm_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
+        ptest = new CRingBuf("dsm_get_adas", "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
 #endif
     }
 
     pool.SetMinThreads(8);
     //pool.SetMaxThreads(4);
-
     printf("min pthread = %d\n", pool.GetMinThreads());
     printf("max pthread = %d\n", pool.GetMaxThreads());
     printf("GetIdleTime = %d\n", pool.GetIdleTime());
 
-    sleep(3);
+    //sleep(3);
+    //sleep(20);
     while(1)
     {
+
         //read_pthread_num(i);
-#if 1        
+#if 1       
         if(pull_mm_queue(&mm))
         {
             usleep(10000);
@@ -831,22 +918,25 @@ void *pthread_sav_warning_jpg(void *p)
         }
 
 #ifdef ENABLE_DSM
-    printf("photo num: 0x%x\n", mm.photo_num);
-    produce_dsm_image(&mm);
+    //printf("photo num: 0x%x\n", mm.photo_num);
+    //produce_dsm_image(&mm);
 
-    continue;
+   // continue;
 #endif
-
-
 
 #else//debug
 
         mm.video_time = 4;
         mm.warn_type = 1;
-        mm.video_id[0] = cnt++;
         mm.video_enable = 1;
-        mm.photo_enable = 0;
-        sleep(1);
+        mm.photo_enable = 1;
+
+        mm.photo_time_period = 4;
+        mm.photo_num = 3;
+        mm.photo_id[0] = 1;
+        mm.photo_id[1] = 2;
+        mm.photo_id[2] = 3;
+        mm.video_id[0] = 4;
 
         //if(cnt >= 2)
         //    sleep(2);
@@ -860,14 +950,23 @@ void *pthread_sav_warning_jpg(void *p)
         printf("mm type: 0x%x, mmid: 0x%x\n", mm.mm_type, mm.mm_id[0]);
         printf("video_time: 0x%x, num: 0x%x\n", mm.video_time, mm.photo_num);
 #endif
+        if(read_pthread_num(i) >= CUSTOMER_NUM)
+        {
+            printf("threadpool busy!");
+            continue;
+        }
 
         i = i % 8;
-
-        cls[i] = NewClosure(record_mm_infor, pr[i], mm);
-        pool.AddTask(cls[i]);
-
-        read_pthread_num(i);
-        i++;
+        if(!mm.flag){
+            cls[i] = NewClosure(record_mm_infor, pr[i], mm);
+            pool.AddTask(cls[i]);
+            i++;
+        }else{
+            printf("store mp4 alone!\n");
+            cls[i] = NewClosure(store_one_mp4, ptest, &mm, RECORD_JPEG_NO_NEED);
+            pool.AddTask(cls[i]);
+            i++;
+        }
     }
 
     return NULL;

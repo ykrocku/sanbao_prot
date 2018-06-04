@@ -6,9 +6,19 @@
 
 #include <queue>
 
-#define ENABLE_ADAS
-//#define ENABLE_DSM
+//#define ENABLE_ADAS
+#define ENABLE_DSM
 //#define ENABLE_ADAS_AND_DSM
+
+
+
+#define FILTER_ALERT_BY_SPEED
+#define FILTER_ALERT_BY_TIME
+
+//30 sec
+#define FILTER_ADAS_ALERT_SET_TIME 30u
+#define FILTER_DSM_ALERT_SET_TIME 30u
+
 
 #define IS_BRDCST(id)   (SAMPLE_DEVICE_ID_BRDCST == (id))
 
@@ -35,8 +45,6 @@
 
 
 
-
-
 #if defined ENABLE_ADAS
 #define DO_DELETE_SNAP_SHOT_FILES "rm -r /data/snap/adas/*"
 //#define SNAP_SHOT_JPEG_PATH "/data/snap/"
@@ -48,9 +56,6 @@
 #define SNAP_SHOT_JPEG_PATH "/mnt/obb/dsm/"
 
 #endif
-
-
-
 
 
 
@@ -427,11 +432,51 @@ typedef struct __car_info {
 
 
 
+typedef struct __dsm_alert_info {
+    //#ifdef BIG_ENDIAN
+#if 0
+
+#else /*Little Endian*/
+
+
+    /* 短时间闭眼报警 */
+    uint8_t alert_eye_close1:2;
+    /* 长时间闭眼报警 */
+    uint8_t alert_eye_close2:2;
+    /* 左顾右盼 */
+    uint8_t alert_look_around:2;
+    /* 打哈欠 */
+    uint8_t alert_yawn:2;
+    /* 打电话 */
+    uint8_t alert_phone:2;
+    /* 吸烟 */
+    uint8_t alert_smoking:2;
+    /* 离岗 */
+    uint8_t alert_absence:2;
+    /* 低头 */
+    uint8_t alert_bow:2;
+
+
+    uint8_t byte2_recv;
+    uint8_t byte3_recv;
+    uint8_t byte4_recv;
+    uint8_t byte5_recv;
+    uint8_t byte6_recv;
+    uint8_t byte7_recv;
+
+#endif
+} __attribute__((packed)) dsm_alert_info;
+
+
+
+
+
+
 /**********************can message*****************************/
 typedef struct _can_struct{
     uint8_t warning[8];
     char source[20];
-    char time[20];
+    uint64_t time;
     char topic[20];
 }can_data_type;
 
@@ -581,6 +626,7 @@ uint8_t time[6];
 #define WARN_SNAP_NUM_MAX   10
 typedef struct _InfoForStore{
 
+uint8_t flag;
 uint8_t warn_type;
 //uint8_t mm_type;
 uint8_t photo_enable;
@@ -690,12 +736,21 @@ int read_local_adas_para_file(const char* filename);
 int read_local_dsm_para_file(const char* filename);
 
 
+void recv_dsm_message( can_data_type *can);
+
 void produce_dsm_image(InfoForStore *mm);
 void set_dsm_para_setting_default();
 
 void *pthread_send_dsm(void *para);
 
 void insert_mm_resouce(mm_node m);
+
+
+int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t devid, uint8_t cmd,uint8_t *payload, int32_t payload_len);
+
+
+int ratelimit_connects(unsigned int *last, unsigned int secs);
+
 
 #define DEBUG_BUF
 

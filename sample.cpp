@@ -33,6 +33,7 @@ static int32_t sample_send_image(uint8_t devid);
 #define READ_REAL_TIME_MSG  1
 
 
+
 int GetFileSize(char *filename);
 
 //实时数据处理
@@ -634,6 +635,46 @@ void get_dsm_Info_for_store(uint8_t type, InfoForStore *mm_store)
 }
 
 
+int filter_alert_by_time(unsigned int *last, unsigned int secs)
+{
+    struct timeval tv; 
+
+#ifndef FILTER_ALERT_BY_SPEED
+    return 1;
+#endif
+
+    gettimeofday(&tv, NULL);
+
+    if (tv.tv_sec - (*last) < secs)
+        return 0;
+
+    *last = tv.tv_sec;
+
+    return 1;
+}
+
+
+
+int filter_alert_by_speed()
+{
+    real_time_data tmp;
+    adas_para_setting para;
+
+#ifndef FILTER_ALERT_BY_SPEED
+    return 1;
+#endif
+
+    read_dev_para(&para, SAMPLE_DEVICE_ID_ADAS);
+    RealTimeDdata_process(&tmp, READ_REAL_TIME_MSG);
+
+    if(tmp.car_speed <= para.warning_speed_val)
+    {
+        printf("filter low speed (%d) alert!\n", tmp.car_speed);
+        return 0;
+    }
+
+    return 1;
+}
 
 
 
@@ -683,6 +724,7 @@ int build_adas_warn_frame(int type, warningtext *uploadmsg)
                 uploadmsg->mm[i].type = MM_VIDEO;
                 uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
             }
+            mm.flag = 0;
             push_mm_queue(&mm);
 
 #if 1
@@ -698,6 +740,7 @@ int build_adas_warn_frame(int type, warningtext *uploadmsg)
                 uploadmsg->mm[i].type = MM_VIDEO;
                 uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
             }
+            mm.flag = 1;
             push_mm_queue(&mm);
 #endif
 
@@ -718,6 +761,7 @@ int build_adas_warn_frame(int type, warningtext *uploadmsg)
                     uploadmsg->mm[i].type = MM_PHOTO;
                     uploadmsg->mm[i].id = MY_HTONL(mm.photo_id[i]);
                 }
+                mm.flag = 0;
                 push_mm_queue(&mm);
             }
             break;
@@ -784,7 +828,23 @@ int build_dsm_warn_frame(int type, dsm_warningtext *uploadmsg)
                 uploadmsg->mm[i].type = MM_VIDEO;
                 uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
             }
+            mm.flag = 0;
             push_mm_queue(&mm);
+
+            //add  video
+            i++;
+            mm.video_enable = 1; 
+            mm.photo_enable = 0; 
+            if(mm.video_enable)
+            {
+                get_next_id(MM_ID_MODE, mm.video_id, 1);
+                uploadmsg->mm_num++;
+                uploadmsg->mm[i].type = MM_VIDEO;
+                uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
+            }
+            mm.flag = 1;
+            push_mm_queue(&mm);
+
             break;
 
         case DSM_DRIVER_CHANGE:
@@ -801,6 +861,7 @@ int build_dsm_warn_frame(int type, dsm_warningtext *uploadmsg)
                     uploadmsg->mm[i].type = MM_PHOTO;
                     uploadmsg->mm[i].id = MY_HTONL(mm.photo_id[i]);
                 }
+                mm.flag = 0;
                 push_mm_queue(&mm);
             }
             break;
@@ -810,6 +871,112 @@ int build_dsm_warn_frame(int type, dsm_warningtext *uploadmsg)
     }
     return (sizeof(*uploadmsg) + uploadmsg->mm_num*sizeof(sample_mm_info));
 }
+
+void recv_dsm_message(can_data_type *can)
+{
+#if 1
+    dsm_alert_info msg;
+    uint32_t playloadlen = 0;
+    uint8_t msgbuf[512];
+    uint8_t txbuf[512];
+    uint8_t i=0;
+    int alert_type = 0;
+    static unsigned int dsm_fatigue_warn = 0;
+    static unsigned int dsm_distract_warn = 0;
+    static unsigned int dsm_calling_warn = 0;
+    static unsigned int dsm_smoking_warn = 0;
+    static unsigned int dsm_abnormal_warn = 0;
+
+    static uint8_t dsm_alert_last[8] = {0,0,0,0,0,0,0,0};
+    uint8_t dsm_alert[8] = {0,0,0,0,0,0,0,0};
+    uint8_t dsm_alert_mask[8] = {0xFF,0xFF,0,0,0,0,0,0};
+
+    sample_prot_header *pSend = (sample_prot_header *) txbuf;
+    dsm_warningtext *uploadmsg = (dsm_warningtext *)&msgbuf[0];
+
+    printf("soure: %s\n", can->source);
+    printf("time: %ld\n", can->time);
+    printf("topic: %s\n", can->topic);
+    printbuf(can->warning, sizeof(can->warning));
+
+    memcpy(&msg, can->warning, sizeof(can->warning));
+    
+    if(!filter_alert_by_speed())
+        return;
+
+
+    for(i=0; i<sizeof(can->warning); i++)
+    {
+        dsm_alert[i] = can->warning[i] & dsm_alert_mask[i];
+    }
+
+    //filter the same alert
+    if(!memcmp(dsm_alert, dsm_alert_last, sizeof(dsm_alert)))
+    {
+        printf("alert is the same!\n");
+        return;
+    }
+
+    printf("msg.alert_eye_close1 %d\n", msg.alert_eye_close1);
+    printf("msg.alert_eye_close2 %d\n", msg.alert_eye_close2);
+    printf("msg.alert_look_around %d\n", msg.alert_look_around);
+    printf("msg.alert_yawn %d\n", msg.alert_yawn);
+    printf("msg.alert_phone %d\n", msg.alert_phone);
+    printf("msg.alert_smoking %d\n", msg.alert_smoking);
+    printf("msg.alert_absence %d\n", msg.alert_absence);
+    printf("msg.alert_bow %d\n", msg.alert_bow);
+
+
+    if(msg.alert_eye_close1 || msg.alert_eye_close2 || msg.alert_yawn){
+        alert_type = DSM_FATIGUE_WARN;
+        if(!filter_alert_by_time(&dsm_fatigue_warn, FILTER_DSM_ALERT_SET_TIME))
+        {
+            printf("dsm filter alert by time!");
+            return;
+        }
+    }else if (msg.alert_look_around || msg.alert_bow){
+        alert_type = DSM_DISTRACT_WARN;
+        if(!filter_alert_by_time(&dsm_distract_warn, FILTER_DSM_ALERT_SET_TIME))
+        {
+            printf("dsm filter alert by time!");
+            return;
+        }
+    }else if(msg.alert_phone){
+        alert_type = DSM_CALLING_WARN;
+        if(!filter_alert_by_time(&dsm_calling_warn, FILTER_DSM_ALERT_SET_TIME))
+        {
+            printf("dsm filter alert by time!");
+            return;
+        }
+    }else if(msg.alert_smoking){
+        alert_type = DSM_SMOKING_WARN;
+        if(!filter_alert_by_time(&dsm_smoking_warn, FILTER_DSM_ALERT_SET_TIME))
+        {
+            printf("dsm filter alert by time!");
+            return;
+        }
+    }else if(msg.alert_absence){
+        alert_type = DSM_ABNORMAL_WARN;
+        if(!filter_alert_by_time(&dsm_abnormal_warn, FILTER_DSM_ALERT_SET_TIME))
+        {
+            printf("dsm filter alert by time!");
+            return;
+        }
+    }else
+        return;
+
+#if 1
+    playloadlen = build_dsm_warn_frame(alert_type, uploadmsg);
+    sample_assemble_msg_to_push(pSend, \
+            SAMPLE_DEVICE_ID_DSM,\
+            SAMPLE_CMD_WARNING_REPORT,\
+            (uint8_t *)uploadmsg,\
+            playloadlen);
+#endif
+    memcpy(dsm_alert_last, dsm_alert, sizeof(dsm_alert));
+#endif
+}
+
 
 #define SEND_PKG_TIME_OUT_1S    1000
 static int send_pkg_to_host(int sock)
@@ -997,8 +1164,7 @@ static int32_t sample_escaple_msg(sample_prot_header *pHeader, int32_t msg_len)
 }
 
 //push到发送队列
-static int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t devid, uint8_t cmd,
-        uint8_t *payload, int32_t payload_len)
+int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t devid, uint8_t cmd,uint8_t *payload, int32_t payload_len)
 {
     uint16_t serial_num = 0;
     char MasterIsMe = 0;
@@ -1118,13 +1284,14 @@ int do_snap_shot()
     return 0;
 }
 
-void set_BCD_time(warningtext *uploadmsg, char *second)
+void set_BCD_time(warningtext *uploadmsg, uint64_t usec)
 {
     struct tm *p = NULL; 
     time_t timep = 0;   
-    printf("time:%s\n", second);
-    timep = strtoul(second, NULL, 10);
-    timep = timep/1000000;
+    printf("time:%ld\n", usec);
+    //timep = strtoul(second, NULL, 10);
+    //timep = timep/1000000;
+    timep = usec/1000000;
     p = localtime(&timep);
     uploadmsg->time[0] = p->tm_year;
     uploadmsg->time[1] = p->tm_mon+1;
@@ -1153,6 +1320,7 @@ int filter_adas_warning()
     }
 }
 
+static struct timeval test_time;  
 
 static MECANWarningMessage g_last_warning_data;
 static MECANWarningMessage g_last_can_msg;
@@ -1167,6 +1335,9 @@ int can_message_send(can_data_type *sourcecan)
     car_info carinfo;
     uint8_t txbuf[512];
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
+    static unsigned int hw_alert = 0;
+    static unsigned int fcw_alert = 0;
+    static unsigned int ldw_alert = 0;
 
     uint32_t i = 0;
     uint8_t all_warning_masks[sizeof(MECANWarningMessage)] = {
@@ -1178,9 +1349,32 @@ int can_message_send(can_data_type *sourcecan)
     uint8_t all_warning_data[sizeof(MECANWarningMessage)] = {0};
     uint8_t trigger_data[sizeof(MECANWarningMessage)] = {0};
 
+#if 0
+    printf("can enter!\n");
+    //sleep(5000);
+    printf("data come********************************\n");
+    printf("can exit3!\n");
+    return 0;
+#endif
     if(!memcmp(sourcecan->topic, MESSAGE_CAN700, strlen(MESSAGE_CAN700)))
     {
         printf("700 come********************************\n");
+        printbuf(sourcecan->warning, 8);
+
+
+#if 1
+        if(timeout_trigger(&test_time, 15*1000))//timeout
+        {
+            gettimeofday(&test_time, NULL);
+            playloadlen = build_adas_warn_frame(SW_TYPE_FCW, uploadmsg);
+            uploadmsg->start_flag = SW_STATUS_EVENT;
+            uploadmsg->sound_type = SW_TYPE_FCW;
+            sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
+                    (uint8_t *)uploadmsg, \
+                    playloadlen);
+        }
+#endif
+
         memcpy(&can, sourcecan->warning, sizeof(sourcecan->warning));
 
         for (i = 0; i < sizeof(all_warning_masks); i++) {
@@ -1189,12 +1383,19 @@ int can_message_send(can_data_type *sourcecan)
         }
 
         if (0 == memcmp(all_warning_data, &g_last_warning_data, sizeof(g_last_warning_data))) {
+            printf("can exit!\n");
             return 0;
         }
 
-
         //if(filter_adas_warning())
         //    return 0;
+
+
+
+        //filter alert
+
+        if(!filter_alert_by_speed())
+            return 0;
 
 #if 1
         if( (g_last_warning_data.headway_warning_level != can.headway_warning_level) || \
@@ -1210,6 +1411,15 @@ int can_message_send(can_data_type *sourcecan)
             printf("------LDW/FCW event-----------\n");
 
             if (can.left_ldw || can.right_ldw) {
+
+
+                if(!filter_alert_by_time(&ldw_alert, FILTER_ADAS_ALERT_SET_TIME))
+                {
+                    printf("ldw filter alert by time!");
+                    return 0;
+                }
+
+
                 memset(uploadmsg, 0, sizeof(*uploadmsg));
                 playloadlen = build_adas_warn_frame(SW_TYPE_LDW, uploadmsg);
                 uploadmsg->start_flag = SW_STATUS_EVENT;
@@ -1224,6 +1434,13 @@ int can_message_send(can_data_type *sourcecan)
                         playloadlen);
             }
             if (can.fcw_on) {
+
+                if(!filter_alert_by_time(&hw_alert, FILTER_ADAS_ALERT_SET_TIME))
+                {
+                    printf("ldw filter alert by time!");
+                    return 0;
+                }
+
                 playloadlen = build_adas_warn_frame(SW_TYPE_FCW, uploadmsg);
                 uploadmsg->start_flag = SW_STATUS_EVENT;
                 uploadmsg->sound_type = SW_TYPE_FCW;
@@ -1237,6 +1454,13 @@ int can_message_send(can_data_type *sourcecan)
             printf("------Headway event-----------\n");
             printf("headway_warning_level:%d\n", can.headway_warning_level);
             printf("headway_measurement:%d\n", can.headway_measurement);
+
+
+            if(!filter_alert_by_time(&hw_alert, FILTER_ADAS_ALERT_SET_TIME))
+            {
+                printf("ldw filter alert by time!");
+                return 0;
+            }
 
             if (HW_LEVEL_RED_CAR == can.headway_warning_level) {
                 playloadlen = build_adas_warn_frame(SW_TYPE_HW, uploadmsg);
@@ -1268,8 +1492,8 @@ int can_message_send(can_data_type *sourcecan)
     }
     if(!strncmp(sourcecan->topic, MESSAGE_CAN760, strlen(MESSAGE_CAN760)))
     {
-        printf("760 come.........................\n");
-        printbuf(sourcecan->warning, 8);
+        //printf("760 come.........................\n");
+        //printbuf(sourcecan->warning, 8);
         memcpy(&carinfo, sourcecan->warning, sizeof(carinfo));
 #if 0
         //			uploadmsg.high = carinfo.
@@ -1285,6 +1509,7 @@ int can_message_send(can_data_type *sourcecan)
         //			uploadmsg.car_status.insert = 
 #endif
     }
+    printf("can exit2!\n");
     return 0;
 }
 
@@ -1369,7 +1594,7 @@ void send_dsm_warning(uint8_t warn_type)
     sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_DSM, SAMPLE_CMD_WARNING_REPORT,\
             (uint8_t *)&uploadmsg, framelen);
 }
-
+#if 0
 void *pthread_send_dsm(void *para)
 {
         printf("dsm mesage.....................\n");
@@ -1381,7 +1606,7 @@ void *pthread_send_dsm(void *para)
         sleep(30);
     }
 }
-
+#endif
 void mmid_to_filename(uint32_t id, uint8_t type, char *filepath)
 {
     if(type == MM_PHOTO)
@@ -2323,6 +2548,7 @@ void *parse_host_cmd(void *para)
     pHeader = (sample_prot_header *) msgbuf;
     while(1)
     {
+
         ret = unescaple_msg(msgbuf, RECV_HOST_DATA_BUF_SIZE);
         if(ret>0)
         {
@@ -2363,6 +2589,8 @@ void *pthread_snap_shot(void *p)
 
     while(1)
     {
+
+
         read_dev_para(&tmp, para_type);
         if(tmp.auto_photo_mode == SNAP_SHOT_BY_TIME){
             if(tmp.auto_photo_time_period != 0)
@@ -2397,6 +2625,7 @@ void *pthread_req_cmd_process(void *para)
     struct timeval req_time;  
     int ret = 0;
 
+    gettimeofday(&test_time, NULL);
     while(1)
     {
 
