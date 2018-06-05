@@ -8,7 +8,7 @@
 
 //#define ENABLE_ADAS
 #define ENABLE_DSM
-//#define ENABLE_ADAS_AND_DSM
+#define ENABLE_ADAS_AND_DSM
 
 
 
@@ -16,7 +16,7 @@
 #define FILTER_ALERT_BY_TIME
 
 //30 sec
-#define FILTER_ADAS_ALERT_SET_TIME 30u
+#define FILTER_ADAS_ALERT_SET_TIME 15u
 #define FILTER_DSM_ALERT_SET_TIME 30u
 
 
@@ -721,8 +721,8 @@ char *warning_type_to_str(uint8_t type);
 int timeout_trigger(struct timeval *tv, int ms);
 void repeat_send_pkg_status_init();
 void printbuf(uint8_t *buf, int len);
-void *communicate_with_host(void *para);
-void *parse_host_cmd(void *para);
+void *pthread_tcp_process(void *para);
+void *pthread_parse_cmd(void *para);
 int can_message_send(can_data_type *sourcecan);
 void adas_para_check(adas_para_setting *para);
 

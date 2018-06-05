@@ -16,6 +16,7 @@
 #include <sys/time.h>
 #include <assert.h>
 #include <semaphore.h>
+#include <sys/prctl.h>
 
 #include <stdlib.h>
 #include <sys/time.h>
@@ -31,6 +32,20 @@ using namespace std;
 static int32_t sample_send_image(uint8_t devid);
 #define WRITE_REAL_TIME_MSG 0
 #define READ_REAL_TIME_MSG  1
+
+
+
+
+
+
+static int tcp_recv_data = 0;
+static pthread_mutex_t  tcp_recv_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t   tcp_recv_cond = PTHREAD_COND_INITIALIZER;
+
+
+int save_mp4 = 0;
+pthread_mutex_t  save_mp4_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t   save_mp4_cond = PTHREAD_COND_INITIALIZER;
 
 
 
@@ -450,6 +465,12 @@ void push_mm_queue(InfoForStore *mm)
     header.buf = NULL;
     header.len = 0;
 
+    pthread_mutex_lock(&save_mp4_mutex);
+    save_mp4 = 1;
+    pthread_cond_signal(&save_mp4_cond);
+    pthread_mutex_unlock(&save_mp4_mutex);
+
+
     memcpy(&header.mm, mm, sizeof(*mm));
 
     ptr_queue_push(g_image_queue_p, &header, &photo_queue_lock);
@@ -461,6 +482,12 @@ int pull_mm_queue(InfoForStore *mm)
     ptr_queue_node header;
     header.buf = NULL;
     header.len = 0;
+
+    pthread_mutex_lock(&save_mp4_mutex);
+    while(!save_mp4)
+        pthread_cond_wait(&save_mp4_cond, &save_mp4_mutex);
+    pthread_mutex_unlock(&save_mp4_mutex);
+
     if(!ptr_queue_pop(g_image_queue_p, &header, &photo_queue_lock))
     {
         memcpy(mm, &header.mm, sizeof(*mm));
@@ -1303,23 +1330,6 @@ void set_BCD_time(warningtext *uploadmsg, uint64_t usec)
     printf("%d-%d-%d %d:%d:%d\n", (1900 + p->tm_year), ( 1 + p->tm_mon), p->tm_mday,(p->tm_hour), p->tm_min, p->tm_sec); 
 }
 
-
-int filter_adas_warning()
-{
-    adas_para_setting para;
-    real_time_data tmp;
-
-    RealTimeDdata_process(&tmp, READ_REAL_TIME_MSG);
-    read_dev_para(&para, SAMPLE_DEVICE_ID_ADAS);
-
-    printf("printf car speed = %d\n", tmp.car_speed);
-    if(tmp.car_speed <= para.warning_speed_val){
-        return -1;
-    }else{
-        return 0;
-    }
-}
-
 static struct timeval test_time;  
 
 static MECANWarningMessage g_last_warning_data;
@@ -1349,21 +1359,19 @@ int can_message_send(can_data_type *sourcecan)
     uint8_t all_warning_data[sizeof(MECANWarningMessage)] = {0};
     uint8_t trigger_data[sizeof(MECANWarningMessage)] = {0};
 
-#if 0
-    printf("can enter!\n");
-    //sleep(5000);
-    printf("data come********************************\n");
-    printf("can exit3!\n");
-    return 0;
-#endif
     if(!memcmp(sourcecan->topic, MESSAGE_CAN700, strlen(MESSAGE_CAN700)))
     {
         printf("700 come********************************\n");
-        printbuf(sourcecan->warning, 8);
-
-
+        //printbuf(sourcecan->warning, 8);
 #if 1
-        if(timeout_trigger(&test_time, 15*1000))//timeout
+
+        if(!filter_alert_by_time(&ldw_alert, FILTER_ADAS_ALERT_SET_TIME))
+        {
+            printf("ldw filter alert by time!");
+            return 0;
+        }
+
+        if(timeout_trigger(&test_time, 5*1000))//timeout
         {
             gettimeofday(&test_time, NULL);
             playloadlen = build_adas_warn_frame(SW_TYPE_FCW, uploadmsg);
@@ -1372,7 +1380,10 @@ int can_message_send(can_data_type *sourcecan)
             sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
                     (uint8_t *)uploadmsg, \
                     playloadlen);
+
+            return 0;
         }
+        
 #endif
 
         memcpy(&can, sourcecan->warning, sizeof(sourcecan->warning));
@@ -1383,20 +1394,13 @@ int can_message_send(can_data_type *sourcecan)
         }
 
         if (0 == memcmp(all_warning_data, &g_last_warning_data, sizeof(g_last_warning_data))) {
-            printf("can exit!\n");
+            //printf("can exit!\n");
             return 0;
         }
 
-        //if(filter_adas_warning())
-        //    return 0;
-
-
-
         //filter alert
-
         if(!filter_alert_by_speed())
             return 0;
-
 #if 1
         if( (g_last_warning_data.headway_warning_level != can.headway_warning_level) || \
                 (0 != memcmp(trigger_data, &g_last_trigger_warning, sizeof(g_last_trigger_warning)) && 0 != trigger_data[4]) )
@@ -1418,7 +1422,6 @@ int can_message_send(can_data_type *sourcecan)
                     printf("ldw filter alert by time!");
                     return 0;
                 }
-
 
                 memset(uploadmsg, 0, sizeof(*uploadmsg));
                 playloadlen = build_adas_warn_frame(SW_TYPE_LDW, uploadmsg);
@@ -1509,7 +1512,7 @@ int can_message_send(can_data_type *sourcecan)
         //			uploadmsg.car_status.insert = 
 #endif
     }
-    printf("can exit2!\n");
+    //printf("can exit2!\n");
     return 0;
 }
 
@@ -2269,8 +2272,8 @@ static int try_connect()
     int sock;
     int32_t ret = 0;
     int enable = 1;
-    const char *server_ip = "192.168.100.100";
-    //const char *server_ip = "192.168.100.102";
+    //const char *server_ip = "192.168.100.100";
+    const char *server_ip = "192.168.100.144";
     struct sockaddr_in host_serv_addr;
     socklen_t optlen;
     int bufsize = 0;
@@ -2341,7 +2344,7 @@ static int try_connect()
     }
 }
 
-void *communicate_with_host(void *para)
+void *pthread_tcp_process(void *para)
 {
 #define TCP_READ_BUF_SIZE (64*1024)
 
@@ -2354,6 +2357,7 @@ void *communicate_with_host(void *para)
     static int tcprecvcnt = 0;
     uint8_t *readbuf = NULL;
 
+    prctl(PR_SET_NAME, "tcp_process");
     repeat_send_pkg_status_init();
 
     readbuf = (uint8_t *)malloc(TCP_READ_BUF_SIZE);
@@ -2419,6 +2423,10 @@ connect_again:
                         else
                             usleep(10);
                     }
+                    pthread_mutex_lock(&tcp_recv_mutex);
+                    tcp_recv_data = 1;
+                    pthread_cond_signal(&tcp_recv_cond);
+                    pthread_mutex_unlock(&tcp_recv_mutex);
                 }
             }
             if(FD_ISSET(hostsock, &wfds))
@@ -2438,6 +2446,148 @@ connect_again:
 
     return NULL;
 }
+
+static int tcp_recv_process(uint8_t *msg, int msglen)
+{
+#if 0
+    uint8_t ch = 0;
+    char get_head = 0;
+    char got_esc_char = 0;
+    int cnt = 0;
+
+    int32_t ret = 0;
+    uint8_t sum = 0;
+    uint32_t framelen = 0;
+    uint8_t *msgbuf = NULL;
+#define RECV_HOST_DATA_BUF_SIZE (128*1024)
+    sample_prot_header *pHeader = NULL;
+
+    prctl(PR_SET_NAME, "parse_cmd");
+
+    msgbuf = (uint8_t *)malloc(RECV_HOST_DATA_BUF_SIZE);
+    if(!msgbuf)
+    {
+        perror("parse_host_cmd malloc");
+        return NULL;
+    }
+
+    pHeader = (sample_prot_header *) msgbuf;
+    while(1)
+    {
+        ret = unescaple_msg(msgbuf, RECV_HOST_DATA_BUF_SIZE);
+        if(ret>0)
+        {
+            framelen = ret;
+            //printf("recv framelen = %d\n", framelen);
+            sum = sample_calc_sum(pHeader, framelen);
+            if (sum != pHeader->checksum) {
+                printf("Checksum missmatch calcated: 0x%02hhx != 0x%2hhx\n",
+                        sum, pHeader->checksum);
+            }
+            else
+            {
+                sample_on_cmd(pHeader, framelen);
+            }
+        }
+        else
+            ;
+    }
+
+    if(msgbuf)
+        free(msgbuf);
+
+    int i = 0;
+
+    if(!msg || msglen <0)
+        return -1;
+
+    while(1)
+    {
+        if(cnt+1 > msglen)
+        {
+            printf("error: msg too long\n");
+            return -1;
+        }
+        if(!uchar_queue_pop(&ch))//pop success
+        {
+            // printf("data[%d] = 0x%02x\n", i++, ch);
+            if(!get_head)//not recv head
+            {
+                if((ch == SAMPLE_PROT_MAGIC) && (cnt == 0))//get head
+                {
+                    msg[cnt] = SAMPLE_PROT_MAGIC;
+                    cnt++;
+                    get_head = 1;
+                    continue;
+                }
+                else
+                    continue;
+            }
+            else//recv head
+            {
+                if((ch == SAMPLE_PROT_MAGIC) && (cnt > 0))//get tail
+                {
+
+                    if(cnt < 6)//maybe error frame, as header, restart
+                    {
+                        cnt = 0;
+                        msg[cnt] = SAMPLE_PROT_MAGIC;
+                        cnt++;
+                        get_head = 1;
+                        continue;
+                    }
+                    else
+                    {
+                        //printf("get tail! cnt = %d, return\n", cnt);
+                        msg[cnt] = SAMPLE_PROT_MAGIC;
+                        get_head = 0;//over
+                        cnt++;
+                        return cnt;
+                    }
+                }
+                else//get text
+                {
+                    if((ch == SAMPLE_PROT_ESC_CHAR) && !got_esc_char)//need deal
+                    {
+                        got_esc_char = 1;
+                        msg[cnt] = ch;
+                        cnt++;
+                    }
+                    else if(got_esc_char && (ch == 0x02))
+                    {
+                        msg[cnt-1] = SAMPLE_PROT_MAGIC;
+                        got_esc_char = 0;
+                    }
+                    else if(got_esc_char && (ch == 0x01))
+                    {
+                        msg[cnt-1] = SAMPLE_PROT_ESC_CHAR;
+                        got_esc_char = 0;
+                    }
+                    else
+                    {
+                        msg[cnt] = ch;
+                        cnt++;
+                        got_esc_char = 0;
+                    }
+                }
+            }
+        }
+        else
+        {
+            usleep(20);
+        }
+    }
+#endif
+}
+
+
+
+
+
+
+
+
+
 
 static int unescaple_msg(uint8_t *msg, int msglen)
 {
@@ -2529,7 +2679,7 @@ static int unescaple_msg(uint8_t *msg, int msglen)
     }
 }
 
-void *parse_host_cmd(void *para)
+void *pthread_parse_cmd(void *para)
 {
     int32_t ret = 0;
     uint8_t sum = 0;
@@ -2537,6 +2687,8 @@ void *parse_host_cmd(void *para)
     uint8_t *msgbuf = NULL;
 #define RECV_HOST_DATA_BUF_SIZE (128*1024)
     sample_prot_header *pHeader = NULL;
+
+    prctl(PR_SET_NAME, "parse_cmd");
 
     msgbuf = (uint8_t *)malloc(RECV_HOST_DATA_BUF_SIZE);
     if(!msgbuf)
@@ -2548,6 +2700,10 @@ void *parse_host_cmd(void *para)
     pHeader = (sample_prot_header *) msgbuf;
     while(1)
     {
+        pthread_mutex_lock(&tcp_recv_mutex);
+        while(!tcp_recv_data)
+            pthread_cond_wait(&tcp_recv_cond, &tcp_recv_mutex);
+        pthread_mutex_unlock(&tcp_recv_mutex);
 
         ret = unescaple_msg(msgbuf, RECV_HOST_DATA_BUF_SIZE);
         if(ret>0)
@@ -2587,9 +2743,11 @@ void *pthread_snap_shot(void *p)
     real_time_data rt_data;;
     uint32_t mileage_last = 0;
 
+
+    prctl(PR_SET_NAME, "pthread_snap");
+
     while(1)
     {
-
 
         read_dev_para(&tmp, para_type);
         if(tmp.auto_photo_mode == SNAP_SHOT_BY_TIME){
@@ -2615,7 +2773,6 @@ void *pthread_snap_shot(void *p)
 
 void *pthread_req_cmd_process(void *para)
 {
-
     uint32_t mm_id = 0;
     uint8_t mm_type = 0;
     uint8_t warn_type = 0;
@@ -2625,10 +2782,10 @@ void *pthread_req_cmd_process(void *para)
     struct timeval req_time;  
     int ret = 0;
 
+    prctl(PR_SET_NAME, "cache_GetVideocmd");
     gettimeofday(&test_time, NULL);
     while(1)
     {
-
         if(!pull_mm_req_cmd_queue(&send_mm))
         {
             printf("pull mm_info!\n");
@@ -2664,7 +2821,7 @@ void *pthread_req_cmd_process(void *para)
         }
         else
         {
-            usleep(10000);
+            usleep(200000);
             continue;
         }
         record_time(RECORD_START);

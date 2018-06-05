@@ -13,7 +13,7 @@
 #include <msgpack.h>
 #include "prot.h"
 #include "rbgetx.h"
-
+#include <sys/prctl.h>
 #include <queue>
 using namespace std;
 
@@ -526,7 +526,7 @@ int ratelimit_connects(unsigned int *last, unsigned int secs)
 
     return 1;
 }
-void *websocket_client(void *para)
+void *pthread_websocket_client(void *para)
 {
     int port = 7681, use_ssl = 0, ietf_version = -1;
     unsigned int rl_dumb = 0,  do_ws = 1, pp_secs = 0;
@@ -534,6 +534,7 @@ void *websocket_client(void *para)
     struct lws_client_connect_info i;
     struct lws_context *context;
 
+    prctl(PR_SET_NAME, "websocket");
     memset(&info, 0, sizeof info);
     memset(&i, 0, sizeof(i));
 
@@ -587,13 +588,13 @@ int main(int argc, char **argv)
     signal(SIGINT, sighandler);
     global_var_init();
     
-    if(pthread_create(&pth[0], NULL, communicate_with_host, NULL))
+    if(pthread_create(&pth[0], NULL, pthread_tcp_process, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
     }
 #if 1
-    if(pthread_create(&pth[1], NULL, websocket_client, NULL))
+    if(pthread_create(&pth[1], NULL, pthread_websocket_client, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
@@ -604,7 +605,7 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
-    if(pthread_create(&pth[3], NULL, parse_host_cmd, NULL))
+    if(pthread_create(&pth[3], NULL, pthread_parse_cmd, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;

@@ -862,6 +862,9 @@ void produce_dsm_image(InfoForStore *mm)
 }
 
 
+
+
+
 void *pthread_sav_warning_jpg(void *p)
 {
 #define CUSTOMER_NUM   8 
@@ -950,12 +953,13 @@ void *pthread_sav_warning_jpg(void *p)
         printf("mm type: 0x%x, mmid: 0x%x\n", mm.mm_type, mm.mm_id[0]);
         printf("video_time: 0x%x, num: 0x%x\n", mm.video_time, mm.photo_num);
 #endif
+#if 0
         if(read_pthread_num(i) >= CUSTOMER_NUM)
         {
             printf("threadpool busy!");
             continue;
         }
-
+#endif
         i = i % 8;
         if(!mm.flag){
             cls[i] = NewClosure(record_mm_infor, pr[i], mm);
