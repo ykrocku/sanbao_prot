@@ -48,12 +48,12 @@ ELSEIF (ANDROID_ABI)
     #include directory
     INCLUDE_DIRECTORIES(
         "${PROJECT_ROOT_PATH}/thirdparty/opencv/android/sdk/native/jni/include/"
-        "${PROJECT_ROOT_PATH}/thirdparty/miniglog/"
         "${PROJECT_ROOT_PATH}/thirdparty/gtest/linux/include/"
         "${PROJECT_ROOT_PATH}/thirdparty/rapidjson-1.1.0/include/"
-        "${PROJECT_ROOT_PATH}/lib/"
+        "${PROJECT_ROOT_PATH}/thirdparty/miniglog/"
         "${PROJECT_ROOT_PATH}/thirdparty/websocket/include"
         "${PROJECT_ROOT_PATH}/thirdparty/msgpackc/include"
+        "${PROJECT_ROOT_PATH}/lib/"
     )
 
     LINK_DIRECTORIES(
@@ -100,7 +100,10 @@ ELSEIF(ANDROID_ABI)
     TARGET_LINK_LIBRARIES(websocket_client
         #        halio concurrency
         libmsgpackc.a libwebsockets.a dl
-        ringbuf halio concurrency mp4w
+        ringbuf halio concurrency mp4w miniglog
+        c z log
+        opencv_core opencv_imgproc opencv_imgcodecs
+        opencv_video opencv_videoio opencv_hal
         -Wl,--start-group
         -Wl,--end-group
         )

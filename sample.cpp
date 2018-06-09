@@ -35,9 +35,6 @@ static int32_t sample_send_image(uint8_t devid);
 
 
 
-
-
-
 static int tcp_recv_data = 0;
 static pthread_mutex_t  tcp_recv_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t   tcp_recv_cond = PTHREAD_COND_INITIALIZER;
@@ -67,6 +64,8 @@ void RealTimeDdata_process(real_time_data *data, int mode)
         memcpy(data, &msg, sizeof(real_time_data));
     }
     pthread_mutex_unlock(&real_time_msg_lock);
+    
+    printf("get car speed: %d\n", data->car_speed);
 }
 
 #define WARNING_ID_MODE 0
@@ -720,6 +719,8 @@ int build_adas_warn_frame(int type, warningtext *uploadmsg)
     memset(&mm, 0, sizeof(mm));
     get_adas_Info_for_store(type, &mm);
 
+    get_local_time(uploadmsg->time);
+
     uploadmsg->warning_id = MY_HTONL(get_next_id(WARNING_ID_MODE, NULL, 0));
     uploadmsg->sound_type = type;
     uploadmsg->mm_num = 0;
@@ -750,6 +751,7 @@ int build_adas_warn_frame(int type, warningtext *uploadmsg)
                 uploadmsg->mm_num++;
                 uploadmsg->mm[i].type = MM_VIDEO;
                 uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
+                i++;
             }
             mm.flag = 0;
             push_mm_queue(&mm);
@@ -757,18 +759,19 @@ int build_adas_warn_frame(int type, warningtext *uploadmsg)
 #if 1
             //add dsm video
 
-            i++;
-            mm.video_enable = 1; 
-            mm.photo_enable = 0; 
-            if(mm.video_enable)
-            {
-                get_next_id(MM_ID_MODE, mm.video_id, 1);
-                uploadmsg->mm_num++;
-                uploadmsg->mm[i].type = MM_VIDEO;
-                uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
+            if(mm.video_enable){
+                mm.video_enable = 1; 
+                mm.photo_enable = 0; 
+                if(mm.video_enable)
+                {
+                    get_next_id(MM_ID_MODE, mm.video_id, 1);
+                    uploadmsg->mm_num++;
+                    uploadmsg->mm[i].type = MM_VIDEO;
+                    uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
+                }
+                mm.flag = 1;
+                push_mm_queue(&mm);
             }
-            mm.flag = 1;
-            push_mm_queue(&mm);
 #endif
 
             break;
@@ -778,6 +781,7 @@ int build_adas_warn_frame(int type, warningtext *uploadmsg)
             break;
 
         case SW_TYPE_SNAP:
+            printf("snap: enable\n");
             if(mm.photo_enable)
             {
                 mm.warn_type = type;
@@ -821,6 +825,9 @@ int build_dsm_warn_frame(int type, dsm_warningtext *uploadmsg)
     uploadmsg->sound_type = type;
     uploadmsg->mm_num = 0;
 
+
+    get_local_time(uploadmsg->time);
+
     RealTimeDdata_process(&tmp, READ_REAL_TIME_MSG);
     uploadmsg->altitude = tmp.altitude;
     uploadmsg->latitude = tmp.latitude;
@@ -839,6 +846,7 @@ int build_dsm_warn_frame(int type, dsm_warningtext *uploadmsg)
             
             if(mm.photo_enable)
             {
+                printf("dsm photo_enbale! num = %d\n", mm.photo_num);
                 get_next_id(MM_ID_MODE, mm.photo_id, mm.photo_num);
                 for(i=0; i<mm.photo_num; i++)
                 {
@@ -850,27 +858,34 @@ int build_dsm_warn_frame(int type, dsm_warningtext *uploadmsg)
             }
             if(mm.video_enable)
             {
+                printf("dsm video_enbale!\n");
                 get_next_id(MM_ID_MODE, mm.video_id, 1);
                 uploadmsg->mm_num++;
                 uploadmsg->mm[i].type = MM_VIDEO;
                 uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
+                i++;
             }
             mm.flag = 0;
             push_mm_queue(&mm);
+            
+            printf("num2 = %d\n", uploadmsg->mm_num);
 
-            //add  video
-            i++;
-            mm.video_enable = 1; 
-            mm.photo_enable = 0; 
             if(mm.video_enable)
             {
-                get_next_id(MM_ID_MODE, mm.video_id, 1);
-                uploadmsg->mm_num++;
-                uploadmsg->mm[i].type = MM_VIDEO;
-                uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
+                //add  video
+                mm.video_enable = 1; 
+                mm.photo_enable = 0; 
+                if(mm.video_enable)
+                {
+                    get_next_id(MM_ID_MODE, mm.video_id, 1);
+                    uploadmsg->mm_num++;
+                    uploadmsg->mm[i].type = MM_VIDEO;
+                    uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
+                }
+                mm.flag = 1;
+                push_mm_queue(&mm);
+                printf("num3 = %d\n", uploadmsg->mm_num);
             }
-            mm.flag = 1;
-            push_mm_queue(&mm);
 
             break;
 
@@ -929,7 +944,7 @@ void recv_dsm_message(can_data_type *can)
     memcpy(&msg, can->warning, sizeof(can->warning));
     
     if(!filter_alert_by_speed())
-        return;
+        goto out;
 
 
     for(i=0; i<sizeof(can->warning); i++)
@@ -941,7 +956,7 @@ void recv_dsm_message(can_data_type *can)
     if(!memcmp(dsm_alert, dsm_alert_last, sizeof(dsm_alert)))
     {
         printf("alert is the same!\n");
-        return;
+        goto out;
     }
 
     printf("msg.alert_eye_close1 %d\n", msg.alert_eye_close1);
@@ -954,53 +969,59 @@ void recv_dsm_message(can_data_type *can)
     printf("msg.alert_bow %d\n", msg.alert_bow);
 
 
-    if(msg.alert_eye_close1 || msg.alert_eye_close2 || msg.alert_yawn){
+    if(msg.alert_eye_close1 || msg.alert_eye_close2 || msg.alert_yawn || msg.alert_bow){
         alert_type = DSM_FATIGUE_WARN;
         if(!filter_alert_by_time(&dsm_fatigue_warn, FILTER_DSM_ALERT_SET_TIME))
         {
             printf("dsm filter alert by time!");
-            return;
+            goto out;
         }
-    }else if (msg.alert_look_around || msg.alert_bow){
+    }else if (msg.alert_look_around ){
         alert_type = DSM_DISTRACT_WARN;
         if(!filter_alert_by_time(&dsm_distract_warn, FILTER_DSM_ALERT_SET_TIME))
         {
             printf("dsm filter alert by time!");
-            return;
+            goto out;
         }
     }else if(msg.alert_phone){
         alert_type = DSM_CALLING_WARN;
         if(!filter_alert_by_time(&dsm_calling_warn, FILTER_DSM_ALERT_SET_TIME))
         {
             printf("dsm filter alert by time!");
-            return;
+            goto out;
         }
     }else if(msg.alert_smoking){
         alert_type = DSM_SMOKING_WARN;
         if(!filter_alert_by_time(&dsm_smoking_warn, FILTER_DSM_ALERT_SET_TIME))
         {
             printf("dsm filter alert by time!");
-            return;
+            goto out;
         }
     }else if(msg.alert_absence){
         alert_type = DSM_ABNORMAL_WARN;
         if(!filter_alert_by_time(&dsm_abnormal_warn, FILTER_DSM_ALERT_SET_TIME))
         {
             printf("dsm filter alert by time!");
-            return;
+            goto out;
         }
     }else
-        return;
+        goto out;
 
 #if 1
     playloadlen = build_dsm_warn_frame(alert_type, uploadmsg);
+    printf("send dsm alert %d!\n", alert_type);
+    printf("dsm alert frame len = %ld\n", sizeof(*uploadmsg));
+    printbuf((uint8_t *)uploadmsg, playloadlen);
     sample_assemble_msg_to_push(pSend, \
             SAMPLE_DEVICE_ID_DSM,\
             SAMPLE_CMD_WARNING_REPORT,\
             (uint8_t *)uploadmsg,\
             playloadlen);
 #endif
+
+out:
     memcpy(dsm_alert_last, dsm_alert, sizeof(dsm_alert));
+    return;
 #endif
 }
 
@@ -1301,6 +1322,7 @@ int do_snap_shot()
 #elif defined ENABLE_ADAS
     warningtext *uploadmsg = (warningtext *)&msgbuf[0];
     playloadlen = build_adas_warn_frame(SW_TYPE_SNAP, uploadmsg);
+    printf("sanp len = %d\n", playloadlen);
     sample_assemble_msg_to_push(pSend, \
             SAMPLE_DEVICE_ID_ADAS,\
             SAMPLE_CMD_WARNING_REPORT,\
@@ -1320,7 +1342,7 @@ void set_BCD_time(warningtext *uploadmsg, uint64_t usec)
     //timep = timep/1000000;
     timep = usec/1000000;
     p = localtime(&timep);
-    uploadmsg->time[0] = p->tm_year;
+    uploadmsg->time[0] = (p->tm_year+1900)%100;
     uploadmsg->time[1] = p->tm_mon+1;
     uploadmsg->time[2] = p->tm_mday;
     uploadmsg->time[3] = p->tm_hour;
@@ -1349,6 +1371,8 @@ int can_message_send(can_data_type *sourcecan)
     static unsigned int fcw_alert = 0;
     static unsigned int ldw_alert = 0;
 
+
+
     uint32_t i = 0;
     uint8_t all_warning_masks[sizeof(MECANWarningMessage)] = {
         0x00, 0x00, 0x01, 0x00,
@@ -1363,7 +1387,7 @@ int can_message_send(can_data_type *sourcecan)
     {
         printf("700 come********************************\n");
         //printbuf(sourcecan->warning, 8);
-#if 1
+#if 0
 
         if(!filter_alert_by_time(&ldw_alert, FILTER_ADAS_ALERT_SET_TIME))
         {
@@ -1400,14 +1424,14 @@ int can_message_send(can_data_type *sourcecan)
 
         //filter alert
         if(!filter_alert_by_speed())
-            return 0;
+            goto out;
 #if 1
         if( (g_last_warning_data.headway_warning_level != can.headway_warning_level) || \
                 (0 != memcmp(trigger_data, &g_last_trigger_warning, sizeof(g_last_trigger_warning)) && 0 != trigger_data[4]) )
         {
             printf("warning happened.........................\n");
             memset(msgbuf, 0, sizeof(msgbuf));
-            set_BCD_time(uploadmsg, sourcecan->time);
+            //set_BCD_time(uploadmsg, sourcecan->time);
         }
 #endif
         //LDW and FCW event
@@ -1420,7 +1444,7 @@ int can_message_send(can_data_type *sourcecan)
                 if(!filter_alert_by_time(&ldw_alert, FILTER_ADAS_ALERT_SET_TIME))
                 {
                     printf("ldw filter alert by time!");
-                    return 0;
+                    goto out;
                 }
 
                 memset(uploadmsg, 0, sizeof(*uploadmsg));
@@ -1432,6 +1456,7 @@ int can_message_send(can_data_type *sourcecan)
                 if(can.right_ldw)
                     uploadmsg->ldw_type = SOUND_TYPE_RLDW;
 
+                printf("send LDW alert message!\n");
                 sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
                         (uint8_t *)uploadmsg, \
                         playloadlen);
@@ -1441,12 +1466,14 @@ int can_message_send(can_data_type *sourcecan)
                 if(!filter_alert_by_time(&hw_alert, FILTER_ADAS_ALERT_SET_TIME))
                 {
                     printf("ldw filter alert by time!");
-                    return 0;
+                    goto out;
                 }
 
                 playloadlen = build_adas_warn_frame(SW_TYPE_FCW, uploadmsg);
                 uploadmsg->start_flag = SW_STATUS_EVENT;
                 uploadmsg->sound_type = SW_TYPE_FCW;
+
+                printf("send FCW alert message!\n");
                 sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
                         (uint8_t *)uploadmsg, \
                         playloadlen);
@@ -1462,7 +1489,7 @@ int can_message_send(can_data_type *sourcecan)
             if(!filter_alert_by_time(&hw_alert, FILTER_ADAS_ALERT_SET_TIME))
             {
                 printf("ldw filter alert by time!");
-                return 0;
+                goto out;
             }
 
             if (HW_LEVEL_RED_CAR == can.headway_warning_level) {
@@ -1471,6 +1498,7 @@ int can_message_send(can_data_type *sourcecan)
                 uploadmsg->start_flag = SW_STATUS_EVENT;
                 uploadmsg->sound_type = SW_TYPE_HW;
 
+                printf("send HW alert message!\n");
                 sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
                         (uint8_t *)uploadmsg, \
                         playloadlen);
@@ -1482,12 +1510,15 @@ int can_message_send(can_data_type *sourcecan)
                 uploadmsg->start_flag = SW_STATUS_EVENT;
                 uploadmsg->sound_type = SW_TYPE_HW;
 
+                printf("send HW alert2 message!\n");
                 sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
                         (uint8_t *)uploadmsg,\
                         playloadlen);
             }
         }
 
+
+out:
         memcpy(&g_last_can_msg, &can, sizeof(g_last_can_msg));
         memcpy(&g_last_warning_data, all_warning_data, sizeof(g_last_warning_data));
         memcpy(&g_last_trigger_warning, trigger_data,\
@@ -1516,22 +1547,23 @@ int can_message_send(can_data_type *sourcecan)
     return 0;
 }
 
-
-void get_local_time(dsm_warningtext *DsmWarnMsg)
+void get_local_time(uint8_t get_time[6])
 {
-    time_t timep;
-    struct tm *p = NULL; 
+    struct tm a;
+    struct tm *p = &a;
+    time_t timep = 0;   
 
-    ctime(&timep);
+    timep = time(NULL);
+
     p = localtime(&timep);
-    DsmWarnMsg->time[0] = p->tm_year;
-    DsmWarnMsg->time[1] = p->tm_mon+1;
-    DsmWarnMsg->time[2] = p->tm_mday;
-    DsmWarnMsg->time[3] = p->tm_hour;
-    DsmWarnMsg->time[4] = p->tm_min;
-    DsmWarnMsg->time[5] = p->tm_sec;
+    get_time[0] = p->tm_year;
+    get_time[1] = p->tm_mon+1;
+    get_time[2] = p->tm_mday;
+    get_time[3] = p->tm_hour;
+    get_time[4] = p->tm_min;
+    get_time[5] = p->tm_sec;
 
-    printf("%d-%d-%d %d:%d:%d\n", (1900 + p->tm_year), ( 1 + p->tm_mon), p->tm_mday,(p->tm_hour), p->tm_min, p->tm_sec); 
+    printf("local time %d-%d-%d %d:%d:%d\n", (1900 + p->tm_year), ( 1 + p->tm_mon), p->tm_mday,(p->tm_hour), p->tm_min, p->tm_sec); 
 }
 
 void send_dsm_warning(uint8_t warn_type)
@@ -1593,7 +1625,7 @@ void send_dsm_warning(uint8_t warn_type)
 #endif
     framelen = build_dsm_warn_frame(DSM_CALLING_WARN, &uploadmsg);
     printf("dsm frame len = %d\n", framelen);
-    get_local_time(&uploadmsg);
+    get_local_time(uploadmsg.time);
     sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_DSM, SAMPLE_CMD_WARNING_REPORT,\
             (uint8_t *)&uploadmsg, framelen);
 }
@@ -1697,6 +1729,7 @@ static int32_t send_mm_req_ack(sample_prot_header *pHeader, int len)
 
     if(pHeader->cmd == SAMPLE_CMD_REQ_MM_DATA && !g_pkg_status_p->mm_data_trans_waiting) //recv req
     {
+        g_pkg_status_p->mm_data_trans_waiting = 1;
         printf("------------req mm-------------\n");
         printbuf((uint8_t *)pHeader, len);
 
@@ -2181,18 +2214,28 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
 
     sample_dev_info dev_info = {
         15, "MINIEYE",
-        15, "M3",
+        15, "M4",
         15, "1.0.0.1",
-        15, "1.0.1.5", //soft version
+        15, "1.0.1.9", //soft version
         15, "0xF0321564",
         15, "SAMPLE",
     };
     uint8_t txbuf[128] = {0};
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
 
-    if(!(MESSAGE_DEVID_IS_ME(pHeader->device_id) ||\
-            (IS_BRDCST(pHeader->device_id) && (pHeader->cmd == SAMPLE_CMD_QUERY))))
+
+#if defined ENABLE_ADAS
+    if(pHeader->device_id != SAMPLE_DEVICE_ID_ADAS ||\
+            pHeader->device_id != SAMPLE_DEVICE_ID_ADAS)
         return 0;
+
+#elif defined ENABLE_DSM
+    if(pHeader->device_id != SAMPLE_DEVICE_ID_DSM ||\
+            pHeader->device_id != SAMPLE_DEVICE_ID_DSM)
+        return 0;
+#else
+        return 0;
+#endif
 
     serial_num = MY_HTONS(pHeader->serial_num);
     do_serial_num(&serial_num, RECORD_RECV_NUM);
@@ -2272,8 +2315,8 @@ static int try_connect()
     int sock;
     int32_t ret = 0;
     int enable = 1;
-    //const char *server_ip = "192.168.100.100";
-    const char *server_ip = "192.168.100.144";
+    const char *server_ip = "192.168.100.100";
+    //const char *server_ip = "192.168.100.144";
     struct sockaddr_in host_serv_addr;
     socklen_t optlen;
     int bufsize = 0;
@@ -2432,7 +2475,6 @@ connect_again:
             if(FD_ISSET(hostsock, &wfds))
             {
                 send_pkg_to_host(hostsock);
-                //tcpsend_pkg_to_host(hostsock);
             }
         }
         else
@@ -2750,7 +2792,9 @@ void *pthread_snap_shot(void *p)
     {
 
         read_dev_para(&tmp, para_type);
+        print_adas_para(&tmp);
         if(tmp.auto_photo_mode == SNAP_SHOT_BY_TIME){
+            printf("auto snap shot!\n");
             if(tmp.auto_photo_time_period != 0)
                 do_snap_shot();
             sleep(tmp.auto_photo_time_period);
@@ -2782,6 +2826,9 @@ void *pthread_req_cmd_process(void *para)
     struct timeval req_time;  
     int ret = 0;
 
+    uint8_t recv_time[6];
+    get_local_time(recv_time);
+
     prctl(PR_SET_NAME, "cache_GetVideocmd");
     gettimeofday(&test_time, NULL);
     while(1)
@@ -2811,7 +2858,6 @@ void *pthread_req_cmd_process(void *para)
                 g_pkg_status_p->mm.id = send_mm_ptr->id;
                 g_pkg_status_p->mm.packet_index = 0;
                 g_pkg_status_p->mm.packet_total_num = MY_HTONS((filesize + IMAGE_SIZE_PER_PACKET - 1)/IMAGE_SIZE_PER_PACKET);
-                g_pkg_status_p->mm_data_trans_waiting = 1;
 
                 //send first package
                 printf("send first package!\n");

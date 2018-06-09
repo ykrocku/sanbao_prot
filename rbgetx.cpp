@@ -9,6 +9,7 @@
 #include <iostream>
 #include <vector>
 #include <list>
+#include <opencv2/opencv.hpp>
 
 #include <string.h>
 #include <sys/time.h>
@@ -16,20 +17,53 @@
 #include "common/ringbuf/RingBufFrame.h"
 #include "common/ringbuf/CRingBuf.h"
 #include "common/time/timestamp.h"
-
-#include "prot.h"
-
 #include "common/hal/ma_api.h"
 #include "common/hal/android_api.h"
-
 #include <stdlib.h>
 #include <fstream>
 #include "common/mp4/MP4Writer.h"
-
 #include <cstddef>
 #include "common/base/closure.h"
 #include "common/concurrency/this_thread.h"
 #include "common/concurrency/thread_pool.h"
+
+
+
+
+
+#include <time.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <getopt.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <string>
+#include <thread>
+#include <stdexcept>
+#include <opencv2/opencv.hpp>
+#include "common/time/time_utils.h"
+#include "common/concurrency/this_thread.h"
+#include "common/hal/ma_api.h"
+#include "common/hal/android_api.h"
+#include "common/ringbuf/CRingBuf.h"
+#include "common/mp4/MP4Writer.h"
+
+
+
+
+
+#include <iostream>
+#include <opencv2/core.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgproc.hpp>
+
+
+#include "prot.h"
 
 #define USE_HW_JPEG
 #ifdef USE_HW_JPEG
@@ -178,12 +212,10 @@ std::vector<uint8_t> jpeg_encode(uint8_t* data,\
 
 #ifdef USE_HW_JPEG
     fprintf(stderr, "Using hardware JPEG encoder.\n");
-#if 1
     int32_t bytes = ma_api_hw_jpeg_encode(data,\
             cols, rows, MA_COLOR_FMT_RGB888,\
             jpg_vec.data(), out_cols, out_rows, quality);
     jpg_vec.resize(bytes);
-#endif
 #else
     fprintf(stderr, "Using software JPEG encoder.\n");
 
@@ -223,6 +255,28 @@ RBFrame* request_jpeg_frame(CRingBuf* pRB, uint32_t repeat_times)
 
     return pFrame;
 }
+
+std::string GetTimestamp() {
+  time_t rawtime;
+  struct tm* timeinfo;
+  char buffer[80];
+  memset(buffer, 0, sizeof buffer);
+  time(&rawtime);
+  timeinfo = localtime(&rawtime);
+  strftime(buffer, sizeof buffer, "%Y-%m-%d %H:%M:%S", timeinfo);
+  return buffer;
+}
+
+#if 1
+// color
+const CvScalar COLOR_BLACK = CV_RGB(0, 0, 0);
+const CvScalar COLOR_DARKGRAY = CV_RGB(55, 55, 55);
+const CvScalar COLOR_WHITE = CV_RGB(255, 255, 255);
+const CvScalar COLOR_RED = CV_RGB(255, 0, 0);
+const CvScalar COLOR_GREEN = CV_RGB(0, 255, 0);
+const CvScalar COLOR_BLUE = CV_RGB(0, 0, 255);
+#endif
+
 int process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int height) {
 
     static uint32_t mFrameIdx=0;
@@ -231,7 +285,6 @@ int process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int height) {
     uint32_t frameLen = 0;
 
     pRB->SeekIndexByTime(0);  // seek to the latest frame
-
     pFrame = request_jpeg_frame(pRB, 10);
     if(pFrame == nullptr)
         return -1;
@@ -253,8 +306,23 @@ int process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int height) {
         return -1;
     }
 
+#if 1
+    cv::Mat new_image;
+    cv::Size dim(pFrame->video.VWidth, pFrame->video.VHeight);
+    cv::Mat image(dim, CV_8UC3, pFrame->data);
+    image.copyTo(new_image);
+    pRB->CommitRead();
+
+    std::string time = GetTimestamp();
+    cv::putText(new_image, time, cv::Point(20, 60),
+                CV_FONT_HERSHEY_DUPLEX, 1.5, COLOR_BLUE, 2, CV_AA);
+
+    std::vector<uint8_t> jpg_vec = jpeg_encode(new_image.data,
+        new_image.cols, new_image.rows, width, height, quality);
+#else
     std::vector<uint8_t> jpg_vec = jpeg_encode(pFrame->data,
             pFrame->video.VWidth, pFrame->video.VHeight, width, height, quality);
+#endif
     pRB->CommitRead();
 
     jpg_size = jpg_vec.size();
@@ -288,28 +356,80 @@ int process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int height) {
     //memcpy(pwFrame->data, info.addr, 2 * 1024 * 1024);
     pwRB->CommitWrite();
 
-    print_frame("producer", pwFrame);
+    //print_frame("producer", pwFrame);
 
     return 0;
 }
 
+
+int ConfigResolution[][2]={
+352,288, //not use
+352,288,
+704,288,
+704,576,
+640,480,
+1280,720,
+1920,1080,
+};
+
+
+
+void GetConfigResolution(int *w, int *h)
+{
+    int index = 0;
+
+#if defined ENABLE_ADAS
+    adas_para_setting para;
+    read_dev_para(&para, SAMPLE_DEVICE_ID_ADAS);
+    index = para.image_Resolution%6;
+    *w = ConfigResolution[index][0];
+    *h = ConfigResolution[index][1];
+#elif defined ENABLE_DSM
+    dsm_para_setting para;
+    read_dev_para(&para, SAMPLE_DEVICE_ID_DSM);
+    index = para.image_Resolution%6;
+    *w = ConfigResolution[index][0];
+    *h = ConfigResolution[index][1];
+
+#endif
+
+    printf("GET Resolution %d x %d\n", *w, *h);
+
+}
+
+
+
+
+
 #include <sys/prctl.h>
 void *pthread_encode_jpeg(void *p)
 {
-    int timems;
+    int index=0;
     int quality = 50;
     //int Vwidth = 640;
     //int Vheight = 360;
+    
+/*
+0x01:352×288
+0x02:704×288
+0x03:704×576
+0x04:640×480
+0x05:1280×720
+0x06:1920×1080
+*/
 
     int Vwidth = 704;
     int Vheight = 576;
+
+
+    GetConfigResolution(&Vwidth, &Vheight);
+
 
     int cnt = 0;
     struct timeval t;
 
     printf("%s enter!\n", __FUNCTION__);
 
-  
     prctl(PR_SET_NAME, "encode");
 #if defined ENABLE_ADAS 
     const char *rb_name = ma_api_get_rb_name(MA_RB_TYPE_ADAS_RAW);
@@ -348,6 +468,7 @@ void *pthread_encode_jpeg(void *p)
             cnt++;
             if(timeout_trigger(&t, 2*1000))
             {
+                GetConfigResolution(&Vwidth, &Vheight);
                 gettimeofday(&t, NULL);
                 printf("encdoe speed %d per 2 sec\n", cnt);
                 cnt = 0; 
@@ -533,7 +654,7 @@ void store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
 #define RECORD_JPEG_NO_NEED 0
 void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
 {
-#define VIDEO_FRAMES_PER_SECOND   10
+#define VIDEO_FRAMES_PER_SECOND   12
     RBFrame* pFrame = nullptr;
     char mp4filepath[100];
     char testfilepath[100];
@@ -586,8 +707,8 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
 
 
         print_frame("video-read", pFrame);
-        //sprintf(testfilepath,"/mnt/obb/adas/%d.jpg", pFrame->frameNo);
-        //write_file(testfilepath, pFrame->data, pFrame->dataLen);
+        sprintf(testfilepath,"/mnt/obb/adas/%d.jpg", pFrame->frameNo);
+        write_file(testfilepath, pFrame->data, pFrame->dataLen);
         mp4.Write(pFrame->data, pFrame->dataLen);
         if(jpeg_flag)
         {

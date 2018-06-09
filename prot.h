@@ -6,31 +6,18 @@
 
 #include <queue>
 
-//#define ENABLE_ADAS
-#define ENABLE_DSM
-#define ENABLE_ADAS_AND_DSM
-
-
+#define ENABLE_ADAS
+//#define ENABLE_DSM
 
 #define FILTER_ALERT_BY_SPEED
 #define FILTER_ALERT_BY_TIME
 
 //30 sec
-#define FILTER_ADAS_ALERT_SET_TIME 15u
+#define FILTER_ADAS_ALERT_SET_TIME 30u
 #define FILTER_DSM_ALERT_SET_TIME 30u
 
 
 #define IS_BRDCST(id)   (SAMPLE_DEVICE_ID_BRDCST == (id))
-
-#if defined ENABLE_ADAS_AND_DSM
-    #define MESSAGE_DEVID_IS_ME(id)  (SAMPLE_DEVICE_ID_ADAS == (id))
-#elif defined ENABLE_ADAS
-    #define MESSAGE_DEVID_IS_ME(id)  (SAMPLE_DEVICE_ID_ADAS == (id))
-#elif defined ENABLE_DSM
-    #define MESSAGE_DEVID_IS_ME(id)  (SAMPLE_DEVICE_ID_DSM == (id))
-#else
-    #define MESSAGE_DEVID_IS_ME(id)  (SAMPLE_DEVICE_ID_ADAS == (id))
-#endif
 
 #define SANBAO_VERSION 0x01
 #define VENDOR_ID 0x1234
@@ -59,9 +46,6 @@
 
 
 
-
-
-
 #define LOCAL_ADAS_PRAR_FILE     "/data/adas_para"
 #define LOCAL_DSM_PRAR_FILE     "/data/dsm_para"
 
@@ -70,9 +54,16 @@
 #define CLEAN_MPK " rm /data/upgrade.mpk"
 #define UPGRADE_FILE_CMD     "/data/upgrade.sh /data/upgrade.mpk"
 #else
-#define UPGRADE_FILE_PATH     "/data/mnt/obb/package.bin"
+#define UPGRADE_FILE_PATH     "/mnt/obb/package.bin"
 #define CLEAN_MPK             "rm /mnt/obb/package.bin"
-#define UPGRADE_FILE_CMD      "/data/upgrade.sh"
+
+
+#if defined ENABLE_ADAS
+    #define UPGRADE_FILE_CMD      "/data/adas_upgrade.sh"
+#elif defined ENABLE_DSM
+    #define UPGRADE_FILE_CMD      "/data/dsm_upgrade.sh"
+#endif
+
 
 #endif
 
@@ -748,6 +739,7 @@ void insert_mm_resouce(mm_node m);
 
 int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t devid, uint8_t cmd,uint8_t *payload, int32_t payload_len);
 
+void get_local_time(uint8_t get_time[6]);
 
 int ratelimit_connects(unsigned int *last, unsigned int secs);
 
