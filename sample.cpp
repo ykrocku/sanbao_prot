@@ -157,7 +157,7 @@ queue<uint8_t> g_uchar_queue;
 pkg_repeat_status g_pkg_status;
 pkg_repeat_status *g_pkg_status_p = &g_pkg_status;
 
-void repeat_send_pkg_status_init()
+void send_stat_pkg_init()
 {
     memset(g_pkg_status_p, 0, sizeof(pkg_repeat_status));
 }
@@ -1027,91 +1027,62 @@ out:
 
 
 #define SEND_PKG_TIME_OUT_1S    1000
-static int send_pkg_to_host(int sock)
+static int send_pkg_to_host(int sock, uint8_t *buf)
 {
-    //uint8_t buf[PTR_QUEUE_BUF_SIZE];
-    uint8_t *buf = NULL;
     int ret = 0;
     int retval = 0;
     int len = 0;
     SendStatus pkg;
 
-    buf = (uint8_t *)malloc(PTR_QUEUE_BUF_SIZE);
-    if(!buf)
-    {
-        perror("send pkg malloc");
+    //读发送包状态。
+    if(read_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock)){
         retval = 1;
         goto out;
     }
-
-    //no message
-    if(read_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock))
-    {
-        retval = 1;
-        goto out;
-    }
-
-    if(pkg.ack_status == MSG_ACK_READY)
-    {
-        if(pkg.send_repeat == 0)
-        {
-            if(!get_node_buf(g_ptr_queue_p, buf, &len, &ptr_queue_lock))
-                ret = unblock_write(sock, buf, len);
-            //如果发送失败，比如断网的情况，怎么处理
+    if(pkg.send_repeat == 0){//第一次直接发送
+        if(get_node_buf(g_ptr_queue_p, buf, &len, &ptr_queue_lock)){
+            retval = 0;
+            goto out;
         }
+        //如果发送失败，比如断网的情况，怎么处理
         //发送成功，释放头节点
-        free_header_node(g_ptr_queue_p, &ptr_queue_lock);
-        retval = 0;
-        goto out;
-    }
-    else if(pkg.ack_status == MSG_ACK_WAITING)
-    {
-        if(pkg.send_repeat == 0)
-        {
-            if(get_node_buf(g_ptr_queue_p, buf, &len, &ptr_queue_lock))
-            {
-                retval = 0;
-                goto out;
-            }
+        ret = unblock_write(sock, buf, len);
+        //printf("send buf:\n");
+        //printbuf(buf, len);
+        gettimeofday(&pkg.send_time, NULL);
+        pkg.send_repeat++;
+        write_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
 
-            ret = unblock_write(sock, buf, len);
-            //printf("send buf:\n");
-            //printbuf(buf, len);
-            gettimeofday(&pkg.send_time, NULL);
-            pkg.send_repeat++;
-            write_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
+        if(pkg.ack_status == MSG_ACK_READY){//ack ready
+            free_header_node(g_ptr_queue_p, &ptr_queue_lock);
+            retval = 0;
+            goto out;
         }
-        else if(pkg.send_repeat > 0 && pkg.send_repeat < 3)
-        {
-            if(timeout_trigger(&pkg.send_time, SEND_PKG_TIME_OUT_1S))
-            {
-                if(get_node_buf(g_ptr_queue_p, buf, &len, &ptr_queue_lock))
-                {
+        goto out;
+    }else{
+        if(pkg.ack_status == MSG_ACK_READY){//ack ready
+            free_header_node(g_ptr_queue_p, &ptr_queue_lock);
+            retval = 0;
+            goto out;
+        }else if(pkg.ack_status == MSG_ACK_WAITING){//no ack
+            if(timeout_trigger(&pkg.send_time, SEND_PKG_TIME_OUT_1S)){
+                if(get_node_buf(g_ptr_queue_p, buf, &len, &ptr_queue_lock)){
                     retval = 1;
                     goto out;
                 }
-
                 ret = unblock_write(sock, buf, len);
                 gettimeofday(&pkg.send_time, NULL);
                 pkg.send_repeat++;
                 write_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
             }
-            else
-            {
-                usleep(20);
+            //3次都已经重发，释放头节点
+            if(pkg.send_repeat >= 3){//第一次发送
+                free_header_node(g_ptr_queue_p, &ptr_queue_lock);
+                g_pkg_status_p->mm_data_trans_waiting = 0;
             }
         }
-        else
-        {
-            //3次都已经重发，释放头节点
-            free_header_node(g_ptr_queue_p, &ptr_queue_lock);
-            g_pkg_status_p->mm_data_trans_waiting = 0;
-        }
     }
-
 out:
-    if(buf)
-        free(buf);
     return retval;
 }
 
@@ -2399,15 +2370,21 @@ void *pthread_tcp_process(void *para)
     int i=0;
     static int tcprecvcnt = 0;
     uint8_t *readbuf = NULL;
+    uint8_t *writebuf = NULL;
 
     prctl(PR_SET_NAME, "tcp_process");
-    repeat_send_pkg_status_init();
+    send_stat_pkg_init();
 
+    writebuf = (uint8_t *)malloc(PTR_QUEUE_BUF_SIZE);
+    if(!writebuf){
+        perror("send pkg malloc");
+        retval = 1;
+        goto out;
+    }
     readbuf = (uint8_t *)malloc(TCP_READ_BUF_SIZE);
-    if(!readbuf)
-    {
+    if(!readbuf){
         perror("tcp readbuf malloc");
-        return NULL;
+        goto out;
     }
 
 connect_again:
@@ -2422,7 +2399,6 @@ connect_again:
 #endif
 
     while (1) {
-
         FD_ZERO(&rfds);
         FD_ZERO(&wfds);
         FD_SET(hostsock, &rfds);
@@ -2463,8 +2439,6 @@ connect_again:
                             //printf("i = %d\n", i);
                             continue;
                         }
-                        else
-                            usleep(10);
                     }
                     pthread_mutex_lock(&tcp_recv_mutex);
                     tcp_recv_data = 1;
@@ -2474,170 +2448,29 @@ connect_again:
             }
             if(FD_ISSET(hostsock, &wfds))
             {
-                send_pkg_to_host(hostsock);
+                send_pkg_to_host(hostsock, writebuf);
             }
         }
         else
         {
-            printf("No data within 2 seconds.\n");
+            printf("tcp no data within 2 seconds.\n");
         }
     }
 
+out:
     if(readbuf)
         free(readbuf);
+    if(writebuf)
+        free(writebuf);
 
     return NULL;
 }
-
-static int tcp_recv_process(uint8_t *msg, int msglen)
-{
-#if 0
-    uint8_t ch = 0;
-    char get_head = 0;
-    char got_esc_char = 0;
-    int cnt = 0;
-
-    int32_t ret = 0;
-    uint8_t sum = 0;
-    uint32_t framelen = 0;
-    uint8_t *msgbuf = NULL;
-#define RECV_HOST_DATA_BUF_SIZE (128*1024)
-    sample_prot_header *pHeader = NULL;
-
-    prctl(PR_SET_NAME, "parse_cmd");
-
-    msgbuf = (uint8_t *)malloc(RECV_HOST_DATA_BUF_SIZE);
-    if(!msgbuf)
-    {
-        perror("parse_host_cmd malloc");
-        return NULL;
-    }
-
-    pHeader = (sample_prot_header *) msgbuf;
-    while(1)
-    {
-        ret = unescaple_msg(msgbuf, RECV_HOST_DATA_BUF_SIZE);
-        if(ret>0)
-        {
-            framelen = ret;
-            //printf("recv framelen = %d\n", framelen);
-            sum = sample_calc_sum(pHeader, framelen);
-            if (sum != pHeader->checksum) {
-                printf("Checksum missmatch calcated: 0x%02hhx != 0x%2hhx\n",
-                        sum, pHeader->checksum);
-            }
-            else
-            {
-                sample_on_cmd(pHeader, framelen);
-            }
-        }
-        else
-            ;
-    }
-
-    if(msgbuf)
-        free(msgbuf);
-
-    int i = 0;
-
-    if(!msg || msglen <0)
-        return -1;
-
-    while(1)
-    {
-        if(cnt+1 > msglen)
-        {
-            printf("error: msg too long\n");
-            return -1;
-        }
-        if(!uchar_queue_pop(&ch))//pop success
-        {
-            // printf("data[%d] = 0x%02x\n", i++, ch);
-            if(!get_head)//not recv head
-            {
-                if((ch == SAMPLE_PROT_MAGIC) && (cnt == 0))//get head
-                {
-                    msg[cnt] = SAMPLE_PROT_MAGIC;
-                    cnt++;
-                    get_head = 1;
-                    continue;
-                }
-                else
-                    continue;
-            }
-            else//recv head
-            {
-                if((ch == SAMPLE_PROT_MAGIC) && (cnt > 0))//get tail
-                {
-
-                    if(cnt < 6)//maybe error frame, as header, restart
-                    {
-                        cnt = 0;
-                        msg[cnt] = SAMPLE_PROT_MAGIC;
-                        cnt++;
-                        get_head = 1;
-                        continue;
-                    }
-                    else
-                    {
-                        //printf("get tail! cnt = %d, return\n", cnt);
-                        msg[cnt] = SAMPLE_PROT_MAGIC;
-                        get_head = 0;//over
-                        cnt++;
-                        return cnt;
-                    }
-                }
-                else//get text
-                {
-                    if((ch == SAMPLE_PROT_ESC_CHAR) && !got_esc_char)//need deal
-                    {
-                        got_esc_char = 1;
-                        msg[cnt] = ch;
-                        cnt++;
-                    }
-                    else if(got_esc_char && (ch == 0x02))
-                    {
-                        msg[cnt-1] = SAMPLE_PROT_MAGIC;
-                        got_esc_char = 0;
-                    }
-                    else if(got_esc_char && (ch == 0x01))
-                    {
-                        msg[cnt-1] = SAMPLE_PROT_ESC_CHAR;
-                        got_esc_char = 0;
-                    }
-                    else
-                    {
-                        msg[cnt] = ch;
-                        cnt++;
-                        got_esc_char = 0;
-                    }
-                }
-            }
-        }
-        else
-        {
-            usleep(20);
-        }
-    }
-#endif
-}
-
-
-
-
-
-
-
-
-
-
 static int unescaple_msg(uint8_t *msg, int msglen)
 {
     uint8_t ch = 0;
     char get_head = 0;
     char got_esc_char = 0;
     int cnt = 0;
-
     int i = 0;
 
     if(!msg || msglen <0)
@@ -2647,7 +2480,7 @@ static int unescaple_msg(uint8_t *msg, int msglen)
     {
         if(cnt+1 > msglen)
         {
-            printf("error: msg too long\n");
+            printf("error: recv msg too long\n");
             return -1;
         }
         if(!uchar_queue_pop(&ch))//pop success
@@ -2716,7 +2549,11 @@ static int unescaple_msg(uint8_t *msg, int msglen)
         }
         else
         {
-            usleep(20);
+            pthread_mutex_lock(&tcp_recv_mutex);
+            while(!tcp_recv_data)
+                pthread_cond_wait(&tcp_recv_cond, &tcp_recv_mutex);
+            pthread_mutex_unlock(&tcp_recv_mutex);
+            //usleep(20);
         }
     }
 }
@@ -2742,10 +2579,6 @@ void *pthread_parse_cmd(void *para)
     pHeader = (sample_prot_header *) msgbuf;
     while(1)
     {
-        pthread_mutex_lock(&tcp_recv_mutex);
-        while(!tcp_recv_data)
-            pthread_cond_wait(&tcp_recv_cond, &tcp_recv_mutex);
-        pthread_mutex_unlock(&tcp_recv_mutex);
 
         ret = unescaple_msg(msgbuf, RECV_HOST_DATA_BUF_SIZE);
         if(ret>0)
@@ -2792,7 +2625,6 @@ void *pthread_snap_shot(void *p)
     {
 
         read_dev_para(&tmp, para_type);
-        print_adas_para(&tmp);
         if(tmp.auto_photo_mode == SNAP_SHOT_BY_TIME){
             printf("auto snap shot!\n");
             if(tmp.auto_photo_time_period != 0)
@@ -2846,7 +2678,10 @@ void *pthread_req_cmd_process(void *para)
                 if(ret != 0)
                 {
                     if(timeout_trigger(&req_time, 8*1000))//timeout
+                    {
+                        g_pkg_status_p->mm_data_trans_waiting = 0;
                         break;
+                    }
 
                     printf("try find mm file!\n");
                     sleep(1);
@@ -2863,6 +2698,7 @@ void *pthread_req_cmd_process(void *para)
                 printf("send first package!\n");
                 sample_send_image(send_mm_ptr->devid);
                 break;
+
             }
         }
         else
