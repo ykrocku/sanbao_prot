@@ -12,7 +12,6 @@
 #include <libwebsockets.h>
 #include <msgpack.h>
 #include "prot.h"
-#include "rbgetx.h"
 #include <sys/prctl.h>
 #include <queue>
 using namespace std;
@@ -632,13 +631,13 @@ int main(int argc, char **argv)
         return -1;
     }
 #endif
-    pthread_detach(pth[0]);
-    pthread_detach(pth[1]);
-    pthread_detach(pth[2]);
-    pthread_detach(pth[3]);
-    pthread_detach(pth[4]);
-    pthread_detach(pth[5]);
-    pthread_detach(pth[6]);
+    //pthread_detach(pth[0]);
+    //pthread_detach(pth[1]);
+    //pthread_detach(pth[2]);
+    //pthread_detach(pth[3]);
+    //pthread_detach(pth[4]);
+    //pthread_detach(pth[5]);
+    //pthread_detach(pth[6]);
 
     while(!force_exit)
     {

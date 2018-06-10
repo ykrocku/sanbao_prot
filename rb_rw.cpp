@@ -247,12 +247,10 @@ const CvScalar COLOR_GREEN = CV_RGB(0, 255, 0);
 const CvScalar COLOR_BLUE = CV_RGB(0, 0, 255);
 #endif
 
-
-
 int EncodeRingBufWrite(CRingBuf* pRB, void *buf, int len, int width, int height)
 {
     static uint64_t mFrameIdx=0;
-    RBFrame *pwFrame = NULL;
+    RBFrame *pwFrame = nullptr;
     //request to write
     pwFrame = (RBFrame *) pRB->RequestWriteFrame(len + sizeof(RBFrame), CRB_FRAME_I_SLICE);
     if (!CRB_VALID_ADDRESS(pwFrame)) {
@@ -298,7 +296,6 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
     pFrame = request_jpeg_frame(pRB, 10);
     if(pFrame == nullptr)
         return -1;
-
     do{
         //usleep(25000);
         pRB->SeekIndexByTime(0);  // seek to the latest frame
@@ -335,6 +332,7 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
     print_frame("origin even", pFrame);
 
 #if 1
+    //add color
     cv::Mat new_image;
     cv::Size dim(pFrame->video.VWidth, pFrame->video.VHeight);
     cv::Mat image(dim, CV_8UC3, pFrame->data);
@@ -352,39 +350,13 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
             pFrame->video.VWidth, pFrame->video.VHeight, width, height, quality);
 #endif
     pRB->CommitRead();
-
     jpg_size = jpg_vec.size();
-    RBFrame *pwFrame = NULL;
 
-    //request to write
-    pwFrame = (RBFrame *) pwRB->RequestWriteFrame(jpg_size + sizeof(RBFrame), CRB_FRAME_I_SLICE);
-    if (!CRB_VALID_ADDRESS(pwFrame)) {
-        printf("RequestWriteFrame %d byte failed", jpg_size);
-        return -1;
-    }
+    EncodeRingBufWrite(pwRB, jpg_vec.data(), jpg_size, width, height);
 
-    //printf("jpg_size = %d\n", jpg_size);
-    pwFrame->frameTag = RBFrameTag;
-    pwFrame->frameType = IFrame;
-    pwFrame->channel = 20;
-    pwFrame->frameIdx = mFrameIdx++;
-    pwFrame->frameNo  = mFrameIdx;
-    pwFrame->dataLen = jpg_size;
-    pwFrame->video.VWidth = width;
-    pwFrame->video.VHeight = height;
-
-    struct timespec t;
-    struct timeval tv;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    gettimeofday(&tv, NULL);
-
-    pwFrame->time = tv.tv_sec * 1000 + tv.tv_usec/1000;
-    pwFrame->pts = t.tv_sec * 1000 + t.tv_nsec/(1000 * 1000);
-    memcpy(pwFrame->data, jpg_vec.data(), jpg_size);
-    //memcpy(pwFrame->data, info.addr, 2 * 1024 * 1024);
-    pwRB->CommitWrite();
-
-    //print_frame("producer", pwFrame);
+#if defined ENABLE_DSM
+    //EncodeRingBufWrite(pwRB, jpg_vec.data(), jpg_size, width, height);
+#endif
 
     return 0;
 }
@@ -442,7 +414,7 @@ void *pthread_encode_jpeg(void *p)
     int Vwidth = 704;
     int Vheight = 576;
 
-    //GetConfigResolution(&Vwidth, &Vheight);
+    GetConfigResolution(&Vwidth, &Vheight);
 
     int cnt = 0;
     struct timeval t;
@@ -487,7 +459,7 @@ void *pthread_encode_jpeg(void *p)
         }
         if(timeout_trigger(&t, 2*1000))
         {
-            //GetConfigResolution(&Vwidth, &Vheight);
+            GetConfigResolution(&Vwidth, &Vheight);
             gettimeofday(&t, NULL);
             printf("encdoe speed %d per 2 sec\n", cnt);
             cnt = 0; 
@@ -767,7 +739,6 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
     char mp4filepath[100];
     char testfilepath[100];
     mm_node node;
-    uint64_t jpg_time = 0;
     uint32_t FrameNumEnd = 0;
     int jpeg_index = 0;
     uint32_t interval= 0; //ms
@@ -792,7 +763,6 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
             if(pFrame == nullptr)
                 return;
             print_frame("video jpeg", pFrame);
-            jpg_time = pFrame->time;
             store_one_jpeg(mm, pFrame, jpeg_index++);
             usleep(interval);
         }

@@ -89,15 +89,14 @@ ENDIF()
 IF (WIN32)
 ELSEIF(ANDROID_ABI)
 
-
     #SET(SRC_LIST RingBufDebug.cpp CRingBuf.cpp)
     #ADD_LIBRARY(ringbuf STATIC ${SRC_LIST})
 
     #ADD_DEFINITIONS(-DENABLE_DSM)
     #ADD_DEFINITIONS(-DENABLE_ADAS)
-    ADD_EXECUTABLE(websocket_client websocket_client.cpp sample.cpp rbgetx.cpp prot.cpp)
-    #ADD_DEPENDENCIES(websocket_client MINIEYE_VERSION)
-    TARGET_LINK_LIBRARIES(websocket_client
+    ADD_EXECUTABLE(wsi wsi.cpp process.cpp rb_rw.cpp prot.cpp)
+    #ADD_DEPENDENCIES(wsi MINIEYE_VERSION)
+    TARGET_LINK_LIBRARIES(wsi
         #        halio concurrency
         libmsgpackc.a libwebsockets.a dl
         ringbuf halio concurrency mp4w miniglog
