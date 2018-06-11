@@ -468,11 +468,12 @@ void push_mm_queue(InfoForStore *mm)
     header.buf = NULL;
     header.len = 0;
 
+#if 0
     pthread_mutex_lock(&save_mp4_mutex);
     save_mp4 = 1;
     pthread_cond_signal(&save_mp4_cond);
     pthread_mutex_unlock(&save_mp4_mutex);
-
+#endif
 
     memcpy(&header.mm, mm, sizeof(*mm));
 
@@ -1725,11 +1726,12 @@ static int32_t send_mm_req_ack(sample_prot_header *pHeader, int len)
         send_mm.type = mm_ptr->type;
         push_mm_req_cmd_queue(&send_mm);
 
+#if 0
         pthread_mutex_lock(&req_mutex);
         req_flag = 1;
         pthread_cond_signal(&req_cond);
         pthread_mutex_unlock(&req_mutex);
-
+#endif
         sample_assemble_msg_to_push(pHeader,pHeader->device_id, SAMPLE_CMD_REQ_MM_DATA, NULL, 0);
     }
     else
@@ -1746,41 +1748,33 @@ static int recv_ack_and_send_image(sample_prot_header *pHeader, int32_t len)
     sample_mm_ack mmack;
 
     //printf("recv ack...........!\n");
-    if(pHeader->cmd == SAMPLE_CMD_UPLOAD_MM_DATA)//recv ack
-    {
-        memcpy(&mmack, pHeader+1, sizeof(mmack));
-        if(mmack.ack)
-        {
-            printf("recv ack err!\n");
-            return -1;
-        }
-        else
-        {
-            //printf("index = 0x%08x, index2 = 0x%08x\n", g_pkg_status_p->mm.packet_index, mmack.packet_index);
+    memcpy(&mmack, pHeader+1, sizeof(mmack));
+    if(mmack.ack){
+        printf("recv ack err!\n");
+        return -1;
+    }else{
+        printf("index = 0x%08x, index2 = 0x%08x\n", g_pkg_status_p->mm.packet_index, mmack.packet_index);
+        //recv ack index is correct
+        if(MY_HTONS(g_pkg_status_p->mm.packet_index) == \
+                (MY_HTONS(mmack.packet_index) + 1)){
+            //改变发送包，接收ACK状态为ready
+            read_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
+            pkg.ack_status = MSG_ACK_READY;
+            write_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
 
-            if(MY_HTONS(g_pkg_status_p->mm.packet_index) == \
-                    (MY_HTONS(mmack.packet_index) + 1)) //recv ack index is correct
-            {
-                //改变发送包，接收ACK状态为ready
-                read_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
-                pkg.ack_status = MSG_ACK_READY;
-                write_header_node(g_ptr_queue_p, &pkg, &ptr_queue_lock);
-
-                //最后一个ACK
-                if(MY_HTONS(g_pkg_status_p->mm.packet_total_num) == \
-                        MY_HTONS(g_pkg_status_p->mm.packet_index)) //the last pkg ack
-                {
-                    g_pkg_status_p->mm_data_trans_waiting = 0;
-                    printf("transmit one file over!\n");
-                    record_time(RECORD_END);
-                    delete_mm_resource(MY_HTONL(g_pkg_status_p->mm.id));
-                    //display_mm_resource();
-                }
-                else
-                {
-                    sample_send_image(pHeader->device_id);
-                }
+            //最后一个ACK
+            if(MY_HTONS(g_pkg_status_p->mm.packet_total_num) == \
+                    MY_HTONS(g_pkg_status_p->mm.packet_index)){
+                g_pkg_status_p->mm_data_trans_waiting = 0;
+                printf("transmit one file over!\n");
+                record_time(RECORD_END);
+                delete_mm_resource(MY_HTONL(g_pkg_status_p->mm.id));
+                //display_mm_resource();
+            }else{
+                sample_send_image(pHeader->device_id);
             }
+        }else{
+            printf("recv package index error!\n");
         }
     }
     return 0;
@@ -1848,6 +1842,7 @@ static int32_t sample_send_image(uint8_t devid)
     else//end and clear
     {
         printf("read file ret <=0\n");
+        perror("error: read image file:");
     }
 
 out:
@@ -2445,10 +2440,12 @@ connect_again:
                             continue;
                         }
                     }
+#if 0
                     pthread_mutex_lock(&tcp_recv_mutex);
                     tcp_recv_data = 1;
                     pthread_cond_signal(&tcp_recv_cond);
                     pthread_mutex_unlock(&tcp_recv_mutex);
+#endif
                 }
             }
             if(FD_ISSET(hostsock, &wfds))
@@ -2468,7 +2465,11 @@ out:
     if(writebuf)
         free(writebuf);
 
-    return NULL;
+    if(hostsock>0)
+        close(hostsock);
+
+    pthread_exit(NULL);
+
 }
 static int unescaple_msg(uint8_t *msg, int msglen)
 {
@@ -2554,10 +2555,14 @@ static int unescaple_msg(uint8_t *msg, int msglen)
         }
         else
         {
+#if 0
             pthread_mutex_lock(&tcp_recv_mutex);
             while(!tcp_recv_data)
                 pthread_cond_wait(&tcp_recv_cond, &tcp_recv_mutex);
+            if(tcp_recv_data == NOTICE_MSG)
+                tcp_recv_data = WAIT_MSG;
             pthread_mutex_unlock(&tcp_recv_mutex);
+#endif
 
             //usleep(20);
         }
@@ -2607,6 +2612,7 @@ void *pthread_parse_cmd(void *para)
 
     if(msgbuf)
         free(msgbuf);
+    pthread_exit(NULL);
 }
 
 #define SNAP_SHOT_CLOSE            0
@@ -2651,6 +2657,7 @@ void *pthread_snap_shot(void *p)
             sleep(2);
         }
     }
+    pthread_exit(NULL);
 }
 
 void *pthread_req_cmd_process(void *para)
@@ -2683,7 +2690,7 @@ void *pthread_req_cmd_process(void *para)
                 ret = find_local_image_name(mm_type, mm_id,  g_pkg_status_p->filepath, &filesize);
                 if(ret != 0)
                 {
-                    if(timeout_trigger(&req_time, 8*1000))//timeout
+                    if(timeout_trigger(&req_time, 10*1000))//timeout
                     {
                         g_pkg_status_p->mm_data_trans_waiting = 0;
                         break;
@@ -2707,13 +2714,20 @@ void *pthread_req_cmd_process(void *para)
 
             }
         }else{
+
+#if 0
             pthread_mutex_lock(&req_mutex);
             while(!req_flag)
                 pthread_cond_wait(&req_cond, &req_mutex);
+            if(req_flag == NOTICE_MSG)
+                req_flag = WAIT_MSG;
+
             pthread_mutex_unlock(&req_mutex);
 
             if(IS_EXIT_MSG(req_flag))
                 pthread_exit(NULL);
+#endif
+            usleep(20000);
         }
         record_time(RECORD_START);
     }

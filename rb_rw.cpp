@@ -22,6 +22,8 @@
 #include <stdlib.h>
 #include <fstream>
 #include "common/mp4/MP4Writer.h"
+#include "common/mjpeg/MjpegWriter.h"
+
 #include <cstddef>
 #include "common/base/closure.h"
 #include "common/concurrency/this_thread.h"
@@ -282,7 +284,7 @@ int EncodeRingBufWrite(CRingBuf* pRB, void *buf, int len, int width, int height)
     memcpy(pwFrame->data, buf, len);
     //memcpy(pwFrame->data, info.addr, 2 * 1024 * 1024);
     pRB->CommitWrite();
-    //print_frame("producer", pwFrame);
+    print_frame("producer", pwFrame);
 
     return 0;
 }
@@ -333,7 +335,7 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
     }while(1);
 
     framecnt_old = pFrame->frameNo;
-    print_frame("origin even", pFrame);
+    //print_frame("origin even", pFrame);
 
 #if 1
     //add color
@@ -469,6 +471,13 @@ void *pthread_encode_jpeg(void *p)
             cnt = 0; 
         }
     }
+
+#if defined ENABLE_ADAS 
+    delete pRb;
+#else
+    delete pwjpg;
+#endif
+    pthread_exit(NULL);
 }
 
 #define FCW_NAME            "FCW"
@@ -644,98 +653,6 @@ void store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
 #define RECORD_JPEG_NEED 1
 #define RECORD_JPEG_NO_NEED 0
 #if 1
-
-#if 0
-void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
-{
-#define VIDEO_FRAMES_PER_SECOND   12
-    RBFrame* pFrame = nullptr;
-    char mp4filepath[100];
-    char testfilepath[100];
-    mm_node node;
-    uint64_t jpg_time = 0;
-    uint32_t FrameNumEnd = 0;
-    int jpeg_index = 0;
-    uint32_t interval= 0; //ms
-    uint32_t framecnt = 0;
-    int seektime = 0;
-    int fps = 0;
-
-    printf("%s enter!\n", __FUNCTION__);
-    interval = mm->photo_time_period*100;
-//start
-#define SEEK_TIME_MAX   60
-#define ENCODE_FRAME_MAX 15
-
-    if(jpeg_flag){//recode jpg time
-        pRB->SeekIndexByTime(0);
-        pFrame = request_jpeg_frame(pRB, 10);
-        if(pFrame == nullptr)
-            return;
-        print_frame("video jpeg", pFrame);
-        jpg_time = pFrame->time;
-        store_one_jpeg(mm, pFrame, jpeg_index++);
-    }
-
-    sleep(mm->video_time);
-    pRB->SeekIndexByTime(0);//get last frame
-    pFrame = request_jpeg_frame(pRB, 10);
-    if(pFrame == nullptr)
-    {
-        printf("Get frame saving file fail!\n");
-        return;
-    }
-    FrameNumEnd = pFrame->frameNo;
-
-    seektime = (2*mm->video_time);
-    printf("seek time:%d\n", 0-seektime);
-    pRB->SeekIndexByTime(0-seektime);
-    do{
-        pFrame = request_jpeg_frame(pRB, 10);
-        if(pFrame == nullptr)
-            break;
-
-        print_frame("seek jpeg", pFrame);
-
-        framecnt = (FrameNumEnd > pFrame->frameNo) ? (FrameNumEnd - pFrame->frameNo) : (FrameNumEnd - pFrame->frameNo);
-        printf("frame sub = %d\n", framecnt);
-        framecnt = framecnt % (SEEK_TIME_MAX*ENCODE_FRAME_MAX);
-        printf("frame sub = %d\n", framecnt);
-        fps = framecnt/seektime;
-        sprintf(mp4filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
-        std::ofstream ofs(mp4filepath, std::ofstream::out | std::ofstream::binary);
-        MP4Writer mp4(ofs, fps, pFrame->video.VWidth, pFrame->video.VHeight);
-
-        fprintf(stdout, "Saving image file...%s, fps = %d\n", mp4filepath, fps);
-        while(framecnt--)
-        {
-            pFrame = request_jpeg_frame(pRB, 10);
-            if(pFrame == nullptr)
-                break;
-            mp4.Write(pFrame->data, pFrame->dataLen);
-            print_frame("video jpeg", pFrame);
-
-            if(jpeg_flag && (jpeg_index < 3)){
-                if(pFrame->time > (jpg_time + interval)){
-                    print_frame("video jpeg", pFrame);
-                    store_one_jpeg(mm, pFrame, jpeg_index++);
-                    jpg_time = pFrame->time;
-                }
-            }
-            pRB->CommitRead();
-        }
-        mp4.End();
-        ofs.close();
-        printf("%s mp4 done!\n", warning_type_to_str(mm->warn_type));
-        node.warn_type = mm->warn_type;
-        node.mm_type = MM_VIDEO;
-        node.mm_id = mm->video_id[0];
-        //uint8_t time[6];
-        insert_mm_resouce(node);
-        //display_mm_resource();
-    }while(0);
-}
-#endif
 void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
 {
 #define VIDEO_FRAMES_PER_SECOND   12
@@ -800,10 +717,12 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
         framecnt = framecnt % (SEEK_TIME_MAX*ENCODE_FRAME_MAX);
         printf("frame sub2 = %d\n", framecnt);
         fps = framecnt/seektime;
+
+#define VIDEO_MP4
+#ifdef VIDEO_MP4
         sprintf(mp4filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
         std::ofstream ofs(mp4filepath, std::ofstream::out | std::ofstream::binary);
         MP4Writer mp4(ofs, fps, pFrame->video.VWidth, pFrame->video.VHeight);
-
         fprintf(stdout, "Saving image file...%s, fps = %d\n", mp4filepath, fps);
         while(framecnt--)
         {
@@ -814,9 +733,27 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
             print_frame("video jpeg", pFrame);
             pRB->CommitRead();
         }
+
         mp4.End();
         ofs.close();
         printf("%s mp4 done!\n", warning_type_to_str(mm->warn_type));
+#else
+        sprintf(mp4filepath,"%s%08d.avi", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
+        MjpegWriter mjpeg;
+        mjpeg.Open(mp4filepath, fps, pFrame->video.VWidth, pFrame->video.VHeight);
+        fprintf(stdout, "Saving image file...%s, fps = %d\n", mp4filepath, fps);
+        while(framecnt--)
+        {
+            pFrame = request_jpeg_frame(pRB, 10);
+            if(pFrame == nullptr)
+                break;
+            mjpeg.Write(pFrame->data, pFrame->dataLen);
+            print_frame("video jpeg", pFrame);
+            pRB->CommitRead();
+        }
+        mjpeg.Close();
+        printf("%s avi done!\n", warning_type_to_str(mm->warn_type));
+#endif
         node.warn_type = mm->warn_type;
         node.mm_type = MM_VIDEO;
         node.mm_id = mm->video_id[0];
@@ -1189,13 +1126,17 @@ void *pthread_sav_warning_jpg(void *p)
 #if defined ENABLE_ADAS 
         printf("name:%s\n", user_name[i]);
         pr[i] = new CRingBuf(user_name[i], "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
-        ptest = new CRingBuf("adas_get_dsm", "dsm_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
 #elif defined ENABLE_DSM
         printf("name:%s\n", dsm_user_name[i]);
         pr[i] = new CRingBuf(dsm_user_name[i], "dsm_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
-        ptest = new CRingBuf("dsm_get_adas", "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
 #endif
     }
+
+#if defined ENABLE_ADAS 
+    ptest = new CRingBuf("adas_get_dsm", "dsm_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
+#elif defined ENABLE_DSM
+    ptest = new CRingBuf("dsm_get_adas", "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
+#endif
 
     pool.SetMinThreads(8);
     //pool.SetMaxThreads(4);
@@ -1207,31 +1148,32 @@ void *pthread_sav_warning_jpg(void *p)
     //sleep(20);
     while(1)
     {
-
         //read_pthread_num(i);
 #if 1       
 
-    pthread_mutex_lock(&save_mp4_mutex);
-    while(!save_mp4)
-        pthread_cond_wait(&save_mp4_cond, &save_mp4_mutex);
-    pthread_mutex_unlock(&save_mp4_mutex);
+#if 0
+        pthread_mutex_lock(&save_mp4_mutex);
+        while(!save_mp4)
+            pthread_cond_wait(&save_mp4_cond, &save_mp4_mutex);
+        if(save_mp4 == NOTICE_MSG)
+            save_mp4 = WAIT_MSG;
+        pthread_mutex_unlock(&save_mp4_mutex);
 
-    if(IS_EXIT_MSG(save_mp4))
-        pthread_exit(NULL);
-
-
+        if(IS_EXIT_MSG(save_mp4))
+            break;
+#endif
         if(pull_mm_queue(&mm))
         {
             usleep(10000);
-           // sleep(1);
+            // sleep(1);
             continue;
         }
 
 #ifdef ENABLE_DSM
-    //printf("photo num: 0x%x\n", mm.photo_num);
-    //produce_dsm_image(&mm);
+        //printf("photo num: 0x%x\n", mm.photo_num);
+        //produce_dsm_image(&mm);
 
-   // continue;
+        // continue;
 #endif
 
 #else//debug
@@ -1279,7 +1221,23 @@ void *pthread_sav_warning_jpg(void *p)
             i++;
         }
     }
+    //for(i=0; i<WARN_TYPE_NUM; i++)
+    for(i=0; i<CUSTOMER_NUM; i++)
+    {
+#if defined ENABLE_ADAS 
+        printf("name:%s\n", user_name[i]);
+        delete pr[i];
+#elif defined ENABLE_DSM
+        printf("name:%s\n", dsm_user_name[i]);
+        delete pr[i];
+#endif
+    }
 
-    return NULL;
+#if defined ENABLE_ADAS 
+    delete ptest;
+#elif defined ENABLE_DSM
+    delete ptest;
+#endif
+    pthread_exit(NULL);
 }
 

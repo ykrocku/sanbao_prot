@@ -80,6 +80,7 @@ ADD_SUBDIRECTORY(common/string)
 ADD_SUBDIRECTORY(common/hal)
 ADD_SUBDIRECTORY(common/ringbuf)
 ADD_SUBDIRECTORY(common/mp4)
+ADD_SUBDIRECTORY(common/mjpeg)
 IF (ANDROID_ABI)
     ADD_SUBDIRECTORY(thirdparty/miniglog)
 ENDIF()
@@ -92,19 +93,18 @@ ELSEIF(ANDROID_ABI)
     #SET(SRC_LIST RingBufDebug.cpp CRingBuf.cpp)
     #ADD_LIBRARY(ringbuf STATIC ${SRC_LIST})
 
-IF (DSM)
-ADD_DEFINITIONS(-DENABLE_DSM)
-ENDIF()
-IF (ADAS)
-ADD_DEFINITIONS(-DENABLE_ADAS)
-ENDIF()
+    IF (ADAS)
+        ADD_DEFINITIONS(-DENABLE_ADAS)
+    ELSE()
+        ADD_DEFINITIONS(-DENABLE_DSM)
+    ENDIF()
 
     ADD_EXECUTABLE(wsi wsi.cpp process.cpp rb_rw.cpp prot.cpp)
     #ADD_DEPENDENCIES(wsi MINIEYE_VERSION)
     TARGET_LINK_LIBRARIES(wsi
         #        halio concurrency
         libmsgpackc.a libwebsockets.a dl
-        ringbuf halio concurrency mp4w miniglog
+        ringbuf halio concurrency mp4w mjpeg miniglog
         c z log
         opencv_core opencv_imgproc opencv_imgcodecs
         opencv_video opencv_videoio opencv_hal

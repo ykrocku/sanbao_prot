@@ -576,7 +576,7 @@ void *pthread_websocket_client(void *para)
     lwsl_err("Exiting\n");
     lws_context_destroy(context);
 
-    return NULL;
+    pthread_exit(NULL);
 }
 
 
@@ -615,6 +615,10 @@ void pthread_exit_notice(void)
 int main(int argc, char **argv)
 {
     pthread_t pth[10];
+    int i =0;
+
+    printf("compile time %s %s\n", __DATE__, __TIME__);
+
 
     signal(SIGINT, sighandler);
     global_var_init();
@@ -669,18 +673,20 @@ int main(int argc, char **argv)
         sleep(1);
     }
 
-
-
-
-    return 0;
-
     pthread_join(pth[0], NULL);
-    pthread_join(pth[2], NULL);
+    printf("join %d\n", i++);
     pthread_join(pth[1], NULL);
+    printf("join %d\n", i++);
+    pthread_join(pth[2], NULL);
+    printf("join %d\n", i++);
     pthread_join(pth[3], NULL);
+    printf("join %d\n", i++);
     pthread_join(pth[4], NULL);
+    printf("join %d\n", i++);
     pthread_join(pth[5], NULL);
+    printf("join %d\n", i++);
     pthread_join(pth[6], NULL);
+    printf("join %d\n", i++);
 
     return 0;
 }
