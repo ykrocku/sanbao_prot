@@ -34,17 +34,21 @@ static int32_t sample_send_image(uint8_t devid);
 #define READ_REAL_TIME_MSG  1
 
 
+extern volatile int force_exit;
 
-static int tcp_recv_data = 0;
-static pthread_mutex_t  tcp_recv_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t   tcp_recv_cond = PTHREAD_COND_INITIALIZER;
 
+
+int tcp_recv_data = 0;
+pthread_mutex_t  tcp_recv_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t   tcp_recv_cond = PTHREAD_COND_INITIALIZER;
+
+int req_flag = 0;
+pthread_mutex_t  req_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t   req_cond = PTHREAD_COND_INITIALIZER;
 
 int save_mp4 = 0;
 pthread_mutex_t  save_mp4_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t   save_mp4_cond = PTHREAD_COND_INITIALIZER;
-
-
 
 int GetFileSize(char *filename);
 
@@ -482,10 +486,6 @@ int pull_mm_queue(InfoForStore *mm)
     header.buf = NULL;
     header.len = 0;
 
-    pthread_mutex_lock(&save_mp4_mutex);
-    while(!save_mp4)
-        pthread_cond_wait(&save_mp4_cond, &save_mp4_mutex);
-    pthread_mutex_unlock(&save_mp4_mutex);
 
     if(!ptr_queue_pop(g_image_queue_p, &header, &photo_queue_lock))
     {
@@ -1725,6 +1725,11 @@ static int32_t send_mm_req_ack(sample_prot_header *pHeader, int len)
         send_mm.type = mm_ptr->type;
         push_mm_req_cmd_queue(&send_mm);
 
+        pthread_mutex_lock(&req_mutex);
+        req_flag = 1;
+        pthread_cond_signal(&req_cond);
+        pthread_mutex_unlock(&req_mutex);
+
         sample_assemble_msg_to_push(pHeader,pHeader->device_id, SAMPLE_CMD_REQ_MM_DATA, NULL, 0);
     }
     else
@@ -2398,7 +2403,7 @@ connect_again:
     send_work_status(SAMPLE_DEVICE_ID_DSM);
 #endif
 
-    while (1) {
+    while (!force_exit) {
         FD_ZERO(&rfds);
         FD_ZERO(&wfds);
         FD_SET(hostsock, &rfds);
@@ -2553,6 +2558,7 @@ static int unescaple_msg(uint8_t *msg, int msglen)
             while(!tcp_recv_data)
                 pthread_cond_wait(&tcp_recv_cond, &tcp_recv_mutex);
             pthread_mutex_unlock(&tcp_recv_mutex);
+
             //usleep(20);
         }
     }
@@ -2577,7 +2583,7 @@ void *pthread_parse_cmd(void *para)
     }
 
     pHeader = (sample_prot_header *) msgbuf;
-    while(1)
+    while(!force_exit)
     {
 
         ret = unescaple_msg(msgbuf, RECV_HOST_DATA_BUF_SIZE);
@@ -2621,7 +2627,7 @@ void *pthread_snap_shot(void *p)
 
     prctl(PR_SET_NAME, "pthread_snap");
 
-    while(1)
+    while(!force_exit)
     {
 
         read_dev_para(&tmp, para_type);
@@ -2700,14 +2706,16 @@ void *pthread_req_cmd_process(void *para)
                 break;
 
             }
-        }
-        else
-        {
-            usleep(200000);
-            continue;
+        }else{
+            pthread_mutex_lock(&req_mutex);
+            while(!req_flag)
+                pthread_cond_wait(&req_cond, &req_mutex);
+            pthread_mutex_unlock(&req_mutex);
+
+            if(IS_EXIT_MSG(req_flag))
+                pthread_exit(NULL);
         }
         record_time(RECORD_START);
     }
 }
-
 

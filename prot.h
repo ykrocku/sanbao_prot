@@ -6,8 +6,12 @@
 
 #include <queue>
 
+
+
+
+
 //#define ENABLE_ADAS
-#define ENABLE_DSM
+//#define ENABLE_DSM
 
 //#define FILTER_ALERT_BY_SPEED
 #define FILTER_ALERT_BY_TIME
@@ -15,6 +19,11 @@
 //30 sec
 #define FILTER_ADAS_ALERT_SET_TIME 30u
 #define FILTER_DSM_ALERT_SET_TIME 30u
+
+
+#define EXIT_MSG    2
+#define IS_EXIT_MSG(flag)   (flag == EXIT_MSG)
+
 
 
 #define IS_BRDCST(id)   (SAMPLE_DEVICE_ID_BRDCST == (id))

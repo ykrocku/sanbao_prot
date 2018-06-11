@@ -44,6 +44,10 @@
 
 using namespace std;
 
+
+
+extern volatile int force_exit;
+
 #define  ADAS_JPEG_SIZE (16* 1024 * 1024)
 
 // global variables
@@ -449,7 +453,7 @@ void *pthread_encode_jpeg(void *p)
     }
     gettimeofday(&t, NULL);
     pRb->SeekIndexByTime(0);  // seek to the latest frame
-    while(1)
+    while(!force_exit)
     {
         ret = encode_process(pRb, pwjpg, quality, Vwidth, Vheight);
         if(!ret)//encode success
@@ -750,7 +754,8 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
     int usec = 0;
 
     printf("%s enter!\n", __FUNCTION__);
-    interval = mm->photo_time_period*100*1000; //us
+    //interval = mm->photo_time_period*100*1000; //us
+    interval = mm->photo_time_period; //单位改成秒
 //start
 #define SEEK_TIME_MAX   60
 #define ENCODE_FRAME_MAX 15
@@ -764,10 +769,12 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
                 return;
             print_frame("video jpeg", pFrame);
             store_one_jpeg(mm, pFrame, jpeg_index++);
-            usleep(interval);
+            //usleep(interval);
+            sleep(interval);
         }
     }
-    sleep(mm->video_time - interval/1000000);
+    //sleep(mm->video_time - interval/1000000);
+    sleep(mm->video_time - interval);
     pRB->SeekIndexByTime(0);//get last frame
     pFrame = request_jpeg_frame(pRB, 10);
     if(pFrame == nullptr)
@@ -1151,6 +1158,10 @@ void produce_dsm_image(InfoForStore *mm)
     insert_mm_resouce(node);
 }
 
+extern int save_mp4;
+extern pthread_mutex_t  save_mp4_mutex;
+extern pthread_cond_t   save_mp4_cond;
+
 void *pthread_sav_warning_jpg(void *p)
 {
 #define CUSTOMER_NUM   8 
@@ -1199,6 +1210,16 @@ void *pthread_sav_warning_jpg(void *p)
 
         //read_pthread_num(i);
 #if 1       
+
+    pthread_mutex_lock(&save_mp4_mutex);
+    while(!save_mp4)
+        pthread_cond_wait(&save_mp4_cond, &save_mp4_mutex);
+    pthread_mutex_unlock(&save_mp4_mutex);
+
+    if(IS_EXIT_MSG(save_mp4))
+        pthread_exit(NULL);
+
+
         if(pull_mm_queue(&mm))
         {
             usleep(10000);

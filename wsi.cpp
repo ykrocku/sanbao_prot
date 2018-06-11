@@ -279,7 +279,7 @@ int unpack_recv_can_msg(uint8_t *data, int size)
     return 0;
 }
 
-static volatile int force_exit = 0;
+volatile int force_exit = 0;
 static struct lws *wsi_dumb;
 enum demo_protocols {
     PROTOCOL_LWS_TO_CAN,
@@ -563,8 +563,7 @@ void *pthread_websocket_client(void *para)
     i.origin = i.address;
     i.ietf_version_or_minus_one = ietf_version;
 
-    while (1) {
-    //while (!force_exit) {
+    while (!force_exit) {
         if(!wsi_dumb && ratelimit_connects(&rl_dumb, 2u))
         {
             i.pwsi = &wsi_dumb;
@@ -578,6 +577,39 @@ void *pthread_websocket_client(void *para)
     lws_context_destroy(context);
 
     return NULL;
+}
+
+
+
+extern int req_flag;
+extern pthread_mutex_t  req_mutex;
+extern pthread_cond_t   req_cond;
+
+extern int tcp_recv_data;
+extern pthread_mutex_t  tcp_recv_mutex;
+extern pthread_cond_t   tcp_recv_cond;
+
+extern int save_mp4;
+extern pthread_mutex_t  save_mp4_mutex;
+extern pthread_cond_t   save_mp4_cond;
+
+
+void pthread_exit_notice(void)
+{
+        pthread_mutex_lock(&req_mutex);
+        req_flag = EXIT_MSG;
+        pthread_cond_signal(&req_cond);
+        pthread_mutex_unlock(&req_mutex);
+
+        pthread_mutex_lock(&tcp_recv_mutex);
+        tcp_recv_data = EXIT_MSG;
+        pthread_cond_signal(&tcp_recv_cond);
+        pthread_mutex_unlock(&tcp_recv_mutex);
+
+        pthread_mutex_lock(&tcp_recv_mutex);
+        tcp_recv_data = EXIT_MSG;
+        pthread_cond_signal(&tcp_recv_cond);
+        pthread_mutex_unlock(&tcp_recv_mutex);
 }
 
 int main(int argc, char **argv)
@@ -631,18 +663,15 @@ int main(int argc, char **argv)
         return -1;
     }
 #endif
-    //pthread_detach(pth[0]);
-    //pthread_detach(pth[1]);
-    //pthread_detach(pth[2]);
-    //pthread_detach(pth[3]);
-    //pthread_detach(pth[4]);
-    //pthread_detach(pth[5]);
-    //pthread_detach(pth[6]);
 
     while(!force_exit)
     {
         sleep(1);
     }
+
+
+
+
     return 0;
 
     pthread_join(pth[0], NULL);
