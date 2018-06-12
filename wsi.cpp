@@ -660,13 +660,11 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
-#if 0
-    if(pthread_create(&pth[7], NULL, pthread_send_dsm, NULL))
+    if(pthread_create(&pth[7], NULL, pthread_tcp_send, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
     }
-#endif
 
     while(!force_exit)
     {
@@ -687,7 +685,8 @@ int main(int argc, char **argv)
     printf("join %d\n", i++);
     pthread_join(pth[6], NULL);
     printf("join %d\n", i++);
-
+    pthread_join(pth[7], NULL);
+    printf("join %d\n", i++);
     return 0;
 }
 
