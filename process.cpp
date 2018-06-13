@@ -60,7 +60,7 @@ int GetFileSize(char *filename);
 void notice_ack_msg()
 {
     pthread_mutex_lock(&recv_ack_mutex);
-    send_data = NOTICE_MSG;
+    recv_ack = NOTICE_MSG;
     pthread_cond_signal(&recv_ack_cond);
     pthread_mutex_unlock(&recv_ack_mutex);
 }
@@ -263,6 +263,7 @@ static int ptr_queue_pop(queue<ptr_queue_node*> *p, ptr_queue_node *out,  pthrea
     //no data in node
     if(!header->buf)
     {
+        printf("no data in node!\n");
         memcpy(out, header, sizeof(ptr_queue_node));
     }
     //node have data,
@@ -271,10 +272,13 @@ static int ptr_queue_pop(queue<ptr_queue_node*> *p, ptr_queue_node *out,  pthrea
         //user don't need data
         if(!out->buf)
         {
+            printf("user no need data out!\n");
             memcpy(out, header, sizeof(ptr_queue_node));
         }
         else
         {
+            printf("copying data out!\n");
+
             //record ptr and len
             ptr = out->buf;
             user_buflen = out->len;
@@ -1142,30 +1146,40 @@ static int send_package(int sock, uint8_t *buf)
     int retval = 0;
     int len = 0;
     SendStatus pkg;
-    struct timeval now;
     struct timespec outtime;
     int msg = 0;
+    int rc = 0;
+
+
+    if(sock < 0)
+    {
+        printf("sock error\n");
+        return -1;
+    }
 
     ptr_queue_node header;
     header.buf = buf;
-    header.len = 0;
+    header.len = PTR_QUEUE_BUF_SIZE;
 
     printf("ptr = %p\n", header.buf);
     //fail
     if(ptr_queue_pop(g_send_q_p, &header, &ptr_queue_lock)){
+        
+        printf("queue no mesg\n");
         goto out;
     }
 
     printf("ptr2 = %p\n", header.buf);
     printf("get buf len = %d\n", header.len);
-    memcpy(g_pkg_status_p, &header.pkg, sizeof(header.pkg));
-
+    memcpy(&pkg, &header.pkg, sizeof(header.pkg));
     do{
         if(pkg.ack_status == MSG_ACK_READY){// no need ack
+            printf("no need ack!\n");
             ret = unblock_write(sock, header.buf, header.len);
             break;
         }
         if(pkg.ack_status == MSG_ACK_WAITING){
+            printf("ack waiting!\n");
             ret = unblock_write(sock, header.buf, header.len);
             pkg.send_repeat++;
 
@@ -1173,21 +1187,24 @@ static int send_package(int sock, uint8_t *buf)
             pthread_mutex_lock(&recv_ack_mutex);
             while(!recv_ack)
             {
-                gettimeofday(&now, NULL);
-                outtime.tv_sec = now.tv_sec + 2;
-                outtime.tv_nsec = now.tv_usec * 1000;
-                pthread_cond_timedwait(&recv_ack_cond, &recv_ack_mutex, &outtime);
+                clock_gettime(CLOCK_REALTIME, &outtime);
+                outtime.tv_sec += 2;
+                rc = pthread_cond_timedwait(&recv_ack_cond, &recv_ack_mutex, &outtime);
+                if(rc != 0)
+                {
+                    printf("recv ack timeout0! %d\n", rc);
+                    perror("error:");
+                    break;
+                }
             }
             msg = recv_ack;
             recv_ack= WAIT_MSG;//clear
             pthread_mutex_unlock(&recv_ack_mutex);
-
             if(pkg.send_repeat >= 3){//第一次发送
                 printf("send three times..\n");
                 g_pkg_status_p->mm_data_trans_waiting = 0;
                 break;
             }
-
             if(msg == NOTICE_MSG){
                 printf("recv send ack..\n");
                 break;
@@ -2058,6 +2075,7 @@ void recv_warning_ack(sample_prot_header *pHeader, int32_t len)
     SendStatus pkg;
 
     if(len == sizeof(sample_prot_header) + 1){
+        printf("send warning ack!\n");
         notice_ack_msg();
 
     }else{
@@ -2363,7 +2381,7 @@ static int try_connect()
     int32_t ret = 0;
     int enable = 1;
     //const char *server_ip = "192.168.100.100";
-    const char *server_ip = "192.168.100.105";
+    const char *server_ip = "192.168.100.102";
     struct sockaddr_in host_serv_addr;
     socklen_t optlen;
     int bufsize = 0;
@@ -2503,7 +2521,7 @@ connect_again:
                 }
             }
         }else{
-            printf("tcp no data within 2 seconds.\n");
+            //printf("tcp no data within 2 seconds.\n");
         }
     }
 
@@ -2674,11 +2692,27 @@ void *pthread_snap_shot(void *p)
     {
 
         read_dev_para(&tmp, para_type);
+#if 0
         if(tmp.auto_photo_mode == SNAP_SHOT_BY_TIME){
+        if(1){
             printf("auto snap shot!\n");
             if(tmp.auto_photo_time_period != 0)
                 do_snap_shot();
             sleep(tmp.auto_photo_time_period);
+            sleep(5);
+#else
+        //if(tmp.auto_photo_mode == SNAP_SHOT_BY_TIME){
+        if(1){
+            //if(tmp.auto_photo_time_period != 0)
+            if(1)
+            {
+                printf("auto snap shot!\n");
+                do_snap_shot();
+            
+            }
+            //sleep(tmp.auto_photo_time_period);
+            sleep(5);
+#endif
         }else if(tmp.auto_photo_mode == SNAP_SHOT_BY_DISTANCE){
             RealTimeDdata_process(&rt_data, READ_REAL_TIME_MSG);
             if((rt_data.mileage - mileage_last)*100 >= tmp.auto_photo_distance_period){

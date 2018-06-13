@@ -628,19 +628,13 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
-#if 1
+#if 0
     if(pthread_create(&pth[1], NULL, pthread_websocket_client, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
     }
-#endif
     if(pthread_create(&pth[2], NULL, pthread_encode_jpeg, NULL))
-    {
-        printf("pthread_create fail!\n");
-        return -1;
-    }
-    if(pthread_create(&pth[3], NULL, pthread_parse_cmd, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
@@ -650,12 +644,18 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
-    if(pthread_create(&pth[5], NULL, pthread_snap_shot, NULL))
+    if(pthread_create(&pth[6], NULL, pthread_req_cmd_process, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
     }
-    if(pthread_create(&pth[6], NULL, pthread_req_cmd_process, NULL))
+#endif
+    if(pthread_create(&pth[3], NULL, pthread_parse_cmd, NULL))
+    {
+        printf("pthread_create fail!\n");
+        return -1;
+    }
+    if(pthread_create(&pth[5], NULL, pthread_snap_shot, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
