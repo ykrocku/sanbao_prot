@@ -2290,8 +2290,8 @@ static int try_connect()
     int sock;
     int32_t ret = 0;
     int enable = 1;
-    //const char *server_ip = "192.168.100.100";
-    const char *server_ip = "192.168.100.102";
+    const char *server_ip = "192.168.100.100";
+    //const char *server_ip = "192.168.100.102";
     struct sockaddr_in host_serv_addr;
     socklen_t optlen;
     int bufsize = 0;
@@ -2446,8 +2446,8 @@ connect_again:
                 }
                 else//write to buf
                 {
-                    MY_DEBUG("recv raw cmd, tcprecvcnt = %d:\n", tcprecvcnt++);
-                    printbuf(readbuf, ret);
+                    //MY_DEBUG("recv raw cmd, tcprecvcnt = %d:\n", tcprecvcnt++);
+                    //printbuf(readbuf, ret);
                     i=0;
                     while(ret--)
                     {
@@ -2509,7 +2509,7 @@ static uint32_t unescaple_msg(uint8_t *buf, uint8_t *msg, int msglen)
         clear_frame_flag();
         return 0;
     }
-    printf("ch = 0x%x\n", buf[0]);
+    //printf("ch = 0x%x\n", buf[0]);
     //not recv head
     if(!get_head){
         if((ch == SAMPLE_PROT_MAGIC) && (cnt == 0)){
