@@ -361,6 +361,7 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
     EncodeRingBufWrite(pwRB, jpg_vec.data(), jpg_size, width, height);
 
 #if defined ENABLE_DSM
+
     //EncodeRingBufWrite(pwRB, jpg_vec.data(), jpg_size, width, height);
 #endif
 
@@ -420,7 +421,7 @@ void *pthread_encode_jpeg(void *p)
     int Vwidth = 704;
     int Vheight = 576;
 
-    GetConfigResolution(&Vwidth, &Vheight);
+    //GetConfigResolution(&Vwidth, &Vheight);
 
     int cnt = 0;
     struct timeval t;
@@ -465,7 +466,7 @@ void *pthread_encode_jpeg(void *p)
         }
         if(timeout_trigger(&t, 2*1000))
         {
-            GetConfigResolution(&Vwidth, &Vheight);
+            //GetConfigResolution(&Vwidth, &Vheight);
             gettimeofday(&t, NULL);
             printf("encdoe speed %d per 2 sec\n", cnt);
             cnt = 0; 
