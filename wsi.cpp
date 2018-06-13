@@ -627,7 +627,7 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
-#if 1
+#if 0
     if(pthread_create(&pth[1], NULL, pthread_websocket_client, NULL))
     {
         printf("pthread_create fail!\n");
@@ -638,22 +638,27 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
-    if(pthread_create(&pth[3], NULL, pthread_sav_warning_jpg, NULL))
+    if(pthread_create(&pth[4], NULL, pthread_sav_warning_jpg, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
     }
-    if(pthread_create(&pth[4], NULL, pthread_snap_shot, NULL))
-    {
-        printf("pthread_create fail!\n");
-        return -1;
-    }
-    if(pthread_create(&pth[5], NULL, pthread_req_cmd_process, NULL))
+    if(pthread_create(&pth[6], NULL, pthread_req_cmd_process, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
     }
 #endif
+    if(pthread_create(&pth[5], NULL, pthread_snap_shot, NULL))
+    {
+        printf("pthread_create fail!\n");
+        return -1;
+    }
+    if(pthread_create(&pth[7], NULL, pthread_tcp_send, NULL))
+    {
+        printf("pthread_create fail!\n");
+        return -1;
+    }
 
     while(!force_exit)
     {
@@ -674,7 +679,8 @@ int main(int argc, char **argv)
     printf("join %d\n", i++);
     pthread_join(pth[6], NULL);
     printf("join %d\n", i++);
-
+    pthread_join(pth[7], NULL);
+    printf("join %d\n", i++);
     return 0;
 }
 

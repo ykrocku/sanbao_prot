@@ -291,17 +291,16 @@ int EncodeRingBufWrite(CRingBuf* pRB, void *buf, int len, int width, int height)
 
 
 int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int height) {
-
-    static uint64_t mFrameIdx=0;
     uint32_t jpg_size=0;
     RBFrame* pFrame = nullptr;
     uint32_t frameLen = 0;
     static uint64_t framecnt_old = 0;
-
+#if 0
     pRB->SeekIndexByTime(0);  // seek to the latest frame
     pFrame = request_jpeg_frame(pRB, 10);
     if(pFrame == nullptr)
         return -1;
+#endif
     do{
         //usleep(25000);
         pRB->SeekIndexByTime(0);  // seek to the latest frame
@@ -318,7 +317,9 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
                 fprintf(stderr, "Error: origin image stream exhausted\n");
                 pRB->CommitRead();
                 //exit(2);
-                return -1;
+                //return -1;
+                usleep(25000);
+                continue;
             }
             //print_frame("origin", pFrame);
             if(pFrame->frameNo == framecnt_old){
@@ -455,7 +456,6 @@ void *pthread_encode_jpeg(void *p)
         return NULL;
     }
     gettimeofday(&t, NULL);
-    pRb->SeekIndexByTime(0);  // seek to the latest frame
     while(!force_exit)
     {
         ret = encode_process(pRb, pwjpg, quality, Vwidth, Vheight);

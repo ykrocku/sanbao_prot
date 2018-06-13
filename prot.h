@@ -657,6 +657,7 @@ uint32_t video_id[2];
 
 #define MSG_ACK_READY           0
 #define MSG_ACK_WAITING         1
+#define MSG_NO_NEED_ACK         2
 
 #define NO_MESSAGE_TO_SEND      1
 #define NO_MESSAGE_TO_SEND      1
@@ -699,6 +700,10 @@ typedef struct _package_repeat_status{
 void *pthread_snap_shot(void *p);
 void *pthread_sav_warning_jpg(void *p);
 void *pthread_encode_jpeg(void *p);
+void *pthread_tcp_process(void *para);
+void *pthread_parse_cmd(void *para);
+void *pthread_req_cmd_process(void *para);
+void *pthread_tcp_send(void *para);
 
 
 void set_algo_para();
@@ -723,14 +728,9 @@ char *warning_type_to_str(uint8_t type);
 int timeout_trigger(struct timeval *tv, int ms);
 void repeat_send_pkg_status_init();
 void printbuf(uint8_t *buf, int len);
-void *pthread_tcp_process(void *para);
-void *pthread_parse_cmd(void *para);
 int can_message_send(can_data_type *sourcecan);
 void adas_para_check(adas_para_setting *para);
 
-void *pthread_req_cmd_process(void *para);
-
-int pthread_is_not_idle();
 
 void print_dsm_para(dsm_para_setting *para);
 void print_adas_para(adas_para_setting *para);
@@ -743,7 +743,7 @@ void recv_dsm_message( can_data_type *can);
 void produce_dsm_image(InfoForStore *mm);
 void set_dsm_para_setting_default();
 
-void *pthread_send_dsm(void *para);
+
 
 void insert_mm_resouce(mm_node m);
 
