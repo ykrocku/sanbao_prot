@@ -37,6 +37,10 @@ static int32_t sample_send_image(uint8_t devid);
 extern volatile int force_exit;
 
 
+void parse_cmd(uint8_t *buf, uint8_t *msgbuf);
+static uint32_t unescaple_msg(uint8_t *buf, uint8_t *msg, int msglen);
+
+
 
 int tcp_recv_data = 0;
 pthread_mutex_t  tcp_recv_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -2286,8 +2290,8 @@ static int try_connect()
     int sock;
     int32_t ret = 0;
     int enable = 1;
-    const char *server_ip = "192.168.100.100";
-    //const char *server_ip = "192.168.100.144";
+    //const char *server_ip = "192.168.100.100";
+    const char *server_ip = "192.168.100.102";
     struct sockaddr_in host_serv_addr;
     socklen_t optlen;
     int bufsize = 0;
@@ -2361,7 +2365,7 @@ static int try_connect()
 void *pthread_tcp_process(void *para)
 {
 #define TCP_READ_BUF_SIZE (64*1024)
-
+#define RECV_HOST_DATA_BUF_SIZE (128*1024)
     int32_t ret = 0;
     int retval = 0;;
     int hostsock = -1;
@@ -2371,9 +2375,23 @@ void *pthread_tcp_process(void *para)
     static int tcprecvcnt = 0;
     uint8_t *readbuf = NULL;
     uint8_t *writebuf = NULL;
+    uint8_t *msgbuf = NULL;
+
+    uint8_t sum = 0;
+    uint32_t framelen = 0;
+
+    sample_prot_header *pHeader = NULL;
+    pHeader = (sample_prot_header *) msgbuf;
 
     prctl(PR_SET_NAME, "tcp_process");
     send_stat_pkg_init();
+
+    msgbuf = (uint8_t *)malloc(RECV_HOST_DATA_BUF_SIZE);
+    if(!msgbuf)
+    {
+        perror("parse_host_cmd malloc");
+        return NULL;
+    }
 
     writebuf = (uint8_t *)malloc(PTR_QUEUE_BUF_SIZE);
     if(!writebuf){
@@ -2428,17 +2446,12 @@ connect_again:
                 }
                 else//write to buf
                 {
-                    //   MY_DEBUG("recv raw cmd, tcprecvcnt = %d:\n", tcprecvcnt++);
-                    //     printbuf(readbuf, ret);
+                    MY_DEBUG("recv raw cmd, tcprecvcnt = %d:\n", tcprecvcnt++);
+                    printbuf(readbuf, ret);
                     i=0;
                     while(ret--)
                     {
-                        if(!uchar_queue_push(&readbuf[i]))
-                        {
-                            i++;
-                            //printf("i = %d\n", i);
-                            continue;
-                        }
+                        parse_cmd(&readbuf[i++], msgbuf);
                     }
 #if 0
                     pthread_mutex_lock(&tcp_recv_mutex);
@@ -2464,6 +2477,8 @@ out:
         free(readbuf);
     if(writebuf)
         free(writebuf);
+    if(msgbuf)
+        free(msgbuf);
 
     if(hostsock>0)
         close(hostsock);
@@ -2471,148 +2486,98 @@ out:
     pthread_exit(NULL);
 
 }
-static int unescaple_msg(uint8_t *msg, int msglen)
+static char get_head = 0;
+static char got_esc_char = 0;
+static int cnt = 0;
+
+void clear_frame_flag()
 {
-    uint8_t ch = 0;
-    char get_head = 0;
-    char got_esc_char = 0;
-    int cnt = 0;
-    int i = 0;
-
-    if(!msg || msglen <0)
-        return -1;
-
-    while(1)
-    {
-        if(cnt+1 > msglen)
-        {
-            printf("error: recv msg too long\n");
-            return -1;
-        }
-        if(!uchar_queue_pop(&ch))//pop success
-        {
-            // printf("data[%d] = 0x%02x\n", i++, ch);
-            if(!get_head)//not recv head
-            {
-                if((ch == SAMPLE_PROT_MAGIC) && (cnt == 0))//get head
-                {
-                    msg[cnt] = SAMPLE_PROT_MAGIC;
-                    cnt++;
-                    get_head = 1;
-                    continue;
-                }
-                else
-                    continue;
-            }
-            else//recv head
-            {
-                if((ch == SAMPLE_PROT_MAGIC) && (cnt > 0))//get tail
-                {
-
-                    if(cnt < 6)//maybe error frame, as header, restart
-                    {
-                        cnt = 0;
-                        msg[cnt] = SAMPLE_PROT_MAGIC;
-                        cnt++;
-                        get_head = 1;
-                        continue;
-                    }
-                    else
-                    {
-                        //printf("get tail! cnt = %d, return\n", cnt);
-                        msg[cnt] = SAMPLE_PROT_MAGIC;
-                        get_head = 0;//over
-                        cnt++;
-                        return cnt;
-                    }
-                }
-                else//get text
-                {
-                    if((ch == SAMPLE_PROT_ESC_CHAR) && !got_esc_char)//need deal
-                    {
-                        got_esc_char = 1;
-                        msg[cnt] = ch;
-                        cnt++;
-                    }
-                    else if(got_esc_char && (ch == 0x02))
-                    {
-                        msg[cnt-1] = SAMPLE_PROT_MAGIC;
-                        got_esc_char = 0;
-                    }
-                    else if(got_esc_char && (ch == 0x01))
-                    {
-                        msg[cnt-1] = SAMPLE_PROT_ESC_CHAR;
-                        got_esc_char = 0;
-                    }
-                    else
-                    {
-                        msg[cnt] = ch;
-                        cnt++;
-                        got_esc_char = 0;
-                    }
-                }
-            }
-        }
-        else
-        {
-#if 0
-            pthread_mutex_lock(&tcp_recv_mutex);
-            while(!tcp_recv_data)
-                pthread_cond_wait(&tcp_recv_cond, &tcp_recv_mutex);
-            if(tcp_recv_data == NOTICE_MSG)
-                tcp_recv_data = WAIT_MSG;
-            pthread_mutex_unlock(&tcp_recv_mutex);
-#endif
-
-            //usleep(20);
-        }
-    }
+        //clear
+        get_head = 0;
+        got_esc_char = 0;
+        cnt = 0;
 }
 
-void *pthread_parse_cmd(void *para)
+static uint32_t unescaple_msg(uint8_t *buf, uint8_t *msg, int msglen)
 {
-    int32_t ret = 0;
-    uint8_t sum = 0;
+    uint8_t ch = 0;
     uint32_t framelen = 0;
-    uint8_t *msgbuf = NULL;
-#define RECV_HOST_DATA_BUF_SIZE (128*1024)
-    sample_prot_header *pHeader = NULL;
+    ch = buf[0];
 
-    prctl(PR_SET_NAME, "parse_cmd");
-
-    msgbuf = (uint8_t *)malloc(RECV_HOST_DATA_BUF_SIZE);
-    if(!msgbuf)
-    {
-        perror("parse_host_cmd malloc");
-        return NULL;
+    if(cnt+1 > msglen){
+        printf("error: recv msg too long\n");
+        clear_frame_flag();
+        return 0;
     }
+    printf("ch = 0x%x\n", buf[0]);
+    //not recv head
+    if(!get_head){
+        if((ch == SAMPLE_PROT_MAGIC) && (cnt == 0)){
+            msg[cnt] = SAMPLE_PROT_MAGIC;
+            cnt++;
+            get_head = 1;
+            return 0;
+        }
+    }else{//recv head
+        if((ch == SAMPLE_PROT_MAGIC) && (cnt > 0)) {//get tail
+            if(cnt < 6){//maybe error frame, as header, restart
+                cnt = 0;
+                msg[cnt] = SAMPLE_PROT_MAGIC;
+                cnt++;
+                get_head = 1;
 
-    pHeader = (sample_prot_header *) msgbuf;
-    while(!force_exit)
-    {
+                //clear_frame_flag();
+                return 0;
 
-        ret = unescaple_msg(msgbuf, RECV_HOST_DATA_BUF_SIZE);
-        if(ret>0)
-        {
-            framelen = ret;
-            //printf("recv framelen = %d\n", framelen);
-            sum = sample_calc_sum(pHeader, framelen);
-            if (sum != pHeader->checksum) {
-                printf("Checksum missmatch calcated: 0x%02hhx != 0x%2hhx\n",
-                        sum, pHeader->checksum);
+            }else{ //success
+                msg[cnt] = SAMPLE_PROT_MAGIC;
+                get_head = 0;//over
+                cnt++;
+                framelen = cnt;
+
+                clear_frame_flag();
+                return framelen;
             }
-            else
-            {
-                sample_on_cmd(pHeader, framelen);
+        }else{//get text
+            if((ch == SAMPLE_PROT_ESC_CHAR) && !got_esc_char){//need deal
+                got_esc_char = 1;
+                msg[cnt] = ch;
+                cnt++;
+            }else if(got_esc_char && (ch == 0x02)){
+                msg[cnt-1] = SAMPLE_PROT_MAGIC;
+                got_esc_char = 0;
+            }else if(got_esc_char && (ch == 0x01)){
+                msg[cnt-1] = SAMPLE_PROT_ESC_CHAR;
+                got_esc_char = 0;
+            }else{
+                msg[cnt] = ch;
+                cnt++;
+                got_esc_char = 0;
             }
         }
-        else
-            ;
     }
+    return 0;
+}
 
-    if(msgbuf)
-        free(msgbuf);
-    pthread_exit(NULL);
+void parse_cmd(uint8_t *buf, uint8_t *msgbuf)
+{
+    uint32_t ret = 0;
+    uint8_t sum = 0;
+    uint32_t framelen = 0;
+    sample_prot_header *pHeader = NULL;
+    pHeader = (sample_prot_header *) msgbuf;
+    ret = unescaple_msg(buf, msgbuf, RECV_HOST_DATA_BUF_SIZE);
+    if(ret>0){
+        framelen = ret;
+        printf("recv framelen = %d\n", framelen);
+        sum = sample_calc_sum(pHeader, framelen);
+        if (sum != pHeader->checksum) {
+            printf("Checksum missmatch calcated: 0x%02hhx != 0x%2hhx\n",
+                    sum, pHeader->checksum);
+        }else{
+            sample_on_cmd(pHeader, framelen);
+        }
+    }
 }
 
 #define SNAP_SHOT_CLOSE            0
