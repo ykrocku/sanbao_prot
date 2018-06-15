@@ -627,7 +627,7 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
-#if 0
+#if 1
     if(pthread_create(&pth[1], NULL, pthread_websocket_client, NULL))
     {
         printf("pthread_create fail!\n");

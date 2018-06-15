@@ -22,6 +22,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <semaphore.h>
 
 #include "prot.h"
 #include <stdbool.h>
@@ -30,8 +31,6 @@
 using namespace std;
 
 static int32_t sample_send_image(uint8_t devid);
-#define WRITE_REAL_TIME_MSG 0
-#define READ_REAL_TIME_MSG  1
 
 
 extern volatile int force_exit;
@@ -43,13 +42,27 @@ static uint32_t unescaple_msg(uint8_t *buf, uint8_t *msg, int msglen);
 
 
 
+sem_t send_data;
+//pthread_mutex_t  send_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+
+
+void sem_send_init()
+{
+    sem_init(&send_data, 0, 0);
+}
+
+
 int recv_ack = 0;
 pthread_mutex_t  recv_ack_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t   recv_ack_cond = PTHREAD_COND_INITIALIZER;
 
+#if 0
 int send_data = 0;
 pthread_mutex_t  send_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t   send_cond = PTHREAD_COND_INITIALIZER;
+#endif
+
 
 int req_flag = 0;
 pthread_mutex_t  req_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -88,6 +101,9 @@ void RealTimeDdata_process(real_time_data *data, int mode)
     pthread_mutex_unlock(&real_time_msg_lock);
     
     printf("get car speed: %d\n", data->car_speed);
+
+
+
 }
 
 #define WARNING_ID_MODE 0
@@ -593,6 +609,7 @@ void get_real_time_msg(warningtext *uploadmsg)
     uploadmsg->longitude = tmp.longitude;
     uploadmsg->car_speed = tmp.car_speed;
 
+
     memcpy(uploadmsg->time, tmp.time, sizeof(uploadmsg->time));
     memcpy(&uploadmsg->car_status, &tmp.car_status, sizeof(uploadmsg->car_status));
 }
@@ -994,13 +1011,14 @@ void recv_dsm_message(can_data_type *can)
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
     dsm_warningtext *uploadmsg = (dsm_warningtext *)&msgbuf[0];
 
+#if 0
     printf("soure: %s\n", can->source);
     printf("time: %ld\n", can->time);
     printf("topic: %s\n", can->topic);
     printbuf(can->warning, sizeof(can->warning));
+#endif
 
     memcpy(&msg, can->warning, sizeof(can->warning));
-    
     if(!filter_alert_by_speed())
         goto out;
 
@@ -1017,6 +1035,7 @@ void recv_dsm_message(can_data_type *can)
         goto out;
     }
 
+#if 0
     printf("msg.alert_eye_close1 %d\n", msg.alert_eye_close1);
     printf("msg.alert_eye_close2 %d\n", msg.alert_eye_close2);
     printf("msg.alert_look_around %d\n", msg.alert_look_around);
@@ -1025,41 +1044,41 @@ void recv_dsm_message(can_data_type *can)
     printf("msg.alert_smoking %d\n", msg.alert_smoking);
     printf("msg.alert_absence %d\n", msg.alert_absence);
     printf("msg.alert_bow %d\n", msg.alert_bow);
-
+#endif
 
     if(msg.alert_eye_close1 || msg.alert_eye_close2 || msg.alert_yawn || msg.alert_bow){
         alert_type = DSM_FATIGUE_WARN;
         if(!filter_alert_by_time(&dsm_fatigue_warn, FILTER_DSM_ALERT_SET_TIME))
         {
-            printf("dsm filter alert by time!");
+      //      printf("dsm filter alert by time!");
             goto out;
         }
     }else if (msg.alert_look_around ){
         alert_type = DSM_DISTRACT_WARN;
         if(!filter_alert_by_time(&dsm_distract_warn, FILTER_DSM_ALERT_SET_TIME))
         {
-            printf("dsm filter alert by time!");
+        //    printf("dsm filter alert by time!");
             goto out;
         }
     }else if(msg.alert_phone){
         alert_type = DSM_CALLING_WARN;
         if(!filter_alert_by_time(&dsm_calling_warn, FILTER_DSM_ALERT_SET_TIME))
         {
-            printf("dsm filter alert by time!");
+          //  printf("dsm filter alert by time!");
             goto out;
         }
     }else if(msg.alert_smoking){
         alert_type = DSM_SMOKING_WARN;
         if(!filter_alert_by_time(&dsm_smoking_warn, FILTER_DSM_ALERT_SET_TIME))
         {
-            printf("dsm filter alert by time!");
+            //printf("dsm filter alert by time!");
             goto out;
         }
     }else if(msg.alert_absence){
         alert_type = DSM_ABNORMAL_WARN;
         if(!filter_alert_by_time(&dsm_abnormal_warn, FILTER_DSM_ALERT_SET_TIME))
         {
-            printf("dsm filter alert by time!");
+            //printf("dsm filter alert by time!");
             goto out;
         }
     }else
@@ -1147,13 +1166,9 @@ out:
 static int send_package(int sock, uint8_t *buf)
 {
     int ret = 0;
-    int retval = 0;
     int len = 0;
     SendStatus pkg;
     struct timespec outtime;
-    int msg = 0;
-    int rc = 0;
-
 
     if(sock < 0)
     {
@@ -1165,61 +1180,51 @@ static int send_package(int sock, uint8_t *buf)
     header.buf = buf;
     header.len = PTR_QUEUE_BUF_SIZE;
 
-    printf("ptr = %p\n", header.buf);
     //fail
     if(ptr_queue_pop(g_send_q_p, &header, &ptr_queue_lock)){
         
         printf("queue no mesg\n");
         goto out;
     }
-
-    printf("ptr2 = %p\n", header.buf);
-    printf("get buf len = %d\n", header.len);
     memcpy(&pkg, &header.pkg, sizeof(header.pkg));
-    do{
-        if(pkg.ack_status == MSG_ACK_READY){// no need ack
-            printf("no need ack!\n");
-            ret = unblock_write(sock, header.buf, header.len);
-            break;
-        }
-        if(pkg.ack_status == MSG_ACK_WAITING){
-            printf("ack waiting!\n");
-            ret = unblock_write(sock, header.buf, header.len);
-            pkg.send_repeat++;
 
-            //waiting ack
-            pthread_mutex_lock(&recv_ack_mutex);
-            while(!recv_ack)
-            {
-                clock_gettime(CLOCK_REALTIME, &outtime);
-                outtime.tv_sec += 2;
-                rc = pthread_cond_timedwait(&recv_ack_cond, &recv_ack_mutex, &outtime);
-                if(rc != 0)
-                {
-                    printf("recv ack timeout0! %d\n", rc);
-                    perror("error:");
+    printf("header len = %d\n", header.len);
+    //printbuf(header.buf, header.len);
+    if(pkg.ack_status == MSG_ACK_READY){// no need ack
+        printf("no need ack!\n");
+        ret = unblock_write(sock, header.buf, header.len);
+        goto out;
+    }
+    if(pkg.ack_status == MSG_ACK_WAITING){
+        printf("ack waiting!\n");
+        ret = unblock_write(sock, header.buf, header.len);
+        pkg.send_repeat++;
+
+        //waiting ack
+        pthread_mutex_lock(&recv_ack_mutex);
+        while(1)
+        {
+            clock_gettime(CLOCK_REALTIME, &outtime);
+            outtime.tv_sec += 2;
+            pthread_cond_timedwait(&recv_ack_cond, &recv_ack_mutex, &outtime);
+            if(recv_ack == NOTICE_MSG){
+                recv_ack= WAIT_MSG;//clear
+                printf("recv send ack..\n");
+                break;
+            }else{
+                printf("recv ack timeout0!\n");
+                if(pkg.send_repeat >= 3){//第一次发送
+                    printf("send three times..\n");
+                    g_pkg_status_p->mm_data_trans_waiting = 0;
                     break;
                 }
             }
-            msg = recv_ack;
-            recv_ack= WAIT_MSG;//clear
-            pthread_mutex_unlock(&recv_ack_mutex);
-            if(pkg.send_repeat >= 3){//第一次发送
-                printf("send three times..\n");
-                g_pkg_status_p->mm_data_trans_waiting = 0;
-                break;
-            }
-            if(msg == NOTICE_MSG){
-                printf("recv send ack..\n");
-                break;
-            }
-            printf("timeout send...\n");
         }
-
-    }while(1);
+        pthread_mutex_unlock(&recv_ack_mutex);
+    }
 
 out:
-    return retval;
+    return 0;
 }
 
 void *pthread_tcp_send(void *para)
@@ -1233,14 +1238,20 @@ void *pthread_tcp_send(void *para)
 
     while(1)
     {
+#if 0
         //wait send msg ready
         pthread_mutex_lock(&send_mutex);
-        while(!send_data)
+        while(1){
             pthread_cond_wait(&send_cond, &send_mutex);
-        if(send_data == NOTICE_MSG)
-            send_data = WAIT_MSG;
+            if(send_data == NOTICE_MSG){
+                send_data = WAIT_MSG;
+                break;
+            }
+        }
         pthread_mutex_unlock(&send_mutex);
-
+#endif
+        printf("sem waiting...\n");
+        sem_wait(&send_data);
         //send_pkg_to_host(hostsock, writebuf);
         send_package(hostsock, writebuf);
     }
@@ -1420,11 +1431,15 @@ int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t devid, 
     //    printf("sendpackage cmd = 0x%x,msg.need_ack = %d, len=%d, push!\n",msg.cmd, msg.need_ack, msg.len);
     ptr_queue_push(g_send_q_p, &msg, &ptr_queue_lock);
 
-    printf("push queue, len = %d\n", msg.len);
+    printf("posting...\n");
+    sem_post(&send_data);
+    //printf("push queue, len = %d\n", msg.len);
+#if 0
     pthread_mutex_lock(&send_mutex);
     send_data = NOTICE_MSG;
     pthread_cond_signal(&send_cond);
     pthread_mutex_unlock(&send_mutex);
+#endif
 
     return msg_len;
 }
@@ -1518,10 +1533,10 @@ int can_message_send(can_data_type *sourcecan)
     uint32_t i = 0;
     uint8_t all_warning_masks[sizeof(MECANWarningMessage)] = {
         0x00, 0x00, 0x01, 0x00,
-        0x0E, 0x00, 0x00, 0x03};
+        0xFF, 0x00, 0x00, 0x03};
     uint8_t trigger_warning_masks[sizeof(MECANWarningMessage)] = {
         0x00, 0x00, 0x00, 0x00,
-        0x0E, 0x00, 0x00, 0x00};
+        0xFF, 0x00, 0x00, 0x00};
     uint8_t all_warning_data[sizeof(MECANWarningMessage)] = {0};
     uint8_t trigger_data[sizeof(MECANWarningMessage)] = {0};
 
@@ -1551,8 +1566,11 @@ int can_message_send(can_data_type *sourcecan)
         }
         
 #endif
-
         memcpy(&can, sourcecan->warning, sizeof(sourcecan->warning));
+        //printf("ldw_off = %d\n",can.ldw_off);
+        //printf("left_ldw= %d\n",can.left_ldw);
+        //printf("right_ldw= %d\n",can.right_ldw);
+        //printf("fcw_on= %d\n",can.fcw_on);
 
         for (i = 0; i < sizeof(all_warning_masks); i++) {
             all_warning_data[i] = sourcecan->warning[i] & all_warning_masks[i];
@@ -1605,7 +1623,7 @@ int can_message_send(can_data_type *sourcecan)
             }
             if (can.fcw_on) {
 
-                if(!filter_alert_by_time(&hw_alert, FILTER_ADAS_ALERT_SET_TIME))
+                if(!filter_alert_by_time(&fcw_alert, FILTER_ADAS_ALERT_SET_TIME))
                 {
                     printf("ldw filter alert by time!");
                     goto out;
@@ -1644,6 +1662,25 @@ int can_message_send(can_data_type *sourcecan)
                 sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
                         (uint8_t *)uploadmsg, \
                         playloadlen);
+
+
+            if (0) {
+
+                if(!filter_alert_by_time(&hw_alert, FILTER_ADAS_ALERT_SET_TIME))
+                {
+                    printf("ldw filter alert by time!");
+                    goto out;
+                }
+
+                playloadlen = build_adas_warn_frame(SW_TYPE_FCW, uploadmsg);
+                uploadmsg->start_flag = SW_STATUS_EVENT;
+                uploadmsg->sound_type = SW_TYPE_FCW;
+
+                printf("send FCW alert message!\n");
+                sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
+                        (uint8_t *)uploadmsg, \
+                        playloadlen);
+            }
 
             } else if (HW_LEVEL_RED_CAR == \
                     g_last_warning_data.headway_warning_level) {
@@ -1841,7 +1878,7 @@ static int recv_ack_and_send_image(sample_prot_header *pHeader, int32_t len)
     SendStatus pkg;
     sample_mm_ack mmack;
 
-    //printf("recv ack...........!\n");
+    printf("recv ack...........!\n");
     memcpy(&mmack, pHeader+1, sizeof(mmack));
     if(mmack.ack){
         printf("recv ack err!\n");
@@ -2079,7 +2116,7 @@ void recv_warning_ack(sample_prot_header *pHeader, int32_t len)
     SendStatus pkg;
 
     if(len == sizeof(sample_prot_header) + 1){
-        printf("send warning ack!\n");
+        printf("push warning ack!\n");
         notice_ack_msg();
 
     }else{
@@ -2284,28 +2321,19 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
     uint8_t txbuf[128] = {0};
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
 
-
-    printf("------id = 0x%x------\n", pHeader->device_id);
-
 #if defined ENABLE_ADAS
-    printf("------id1 = 0x%x------\n", pHeader->device_id);
     if(pHeader->device_id != SAMPLE_DEVICE_ID_ADAS &&\
             pHeader->device_id != SAMPLE_DEVICE_ID_BRDCST)
         return 0;
 
 #elif defined ENABLE_DSM
-    printf("------id2 = 0x%x------\n", pHeader->device_id);
     if((pHeader->device_id != SAMPLE_DEVICE_ID_DSM) && (pHeader->device_id != SAMPLE_DEVICE_ID_BRDCST)){
-
-        printf("------id2 filter-----\n");
         return 0;
     }
 #else
     printf("no defien device.\n");
     return 0;
 #endif
-    printf("------cmd0 = 0x%x------\n", pHeader->cmd);
-
     serial_num = MY_HTONS(pHeader->serial_num);
     do_serial_num(&serial_num, RECORD_RECV_NUM);
 
@@ -2385,7 +2413,7 @@ static int try_connect()
     int32_t ret = 0;
     int enable = 1;
     const char *server_ip = "192.168.100.100";
-    //const char *server_ip = "192.168.100.102";
+    //const char *server_ip = "192.168.100.105";
     struct sockaddr_in host_serv_addr;
     socklen_t optlen;
     int bufsize = 0;
@@ -2461,17 +2489,11 @@ void *pthread_tcp_process(void *para)
 #define TCP_READ_BUF_SIZE (64*1024)
 #define RECV_HOST_DATA_BUF_SIZE (128*1024)
     int32_t ret = 0;
-    int retval = 0;;
-    fd_set rfds;
-    struct timeval tv;
     int i=0;
     static int tcprecvcnt = 0;
     uint8_t *readbuf = NULL;
     uint8_t *writebuf = NULL;
     uint8_t *msgbuf = NULL;
-
-    uint8_t sum = 0;
-    uint32_t framelen = 0;
 
     sample_prot_header *pHeader = NULL;
     pHeader = (sample_prot_header *) msgbuf;
@@ -2503,41 +2525,24 @@ connect_again:
 #endif
 
     while (!force_exit) {
-        FD_ZERO(&rfds);
-        FD_SET(hostsock, &rfds);
+        ret = read(hostsock, readbuf, TCP_READ_BUF_SIZE);
+        if (ret <= 0) {
+            printf("read failed %d %s\n", ret, strerror(errno));
+            close(hostsock);
+            hostsock = -1;
+            goto connect_again;
 
-        tv.tv_sec = 2;
-        tv.tv_usec = 0;
-        retval = select((hostsock + 1), &rfds, NULL, NULL, &tv);
-        if (retval == -1){
-            perror("select()");
-            continue;
-        }else if (retval){
-            if(FD_ISSET(hostsock, &rfds)){
-                memset(readbuf, 0, TCP_READ_BUF_SIZE);
-                ret = read(hostsock, readbuf, TCP_READ_BUF_SIZE);
-                if (ret <= 0) {
-                    printf("read failed %d %s\n", ret, strerror(errno));
-                    close(hostsock);
-                    hostsock = -1;
-                    goto connect_again;
-
-                    //continue;
-                }else{//write to buf
-                       MY_DEBUG("recv raw cmd, tcprecvcnt = %d:\n", tcprecvcnt++);
-                         printbuf(readbuf, ret);
-                    i=0;
-                    while(ret--)
-                    {
-                        parse_cmd(&readbuf[i++], msgbuf);
-                    }
-                }
+            //continue;
+        }else{//write to buf
+            //MY_DEBUG("recv raw cmd, tcprecvcnt = %d:\n", tcprecvcnt++);
+            //printbuf(readbuf, ret);
+            i=0;
+            while(ret--)
+            {
+                parse_cmd(&readbuf[i++], msgbuf);
             }
-        }else{
-            //printf("tcp no data within 2 seconds.\n");
         }
     }
-
 out:
     if(readbuf)
         free(readbuf);
@@ -2546,9 +2551,7 @@ out:
 
     if(hostsock>0)
         close(hostsock);
-
     pthread_exit(NULL);
-
 }
 static char get_head = 0;
 static char got_esc_char = 0;
@@ -2666,26 +2669,20 @@ void *pthread_snap_shot(void *p)
     {
 
         read_dev_para(&tmp, para_type);
-#if 0
+#if 1
         if(tmp.auto_photo_mode == SNAP_SHOT_BY_TIME){
-        if(1){
             printf("auto snap shot!\n");
             if(tmp.auto_photo_time_period != 0)
                 do_snap_shot();
             sleep(tmp.auto_photo_time_period);
-            sleep(5);
 #else
-        //if(tmp.auto_photo_mode == SNAP_SHOT_BY_TIME){
         if(1){
-            //if(tmp.auto_photo_time_period != 0)
+            sleep(5);
             if(1)
             {
                 printf("auto snap shot!\n");
                 do_snap_shot();
-            
             }
-            //sleep(tmp.auto_photo_time_period);
-            sleep(5);
 #endif
         }else if(tmp.auto_photo_mode == SNAP_SHOT_BY_DISTANCE){
             RealTimeDdata_process(&rt_data, READ_REAL_TIME_MSG);
@@ -2721,6 +2718,8 @@ void *pthread_req_cmd_process(void *para)
 
     prctl(PR_SET_NAME, "cache_GetVideocmd");
     gettimeofday(&test_time, NULL);
+
+
     while(1)
     {
         if(!pull_mm_req_cmd_queue(&send_mm))

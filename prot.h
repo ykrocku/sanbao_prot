@@ -7,6 +7,8 @@
 #include <queue>
 
 
+#define WRITE_REAL_TIME_MSG 0
+#define READ_REAL_TIME_MSG  1
 
 
 
@@ -753,6 +755,11 @@ int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t devid, 
 void get_local_time(uint8_t get_time[6]);
 
 int ratelimit_connects(unsigned int *last, unsigned int secs);
+
+void sem_send_init();
+
+
+void RealTimeDdata_process(real_time_data *data, int mode);
 
 
 #define DEBUG_BUF

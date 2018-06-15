@@ -231,7 +231,7 @@ RBFrame* request_jpeg_frame(CRingBuf* pRB, uint32_t repeat_times)
 
     return pFrame;
 }
-
+#if 0
 std::string GetTimestamp() {
   time_t rawtime;
   struct tm* timeinfo;
@@ -242,6 +242,42 @@ std::string GetTimestamp() {
   strftime(buffer, sizeof buffer, "%Y-%m-%d %H:%M:%S", timeinfo);
   return buffer;
 }
+#else
+std::string GetTimestamp() {
+  time_t rawtime;
+  struct tm* timeinfo;
+  char buffer[200];
+  memset(buffer, 0, sizeof buffer);
+  time(&rawtime);
+  timeinfo = localtime(&rawtime);
+  strftime(buffer, sizeof buffer, "%Y-%m-%d %H:%M:%S", timeinfo);
+
+    real_time_data tmp;
+    RealTimeDdata_process(&tmp, READ_REAL_TIME_MSG);
+
+    snprintf(&buffer[strlen(buffer)], sizeof(buffer), " BD:%.6fN,%.6fE",\
+            (MY_HTONL(tmp.latitude)*1.0)/1000000, (MY_HTONL(tmp.longitude)*1.0)/1000000);
+
+    printf("latitude: %s\n", buffer);
+
+  return buffer;
+}
+#endif
+
+//填写报警信息的一些实时数据
+std::string get_latitude_msg()
+{
+    char msg[100];
+    real_time_data tmp;
+    RealTimeDdata_process(&tmp, READ_REAL_TIME_MSG);
+
+    //printf("high altitude %f\n", (tmp.altitude*1.0)/1000000);
+    snprintf(msg, sizeof(msg), "BD: %.6fN, %.6fE\nspeed:%d km/h",\
+            (tmp.latitude*1.0)/1000000, (tmp.longitude*1.0)/1000000,tmp.car_speed);
+
+    printf("latitude: %s\n", msg);
+}
+
 
 #if 1
 // color
@@ -326,11 +362,15 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
                 usleep(25000);
                 continue;
             }
-            if(pFrame->frameNo % 2 == 0){
-                break;
-            }else{
+
+
+            //if(pFrame->frameNo % 2 == 0){
+
+            if(pFrame->frameNo % 2 == 0 && pFrame->frameNo % 3 == 0){
                 framecnt_old = pFrame->frameNo;
                 usleep(25000);
+            }else{
+                break;
             }
         }
     }while(1);
@@ -347,8 +387,13 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
     pRB->CommitRead();
 
     std::string time = GetTimestamp();
+
+    //std::string latitude =  get_latitude_msg();
+
     cv::putText(new_image, time, cv::Point(20, 60),
                 CV_FONT_HERSHEY_DUPLEX, 1.5, COLOR_BLUE, 2, CV_AA);
+
+
 
     std::vector<uint8_t> jpg_vec = jpeg_encode(new_image.data,
         new_image.cols, new_image.rows, width, height, quality);
@@ -361,9 +406,10 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
 
     EncodeRingBufWrite(pwRB, jpg_vec.data(), jpg_size, width, height);
 
-#if defined ENABLE_DSM
+//#if defined ENABLE_DSM
+#if 1
 
-    //EncodeRingBufWrite(pwRB, jpg_vec.data(), jpg_size, width, height);
+    EncodeRingBufWrite(pwRB, jpg_vec.data(), jpg_size, width, height);
 #endif
 
     return 0;
@@ -414,8 +460,8 @@ void GetConfigResolution(int *w, int *h)
 void *pthread_encode_jpeg(void *p)
 {
     int ret = 0;
-    //int quality = 50;
-    int quality = 40;
+    int quality = 50;
+    //int quality = 40;
     //int Vwidth = 640;
     //int Vheight = 360;
     
@@ -1034,6 +1080,8 @@ void global_var_init()
     printf("using default, ENABLE_ADAS!\n");
 #endif
 
+
+    sem_send_init();
     read_local_adas_para_file(LOCAL_ADAS_PRAR_FILE);
     read_local_dsm_para_file(LOCAL_DSM_PRAR_FILE);
 
@@ -1043,8 +1091,10 @@ void global_var_init()
     //    system(DO_DELETE_SNAP_SHOT_FILES);
     //    printf("do %s\n", DO_DELETE_SNAP_SHOT_FILES);
 
+    system("rm /mnt/obb/dsm/* -f");
+    system("rm /mnt/obb/adas/* -f");
 
-    read_local_file_to_list();
+    //read_local_file_to_list();
 }
 
 ThreadPool pool; // 0 - cpu member
