@@ -104,7 +104,7 @@ ELSEIF(ANDROID_ABI)
     TARGET_LINK_LIBRARIES(wsi
         #        halio concurrency
         libmsgpackc.a libwebsockets.a dl
-        ringbuf halio concurrency mp4w mjpeg miniglog
+        ringbuf halio concurrency mp4 mjpeg miniglog
         c z log
         opencv_core opencv_imgproc opencv_imgcodecs
         opencv_video opencv_videoio opencv_hal
