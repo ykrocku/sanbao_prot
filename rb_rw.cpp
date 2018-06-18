@@ -364,6 +364,25 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
             }
 
 
+#if defined ENABLE_DSM
+            if(pFrame->frameNo % 3 == 0){
+                framecnt_old = pFrame->frameNo;
+                usleep(20000);
+            }else{
+                break;
+            }
+#else
+            if(pFrame->frameNo % 3 == 0){
+                break;
+            }else{
+                framecnt_old = pFrame->frameNo;
+                usleep(20000);
+            }
+#endif
+
+
+
+#if 0
             //if(pFrame->frameNo % 2 == 0){
 
             if(pFrame->frameNo % 2 == 0 && pFrame->frameNo % 3 == 0){
@@ -372,6 +391,7 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
             }else{
                 break;
             }
+#endif
         }
     }while(1);
 
@@ -716,6 +736,7 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
     int i=0;
     int sec = 0;
     int usec = 0;
+    int64_t frame_oldtime=0;
 
     printf("%s enter!\n", __FUNCTION__);
     //interval = mm->photo_time_period*100*1000; //us
@@ -724,6 +745,7 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
 #define SEEK_TIME_MAX   60
 #define ENCODE_FRAME_MAX 15
 
+#if 1
     if(jpeg_flag){//recode jpg time
 
         for(i=0; i<mm->photo_num; i++){
@@ -735,10 +757,33 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
             store_one_jpeg(mm, pFrame, jpeg_index++);
             //usleep(interval);
             sleep(interval);
+            //usleep(interval*1200000);
         }
     }
+#else
+    printf("store jpg interval = %d\n", interval);
+    if(jpeg_flag){//recode jpg time
+        while(i<mm->photo_num)
+        {
+            pRB->SeekIndexByTime(0);
+            pFrame = request_jpeg_frame(pRB, 0);
+            if(pFrame == nullptr){
+                usleep(60000);
+                continue;
+            }
+            print_frame("pre jpeg", pFrame);
+            if(pFrame->time - frame_oldtime > interval*1100){
+                frame_oldtime = pFrame->time;
+                print_frame("get jpeg", pFrame);
+                store_one_jpeg(mm, pFrame, jpeg_index++);
+                i++;
+            }
+        }
+    }
+#endif
+
     //sleep(mm->video_time - interval/1000000);
-    sleep(mm->video_time - interval);
+    sleep(mm->video_time - (mm->photo_num -1)*interval);
     pRB->SeekIndexByTime(0);//get last frame
     pFrame = request_jpeg_frame(pRB, 10);
     if(pFrame == nullptr)
@@ -785,6 +830,27 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
         ofs.close();
         printf("%s mp4 done!\n", warning_type_to_str(mm->warn_type));
 #else
+
+
+        sprintf(mp4filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
+        std::ofstream ofs(mp4filepath, std::ofstream::out | std::ofstream::binary);
+        MjpegWriter mp4(ofs, fps, pFrame->video.VWidth, pFrame->video.VHeight);
+        fprintf(stdout, "Saving image file...%s, fps = %d\n", mp4filepath, fps);
+        while(framecnt--)
+        {
+            pFrame = request_jpeg_frame(pRB, 10);
+            if(pFrame == nullptr)
+                break;
+            mp4.Write(pFrame->data, pFrame->dataLen);
+            print_frame("video jpeg", pFrame);
+            pRB->CommitRead();
+        }
+
+        mp4.End();
+        ofs.close();
+        printf("%s mp4 done!\n", warning_type_to_str(mm->warn_type));
+
+#if 0
         sprintf(mp4filepath,"%s%08d.avi", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
         MjpegWriter mjpeg;
         mjpeg.Open(mp4filepath, fps, pFrame->video.VWidth, pFrame->video.VHeight);
@@ -800,6 +866,8 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
         }
         mjpeg.Close();
         printf("%s avi done!\n", warning_type_to_str(mm->warn_type));
+#endif
+
 #endif
         node.warn_type = mm->warn_type;
         node.mm_type = MM_VIDEO;
