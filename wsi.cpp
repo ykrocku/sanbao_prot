@@ -432,6 +432,7 @@ int msgpack_object_dsm_get(FILE* out, msgpack_object o, can_data_type *can, uint
 }
 
 int dsm_parse_data_json(char *buffer);
+#define DSM_JSON_MSG_LEN (1024*1024)
 int unpack_recv_can_msg(char *data, size_t size)
 {
     uint32_t len = 0;
@@ -444,7 +445,7 @@ int unpack_recv_can_msg(char *data, size_t size)
  //       return -1;
 
 #if defined ENABLE_ADAS 
-    msgpack_zone_init(&mempool, 1048576);//1M
+    msgpack_zone_init(&mempool, DSM_JSON_MSG_LEN);//1M
 
     msgpack_unpack((const char *)data, size, NULL, &mempool, &deserialized);
 
@@ -460,7 +461,6 @@ int unpack_recv_can_msg(char *data, size_t size)
 
     //recv_dsm_message(&can);
  
-#define DSM_JSON_MSG_LEN (1024*1024)
 
     msgpack_zone_init(&mempool, DSM_JSON_MSG_LEN);//1M
     //printbuf(data, size);
@@ -490,7 +490,6 @@ int unpack_recv_can_msg(char *data, size_t size)
 
 static bool is_dsm_alert(const rapidjson::Value& val)
 {
-
     assert(val["alerting"].IsBool());
     if (val.HasMember("alerting")) {
         printf("alerting = %s\n", val["alerting"].GetBool() ? "true" : "false");
@@ -499,6 +498,30 @@ static bool is_dsm_alert(const rapidjson::Value& val)
 
     return 0;
 }
+
+
+static int get_dsm_alert_score(const rapidjson::Value& val)
+{
+    assert(val["score"].IsNumber());
+    assert(val["score"].IsDouble());
+    if (val.HasMember("score")) {
+        printf("score = %f\n", val["score"].GetDouble());
+    }   
+
+    if(val["score"].GetDouble() == 0){
+        printf("no detect\n");
+        return 0;
+    }
+    else if(val["score"].GetDouble() == 1){
+        printf("alert\n");
+        return 2;
+    }
+    else{
+        printf("detect but no alert\n");
+        return 1;
+    }
+}
+
 
 static bool get_dsm_pose(const rapidjson::Value& val, uint8_t *yaw, uint8_t *pitch, uint8_t *roll)
 {
@@ -533,8 +556,7 @@ int dsm_parse_data_json(char *buffer)
     if (document.ParseInsitu(buffer).HasParseError())
         return 1;
 
-    printf("\nParsing to document succeeded.\n");
-    printf("\nAccess values in document:\n");
+    printf("Parsing to document succeeded.\n");
     assert(document.IsObject()); 
     assert(document.HasMember("eye_alert"));
     assert(document.HasMember("yawn_alert"));
@@ -546,6 +568,7 @@ int dsm_parse_data_json(char *buffer)
     assert(document.HasMember("absence_alert"));
 
     //build can 779
+#if 0
     can_779.Eye_Closure_Warning = is_dsm_alert(document["eye_alert"]);
     can_779.Yawn_warning = is_dsm_alert(document["yawn_alert"]);
     can_779.Look_around_warning = is_dsm_alert(document["look_around_alert"]);
@@ -554,6 +577,17 @@ int dsm_parse_data_json(char *buffer)
     can_779.Phone_call_warning = is_dsm_alert(document["phone_alert"]);
     can_779.Smoking_warning = is_dsm_alert(document["smoking_alert"]);
     can_779.Absence_warning = is_dsm_alert(document["absence_alert"]);
+#else
+    can_779.Eye_Closure_Warning = get_dsm_alert_score(document["eye_alert"]);
+    can_779.Yawn_warning = get_dsm_alert_score(document["yawn_alert"]);
+    can_779.Look_around_warning = get_dsm_alert_score(document["look_around_alert"]);
+    can_779.Look_up_warning = get_dsm_alert_score(document["look_up_alert"]);
+    can_779.Look_down_warning = get_dsm_alert_score(document["look_down_alert"]);
+    can_779.Phone_call_warning = get_dsm_alert_score(document["phone_alert"]);
+    can_779.Smoking_warning = get_dsm_alert_score(document["smoking_alert"]);
+    can_779.Absence_warning = get_dsm_alert_score(document["absence_alert"]);
+#endif
+
     can_779.Frame_Tag = frame_tag_779 & 0xFF;
     frame_tag_779 ++;
     memset(can_779.reserved, 0, sizeof(can_779.reserved));
@@ -891,25 +925,11 @@ void *pthread_websocket_client(void *para)
         }
         lws_service(context, 200);
     }
-    lwsl_err("Exiting\n");
+    lwsl_err("wsi Exiting\n");
     lws_context_destroy(context);
 
     pthread_exit(NULL);
 }
-
-
-
-#if 0
-{"absence_alert":{"alerting":false, "duration":0.000000, "score":0.000000}, "bottom_face_tremble":1.000000, "bottom_landmarks_stable":false, "detect_result":{"box":[519, 384, 205, 215], "type":2}, "eye_alert":{"alerting":false, "duration":0.000000, "score":0.000000}, "face_detected":true, "face_gray_level":156, "face_tremble":1.000000, "frame":{"count":3447, "millis":382100.000000}, "intrinsic_pose":{"pitch":5.429827, "roll":-3.330798, "yaw":2.910615}, "landmarks_stable":false,
-"left_eye_open_faction":0.746152, "left_phone_detected":false, "left_phone_region":[0, 0, 0, 0], "longest_static_length":3855.000000, "look_around_alert":{"alerting":false, "duration":0.000000, "score":0.000000}, "look_down_alert":{"alerting":false, "duration":0.000000, "score":0.000000}, "look_up_alert":{"alerting":false, "duration":0.000000, "score":0.000000}, "normal_pose":{"pitch":-32.274864, "roll":4.668540, "yaw":5.933395}, "phone_alert":{"alerting":false, "duration":0.000000,
-"score":0.000000}, "pose":{"pitch":-26.959087, "roll":0.298464, "yaw":6.611538}, "position":[-0.059618, -1.165627, -6.808969], "process_fps":9.721322, "regression_result":{"ftr_pts":[[0.000000, 0.000000], [0.000000, 0.000000], [0.000000, 0.000000], [0.000000, 0.000000], [543.040000, 570.500000], [0.000000, 0.000000], [564.930000, 602.320000], [0.000000, 0.000000], [609.470000, 613.650000], [0.000000, 0.000000], [662.880000, 609.270000], [0.000000, 0.000000], [700.050000, 581.550000],
-[0.000000, 0.000000], [0.000000, 0.000000], [0.000000, 0.000000], [0.000000, 0.000000], [0.000000, 0.000000], [556.300000, 427.190000], [571.170000, 418.040000], [589.130000, 416.650000], [0.000000, 0.000000], [0.000000, 0.000000], [663.070000, 419.260000], [680.780000, 420.180000], [696.580000, 429.680000], [0.000000, 0.000000], [619.830000, 453.650000], [0.000000, 0.000000], [0.000000, 0.000000], [615.650000, 494.500000], [602.090000, 514.870000], [0.000000, 0.000000], [616.790000,
-511.750000], [0.000000, 0.000000], [635.620000, 516.200000], [566.620000, 464.200000], [572.600000, 457.340000], [585.840000, 455.450000], [598.460000, 462.080000], [586.850000, 463.870000], [575.510000, 465.270000], [650.590000, 462.840000], [662.250000, 457.090000], [673.880000, 458.970000], [684.190000, 465.670000], [672.370000, 467.060000], [660.390000, 465.790000], [586.030000, 550.720000], [594.630000, 537.270000], [0.000000, 0.000000], [617.160000, 533.460000], [0.000000, 0.000000],
-[641.160000, 539.390000], [652.330000, 552.170000], [638.400000, 558.240000], [0.000000, 0.000000], [616.260000, 559.010000], [0.000000, 0.000000], [594.960000, 559.270000], [0.000000, 0.000000], [0.000000, 0.000000], [617.430000, 542.630000], [0.000000, 0.000000], [0.000000, 0.000000], [0.000000, 0.000000], [616.630000, 546.670000], [0.000000, 0.000000]], "type":0}, "right_eye_open_faction":0.719972, "right_phone_detected":false, "right_phone_region":[0, 0, 0, 0],
-"smoking_alert":{"alerting":false, "duration":0.000000, "score":0.000000}, "smoking_detected":false, "smoking_region":[0, 0, 0, 0], "static_length":0.000000, "time_cost":{"detect":268859, "frame":0, "get_frame":0, "landmarks":40967, "phone_alert":0, "smoking_alert":0}, "vehicle":{"latitude":0.000000, "longitude":0.000000, "speed":0.000000}, "yaw_speed":0.000000, "yawn_alert":{"alerting":false, "duration":0.000000, "score":0.000000}}
-
-
-#endif
 
 size_t ReadFile(char *buf, int len, const char *filename)
 {
@@ -1010,13 +1030,13 @@ int main(int argc, char **argv)
     can_send_init();
     
     //pthread_create(&pth[0], NULL, can_send_test, NULL);
-    if(pthread_create(&pth[1], NULL, pthread_websocket_client, NULL))
+    if(pthread_create(&pth[0], NULL, pthread_websocket_client, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
     }
 #if 0
-    if(pthread_create(&pth[0], NULL, pthread_tcp_process, NULL))
+    if(pthread_create(&pth[1], NULL, pthread_tcp_process, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
@@ -1047,13 +1067,15 @@ int main(int argc, char **argv)
         return -1;
     }
 #endif
+#if 0
     while(!force_exit)
     {
         sleep(1);
     }
-
+#endif
     pthread_join(pth[0], NULL);
     printf("join %d\n", i++);
+#if 0
     pthread_join(pth[1], NULL);
     printf("join %d\n", i++);
     pthread_join(pth[2], NULL);
@@ -1068,6 +1090,7 @@ int main(int argc, char **argv)
     printf("join %d\n", i++);
     pthread_join(pth[7], NULL);
     printf("join %d\n", i++);
+#endif
     return 0;
 }
 
