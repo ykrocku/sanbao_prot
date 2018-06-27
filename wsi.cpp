@@ -46,6 +46,7 @@
 using namespace rapidjson;
 using namespace std;
 
+HalIO &halio = HalIO::Instance();
 
 #ifndef _DSM_INFO_SIMPLE_BUFFER_H
 #define _DSM_INFO_SIMPLE_BUFFER_H
@@ -558,12 +559,13 @@ int dsm_parse_data_json(char *buffer)
     memset(can_779.reserved, 0, sizeof(can_779.reserved));
     printf("can779:\n");
     printbuf(&can_779, sizeof(can_779));
-    send_can_frame(0x779, (char *)&can_779);
+    halio.send_can_frame(0x779, (char *)&can_779);
 
 
     //build can 778
     assert(document["face_detected"].IsBool());
     if(document["face_detected"].GetBool()){
+        printf("face detected!\n");
         assert(document["left_eye_open_faction"].IsNumber());
         assert(document["left_eye_open_faction"].IsDouble());
         can_778.Left_Eyelid_fraction = (uint8_t)(document["left_eye_open_faction"].GetDouble()*100);
@@ -576,17 +578,17 @@ int dsm_parse_data_json(char *buffer)
         assert(document["intrinsic_pose"].HasMember("yaw"));
         assert(document["intrinsic_pose"].HasMember("pitch"));
         assert(document["intrinsic_pose"].HasMember("roll"));
-        get_dsm_pose(document["right_eye_open_faction"], &yaw, &pitch, &roll);
+        get_dsm_pose(document["intrinsic_pose"], &yaw, &pitch, &roll);
         can_778.Head_Yaw = yaw;
         can_778.Head_Pitch = pitch;
         can_778.Head_Roll = roll;
-        can_778.reserved = 0;
+        memset(can_778.reserved, 0, sizeof(can_778.reserved));
         can_778.Frame_Tag = frame_tag_778 & 0xFF;
         frame_tag_778 ++;
         
         printf("can778:\n");
         printbuf(&can_778, sizeof(can_778));
-        send_can_frame(0x778, (char *)&can_778);
+        halio.send_can_frame(0x778, (char *)&can_778);
     }
     return 0;
 }
@@ -604,7 +606,7 @@ void printbuf(void *buffer, int len)
 {
     int i;
     uint8_t *buf = (uint8_t *)buffer;
-#ifdef DEBUG_BUF
+
     for(i=0; i<len; i++)
     {
         if(i && (i%16==0))
@@ -613,7 +615,6 @@ void printbuf(void *buffer, int len)
         printf("0x%02x ", buf[i]);
     }
     printf("\n");
-#endif   
 }
 
 //void write_wsi_log(char *buf, int len)
@@ -897,84 +898,72 @@ void *pthread_websocket_client(void *para)
 }
 
 
-#define MAX_LOG_FILENAME_LEN    (128)
-struct cmd_line_param
+
+#if 0
+{"absence_alert":{"alerting":false, "duration":0.000000, "score":0.000000}, "bottom_face_tremble":1.000000, "bottom_landmarks_stable":false, "detect_result":{"box":[519, 384, 205, 215], "type":2}, "eye_alert":{"alerting":false, "duration":0.000000, "score":0.000000}, "face_detected":true, "face_gray_level":156, "face_tremble":1.000000, "frame":{"count":3447, "millis":382100.000000}, "intrinsic_pose":{"pitch":5.429827, "roll":-3.330798, "yaw":2.910615}, "landmarks_stable":false,
+"left_eye_open_faction":0.746152, "left_phone_detected":false, "left_phone_region":[0, 0, 0, 0], "longest_static_length":3855.000000, "look_around_alert":{"alerting":false, "duration":0.000000, "score":0.000000}, "look_down_alert":{"alerting":false, "duration":0.000000, "score":0.000000}, "look_up_alert":{"alerting":false, "duration":0.000000, "score":0.000000}, "normal_pose":{"pitch":-32.274864, "roll":4.668540, "yaw":5.933395}, "phone_alert":{"alerting":false, "duration":0.000000,
+"score":0.000000}, "pose":{"pitch":-26.959087, "roll":0.298464, "yaw":6.611538}, "position":[-0.059618, -1.165627, -6.808969], "process_fps":9.721322, "regression_result":{"ftr_pts":[[0.000000, 0.000000], [0.000000, 0.000000], [0.000000, 0.000000], [0.000000, 0.000000], [543.040000, 570.500000], [0.000000, 0.000000], [564.930000, 602.320000], [0.000000, 0.000000], [609.470000, 613.650000], [0.000000, 0.000000], [662.880000, 609.270000], [0.000000, 0.000000], [700.050000, 581.550000],
+[0.000000, 0.000000], [0.000000, 0.000000], [0.000000, 0.000000], [0.000000, 0.000000], [0.000000, 0.000000], [556.300000, 427.190000], [571.170000, 418.040000], [589.130000, 416.650000], [0.000000, 0.000000], [0.000000, 0.000000], [663.070000, 419.260000], [680.780000, 420.180000], [696.580000, 429.680000], [0.000000, 0.000000], [619.830000, 453.650000], [0.000000, 0.000000], [0.000000, 0.000000], [615.650000, 494.500000], [602.090000, 514.870000], [0.000000, 0.000000], [616.790000,
+511.750000], [0.000000, 0.000000], [635.620000, 516.200000], [566.620000, 464.200000], [572.600000, 457.340000], [585.840000, 455.450000], [598.460000, 462.080000], [586.850000, 463.870000], [575.510000, 465.270000], [650.590000, 462.840000], [662.250000, 457.090000], [673.880000, 458.970000], [684.190000, 465.670000], [672.370000, 467.060000], [660.390000, 465.790000], [586.030000, 550.720000], [594.630000, 537.270000], [0.000000, 0.000000], [617.160000, 533.460000], [0.000000, 0.000000],
+[641.160000, 539.390000], [652.330000, 552.170000], [638.400000, 558.240000], [0.000000, 0.000000], [616.260000, 559.010000], [0.000000, 0.000000], [594.960000, 559.270000], [0.000000, 0.000000], [0.000000, 0.000000], [617.430000, 542.630000], [0.000000, 0.000000], [0.000000, 0.000000], [0.000000, 0.000000], [616.630000, 546.670000], [0.000000, 0.000000]], "type":0}, "right_eye_open_faction":0.719972, "right_phone_detected":false, "right_phone_region":[0, 0, 0, 0],
+"smoking_alert":{"alerting":false, "duration":0.000000, "score":0.000000}, "smoking_detected":false, "smoking_region":[0, 0, 0, 0], "static_length":0.000000, "time_cost":{"detect":268859, "frame":0, "get_frame":0, "landmarks":40967, "phone_alert":0, "smoking_alert":0}, "vehicle":{"latitude":0.000000, "longitude":0.000000, "speed":0.000000}, "yaw_speed":0.000000, "yawn_alert":{"alerting":false, "duration":0.000000, "score":0.000000}}
+
+
+#endif
+
+size_t ReadFile(char *buf, int len, const char *filename)
 {
-    bool enable_camera;
-    bool enable_speed;
-    bool enable_gps;
-    bool enable_gsensor;
-    bool enable_mobileye;
-    bool enable_radar;
-    bool enable_radar2;
-    bool enable_fmu;
-    bool enable_wrs;
-    bool enable_can_dumper;
-    bool dump_display_unit;
-    bool enable_uart_receiver;
-    bool send_can;
-    bool test_display_unit;
-    bool show_car_info_on_disp;
-    bool enable_cmd_socket;
-    bool enable_baudrate_detect;
-    char *send_can_arg;
-    bool test_mtk_audio;
+    FILE *fp;
+    size_t size = 0;
 
-    bool enable_led;
-    bool truncate_log;
-    int  display_test_patten;
-    int  speed_type;
-    int  radar2_index;
-    int  verbose;
-    char output_file[MAX_LOG_FILENAME_LEN];
+    fp = fopen(filename, "rb");
+    if(!fp){
+        printf("read file fail:%s\n", strerror(errno));
+        return 0;
+    }   
+    size = fread(buf, 1, len, fp);
+    fclose(fp);
 
-    bool          using_can_config;
-    HalioInitInfo hal_init_info;
-};
-struct cmd_line_param param;
+    return size;
+}
+
 void *can_send_test(void *para)
 {
 
-    uint32_t i = 0;
-    uint32_t lasting_second = 0;
-    struct timespec ts = {0, 200 * 1000 * 1000};
-    HalIO &halio = HalIO::Instance();
+    //HalIO &halio = HalIO::Instance();
     prctl(PR_SET_NAME, "test_display");
 
     char can_data[8] = {0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7};
     uint8_t field_masks[8] = {
         0x07, 0x20, 0xFF, 0x00,
         0x0E, 0x00, 0x00, 0x03};
-    uint8_t hw_ldw_masks[8] = {
-        0x07, 0x20, 0xFF, 0x00,
-        0x0E, 0x00, 0x00, 0x03};
 
     dsm_can_778 can_778;
     memset(&can_778, 0x11, sizeof(can_778));
+    halio.Init(NULL, 0, true);
+    sleep(100000);
 
-
-
-    struct HalioInitInfo init_info;
-    memset(&init_info, 0, sizeof(init_info));
-
-    init_info.cs_speed = gs_car_speed_signals[param.speed_type];
-    init_info.cs_left  = gs_car_turn_signals[param.speed_type][0];
-    init_info.cs_right = gs_car_turn_signals[param.speed_type][1];
-    init_info.scenario = CAN_SCENARIO_NORMAL;
-    init_info.input_can_speed = CAN_SPEED_500K;
-
-    //init_info.speed_cb = speed_callback;
-    //init_info.raw_cb   = rawbuf_callback;
-    bool res = halio.Init(&init_info, 0x01020304);
-
-
+    char buffer[1024*4];
+    if(0 == ReadFile(buffer, sizeof(buffer), "./json.txt")){
+        return NULL;
+    }
+    printf("read JSON:\n %s\n", buffer);
+    dsm_parse_data_json(buffer);
     while(1)
     {
-        send_can_frame(0x778, (char *)&can_778);
+        halio.send_can_frame(0x778, (char *)&can_778);
+        //halio.send_can_frame(0x760, (char *)&can_778);
         sleep(1);
         printf("can send!\n");
     }
 
+}
+
+void can_send_init(void)
+{
+
+    //HalIO &halio = HalIO::Instance();
+    halio.Init(NULL, 0, true);
 }
 
 
@@ -1018,19 +1007,20 @@ int main(int argc, char **argv)
 
     signal(SIGINT, sighandler);
     global_var_init();
+    can_send_init();
     
-    pthread_create(&pth[0], NULL, can_send_test, NULL);
-    if(pthread_create(&pth[0], NULL, pthread_tcp_process, NULL))
-    {
-        printf("pthread_create fail!\n");
-        return -1;
-    }
+    //pthread_create(&pth[0], NULL, can_send_test, NULL);
     if(pthread_create(&pth[1], NULL, pthread_websocket_client, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
     }
 #if 0
+    if(pthread_create(&pth[0], NULL, pthread_tcp_process, NULL))
+    {
+        printf("pthread_create fail!\n");
+        return -1;
+    }
     if(pthread_create(&pth[2], NULL, pthread_encode_jpeg, NULL))
     {
         printf("pthread_create fail!\n");
@@ -1056,7 +1046,6 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
-
 #endif
     while(!force_exit)
     {

@@ -485,7 +485,7 @@ typedef struct __dsm_can_778 {
     uint8_t Head_Pitch;
     uint8_t Head_Roll;
     uint8_t Frame_Tag;
-    uint8_t reserved;
+    uint8_t reserved[2];
 } __attribute__((packed)) dsm_can_778;
 
 typedef struct __dsm_can_779 {
@@ -500,7 +500,7 @@ typedef struct __dsm_can_779 {
     uint8_t Absence_warning:2;
 
     uint8_t Frame_Tag;
-    uint8_t reserved[4];
+    uint8_t reserved[5];
 
 } __attribute__((packed)) dsm_can_779;
 
@@ -789,8 +789,6 @@ void sem_send_init();
 
 void RealTimeDdata_process(real_time_data *data, int mode);
 
-
-#define DEBUG_BUF
 
 #define DEBUG_G
 #ifdef DEBUG_G 
