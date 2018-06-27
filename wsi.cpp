@@ -504,20 +504,21 @@ static int get_dsm_alert_score(const rapidjson::Value& val)
 {
     assert(val["score"].IsNumber());
     assert(val["score"].IsDouble());
+    assert(val["alerting"].IsBool());
     if (val.HasMember("score")) {
         printf("score = %f\n", val["score"].GetDouble());
     }   
 
     if(val["score"].GetDouble() == 0){
-        printf("no detect\n");
+        printf("no detect!\n");
         return 0;
     }
-    else if(val["score"].GetDouble() == 1){
-        printf("alert\n");
+
+    if(val["alerting"].GetBool()){
+        printf("alert!\n");
         return 2;
-    }
-    else{
-        printf("detect but no alert\n");
+    }else{
+        printf("detect!\n");
         return 1;
     }
 }
