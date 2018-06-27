@@ -390,6 +390,13 @@ typedef struct __dsm_warningtext {
 } __attribute__((packed)) dsm_warningtext;
 
 
+
+
+
+
+
+
+
 typedef struct __car_info {
 //#ifdef BIG_ENDIAN
 
@@ -471,10 +478,31 @@ typedef struct __dsm_alert_info {
 #endif
 } __attribute__((packed)) dsm_alert_info;
 
+typedef struct __dsm_can_778 {
+    uint8_t Left_Eyelid_fraction;
+    uint8_t Right_Eyelid_fraction;
+    uint8_t Head_Yaw;
+    uint8_t Head_Pitch;
+    uint8_t Head_Roll;
+    uint8_t Frame_Tag;
+    uint8_t reserved;
+} __attribute__((packed)) dsm_can_778;
 
+typedef struct __dsm_can_779 {
+    uint8_t Eye_Closure_Warning:2;
+    uint8_t Yawn_warning:2;
+    uint8_t Look_around_warning:2;
+    uint8_t Look_up_warning:2;
 
+    uint8_t Look_down_warning:2;
+    uint8_t Phone_call_warning:2;
+    uint8_t Smoking_warning:2;
+    uint8_t Absence_warning:2;
 
+    uint8_t Frame_Tag;
+    uint8_t reserved[4];
 
+} __attribute__((packed)) dsm_can_779;
 
 /**********************can message*****************************/
 typedef struct _can_struct{
@@ -729,7 +757,7 @@ int32_t delete_mm_resource(uint32_t id);
 char *warning_type_to_str(uint8_t type);
 int timeout_trigger(struct timeval *tv, int ms);
 void repeat_send_pkg_status_init();
-void printbuf(uint8_t *buf, int len);
+void printbuf(void *buf, int len);
 int can_message_send(can_data_type *sourcecan);
 void adas_para_check(adas_para_setting *para);
 

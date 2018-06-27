@@ -14,6 +14,36 @@
 #include "prot.h"
 #include <sys/prctl.h>
 #include <queue>
+
+#include "rapidjson/document.h"     // rapidjson's DOM-style API
+#include "rapidjson/prettywriter.h" // for stringify JSON
+#include <cstdio>
+
+
+
+
+
+#include "common/hal/halio.h"
+#include "common/hal/canio.h"
+
+
+#include "common/hal/android_gsensor.h"
+#include "common/hal/tty.h"
+#include "common/hal/halio.h"
+#include "common/hal/esr.h"
+#include "common/hal/fmu.h"
+#include "common/hal/wrs.h"
+#include "common/hal/canio.h"
+#include "common/hal/camctl.h"
+
+
+#define MOBILEYE_WARNING_ID     (0x700)
+#define MOBILEYE_CARSIGNAL_ID   (0x760)
+
+#include "can_signal.cpp"
+
+
+using namespace rapidjson;
 using namespace std;
 
 
@@ -32,7 +62,9 @@ using namespace std;
 */
 
 
-#define DSM_INFO_TOPIC  ("dsm.alert.0x100")
+//#define DSM_INFO_TOPIC  ("dsm.alert.0x100")
+#define DSM_INFO_TOPIC  ("output.info.v1")
+
 #define DSM_INFO_SOURCE  ("DSMNEWS")
 
 #define DSM_INFO_ALERT_BIT_NUM  (2)
@@ -128,7 +160,7 @@ int pack_req_can_cmd(uint8_t *data, uint32_t len, const char *name)
     }
     else if(!memcmp(name, "dsm_alert", strlen("dsm_alert")))
     {
-        PACK_MAP_MSG("data", strlen("data"), "dsm.alert.0x100", strlen("dsm.alert.0x100"));
+        PACK_MAP_MSG("data", strlen("data"), DSM_INFO_TOPIC, strlen("dsm.alert.0x100"));
     }
     else
         ;
@@ -140,6 +172,42 @@ int pack_req_can_cmd(uint8_t *data, uint32_t len, const char *name)
 
     return minlen;
 }
+
+
+#if 1
+const char* type_to_str(uint8_t type)
+{
+    switch(type){
+        case MSGPACK_OBJECT_NIL:
+            return "OBJECT_NIL";
+        case MSGPACK_OBJECT_BOOLEAN:
+            return "BOOLEAN";
+        case MSGPACK_OBJECT_POSITIVE_INTEGER:
+            return "POSITIVE_INTEGER";
+        case MSGPACK_OBJECT_NEGATIVE_INTEGER:
+            return "NEGATIVE_INTEGER";
+        case MSGPACK_OBJECT_FLOAT32:
+            return "FLOAT32";
+        case MSGPACK_OBJECT_FLOAT64:
+            return "FLOAT64";
+        case MSGPACK_OBJECT_EXT:
+            return "EXT";
+        case MSGPACK_OBJECT_ARRAY:
+            return "ARRAY";
+
+        case MSGPACK_OBJECT_BIN:
+            return "BIN";
+        case MSGPACK_OBJECT_STR:
+            return "STR";
+        case MSGPACK_OBJECT_MAP:
+            return "MAP";
+        default:
+            return "DEFAULT";
+    }
+}
+
+#endif
+
 void msgpack_object_get(FILE* out, msgpack_object o, can_data_type *can)
 {
     enum MSG_DATA_TYPE{
@@ -249,16 +317,133 @@ void msgpack_object_get(FILE* out, msgpack_object o, can_data_type *can)
     return;
 }
 
-int unpack_recv_can_msg(uint8_t *data, int size)
+
+
+int msgpack_object_dsm_get(FILE* out, msgpack_object o, can_data_type *can, uint8_t *buf, uint32_t *buflen)
 {
+    enum MSG_DATA_TYPE{
+        CAN_DATA=1,
+        CAN_SOURCE,
+        CAN_TIME,
+        CAN_TOPIC,
+    };
+    static char data_type = 0;
+
+    //printf("type = %s\n", type_to_str(o.type));
+    switch(o.type) {
+        case MSGPACK_OBJECT_NIL:
+        case MSGPACK_OBJECT_BOOLEAN:
+        case MSGPACK_OBJECT_POSITIVE_INTEGER:
+        case MSGPACK_OBJECT_NEGATIVE_INTEGER:
+        case MSGPACK_OBJECT_FLOAT32:
+        case MSGPACK_OBJECT_FLOAT64:
+        case MSGPACK_OBJECT_EXT:
+        case MSGPACK_OBJECT_ARRAY:
+            //case MSGPACK_OBJECT_BIN:
+            //printf("get uint64: %ld\n", o.via.u64);
+            //printf("get bin: %d\n", o.via.i64);
+            if(data_type == CAN_TIME)
+            {
+                data_type = 0;
+                //printf("get uint64: %ld\n", o.via.u64);
+                can->time = o.via.u64;
+                break;
+            }
+            break;
+        case MSGPACK_OBJECT_BIN:
+            //printf("get bin: %d\n", o.via.bin.size);
+            //printbuf((uint8_t *)o.via.bin.ptr,o.via.bin.size);
+            //printf("get bin: %d\n", o.via.i64);
+
+            if(data_type == CAN_DATA)
+            {
+                data_type = 0;
+                //memcpy(can->warning, o.via.bin.ptr, (o.via.bin.size > sizeof(can->warning) ? sizeof(can->warning) : o.via.bin.size));
+                *buflen = o.via.bin.size > *buflen ? *buflen : o.via.bin.size;
+                //printf("data enter! len = %d / %d\n", o.via.bin.size, *buflen);
+                memcpy(buf, o.via.bin.ptr, *buflen);
+                break;
+            }
+            break;
+
+        case MSGPACK_OBJECT_STR:
+            //printf("get str: %s\n", o.via.str.ptr);
+
+            if(data_type == CAN_SOURCE)
+            {	
+                data_type = 0;
+                memcpy(can->source, o.via.str.ptr, (o.via.str.size > sizeof(can->source) ? sizeof(can->source) : o.via.str.size));
+                break;
+            }
+            else if(data_type == CAN_TOPIC)
+            {
+                //printf("topic enter!\n");
+                data_type = 0;
+                memcpy(can->topic, o.via.str.ptr, (o.via.str.size > sizeof(can->topic) ? sizeof(can->topic) : o.via.str.size));
+                break;
+            }
+            else
+            {
+                if(!strncmp(o.via.str.ptr, "data", strlen("data")))
+                {
+                    data_type = CAN_DATA;
+                    break;
+                }
+                if(!strncmp(o.via.str.ptr, "source", strlen("source")))
+                {
+                    data_type = CAN_SOURCE;
+                    break;
+                }
+                if(!strncmp(o.via.str.ptr, "time", strlen("time")))
+                {
+                    data_type = CAN_TIME;
+                    break;
+                }
+                if(!strncmp(o.via.str.ptr, "topic", strlen("topic")))
+                {
+                    data_type = CAN_TOPIC;
+                    break;
+                }
+            }
+            break;
+
+        case MSGPACK_OBJECT_MAP:
+            if(o.via.map.size != 0) {
+                msgpack_object_kv* p = o.via.map.ptr;
+                msgpack_object_kv* const pend = o.via.map.ptr + o.via.map.size;
+                msgpack_object_dsm_get(out, p->key, NULL, buf, buflen);
+                msgpack_object_dsm_get(out, p->val, can, buf, buflen);
+                ++p;
+                for(; p < pend; ++p) {
+                    msgpack_object_dsm_get(out, p->key, NULL, buf, buflen);
+                    msgpack_object_dsm_get(out, p->val, can, buf, buflen);
+                }
+            }
+            break;
+
+        default:
+            if (o.via.u64 > ULONG_MAX)
+                fprintf(out, "#<UNKNOWN %i over 4294967295>", o.type);
+            else
+                fprintf(out, "#<UNKNOWN %i %lu>", o.type, (unsigned long)o.via.u64);
+    }
+    return 0;
+}
+
+int dsm_parse_data_json(char *buffer);
+int unpack_recv_can_msg(char *data, size_t size)
+{
+    uint32_t len = 0;
     msgpack_zone mempool;
     msgpack_object deserialized;
     can_data_type can;
+    uint8_t data_msg[8192];
 
  //   if(!data || size < 0)
  //       return -1;
 
-    msgpack_zone_init(&mempool, 2048);
+#if defined ENABLE_ADAS 
+    msgpack_zone_init(&mempool, 1048576);//1M
 
     msgpack_unpack((const char *)data, size, NULL, &mempool, &deserialized);
 
@@ -268,14 +453,141 @@ int unpack_recv_can_msg(uint8_t *data, int size)
 
     msgpack_zone_destroy(&mempool);
 
-#if defined ENABLE_ADAS 
     can_message_send(&can);
 
 #elif defined ENABLE_DSM
 
-    recv_dsm_message(&can);
+    //recv_dsm_message(&can);
+ 
+#define DSM_JSON_MSG_LEN (1024*1024)
+
+    msgpack_zone_init(&mempool, DSM_JSON_MSG_LEN);//1M
+    //printbuf(data, size);
+    msgpack_unpack((const char *)data, size, NULL, &mempool, &deserialized);
+    //get bin data
+    len = sizeof(data_msg);
+    msgpack_object_dsm_get(stdout, deserialized, &can, data_msg, &len);
+    printf("get bin data len = %d\n", len);
+    //printbuf(data_msg, len);
+
+    //second unpack
+    char *buffer = (char *)malloc(DSM_JSON_MSG_LEN);
+    msgpack_unpack((const char *)data_msg, len, NULL, &mempool, &deserialized);
+    msgpack_object_print_buffer(buffer, DSM_JSON_MSG_LEN, deserialized);
+    msgpack_zone_destroy(&mempool);
+    printf("unpack:\n %s\n", buffer);
+
+    dsm_parse_data_json(buffer);
+
+    if(buffer)
+        free(buffer);
+
 #endif
 
+    return 0;
+}
+
+static bool is_dsm_alert(const rapidjson::Value& val)
+{
+
+    assert(val["alerting"].IsBool());
+    if (val.HasMember("alerting")) {
+        printf("alerting = %s\n", val["alerting"].GetBool() ? "true" : "false");
+        return (val["alerting"].GetBool());
+    }   
+
+    return 0;
+}
+
+static bool get_dsm_pose(const rapidjson::Value& val, uint8_t *yaw, uint8_t *pitch, uint8_t *roll)
+{
+    assert(val["yaw"].IsNumber());
+    assert(val["yaw"].IsDouble());
+    *yaw = (uint8_t)(val["yaw"].GetDouble() + 127);
+    printf("yaw = %g\n", val["yaw"].GetDouble());
+
+    assert(val["pitch"].IsNumber());
+    assert(val["pitch"].IsDouble());
+    *pitch = (uint8_t)(val["pitch"].GetDouble() + 127);
+    printf("pitch = %g\n", val["pitch"].GetDouble());
+
+    assert(val["roll"].IsNumber());
+    assert(val["roll"].IsDouble());
+    *roll= (uint8_t)(val["roll"].GetDouble() + 127);
+    printf("roll = %g\n", val["roll"].GetDouble());
+
+    return true;
+}
+
+
+int dsm_parse_data_json(char *buffer)
+{
+    Document document;  // Default template parameter uses UTF8 and MemoryPoolAllocator.
+    dsm_can_778 can_778;
+    dsm_can_779 can_779;
+    static uint32_t frame_tag_778 = 0, frame_tag_779 = 0;
+    uint8_t yaw = 0, pitch = 0, roll = 0;
+
+    // In-situ parsing, decode strings directly in the source string. Source must be string.
+    if (document.ParseInsitu(buffer).HasParseError())
+        return 1;
+
+    printf("\nParsing to document succeeded.\n");
+    printf("\nAccess values in document:\n");
+    assert(document.IsObject()); 
+    assert(document.HasMember("eye_alert"));
+    assert(document.HasMember("yawn_alert"));
+    assert(document.HasMember("look_around_alert"));
+    assert(document.HasMember("look_up_alert"));
+    assert(document.HasMember("look_down_alert"));
+    assert(document.HasMember("phone_alert"));
+    assert(document.HasMember("smoking_alert"));
+    assert(document.HasMember("absence_alert"));
+
+    //build can 779
+    can_779.Eye_Closure_Warning = is_dsm_alert(document["eye_alert"]);
+    can_779.Yawn_warning = is_dsm_alert(document["yawn_alert"]);
+    can_779.Look_around_warning = is_dsm_alert(document["look_around_alert"]);
+    can_779.Look_up_warning = is_dsm_alert(document["look_up_alert"]);
+    can_779.Look_down_warning = is_dsm_alert(document["look_down_alert"]);
+    can_779.Phone_call_warning = is_dsm_alert(document["phone_alert"]);
+    can_779.Smoking_warning = is_dsm_alert(document["smoking_alert"]);
+    can_779.Absence_warning = is_dsm_alert(document["absence_alert"]);
+    can_779.Frame_Tag = frame_tag_779 & 0xFF;
+    frame_tag_779 ++;
+    memset(can_779.reserved, 0, sizeof(can_779.reserved));
+    printf("can779:\n");
+    printbuf(&can_779, sizeof(can_779));
+    send_can_frame(0x779, (char *)&can_779);
+
+
+    //build can 778
+    assert(document["face_detected"].IsBool());
+    if(document["face_detected"].GetBool()){
+        assert(document["left_eye_open_faction"].IsNumber());
+        assert(document["left_eye_open_faction"].IsDouble());
+        can_778.Left_Eyelid_fraction = (uint8_t)(document["left_eye_open_faction"].GetDouble()*100);
+
+        assert(document["right_eye_open_faction"].IsNumber());
+        assert(document["right_eye_open_faction"].IsDouble());
+        can_778.Right_Eyelid_fraction = (uint8_t)(document["right_eye_open_faction"].GetDouble()*100);
+
+        assert(document.HasMember("intrinsic_pose"));
+        assert(document["intrinsic_pose"].HasMember("yaw"));
+        assert(document["intrinsic_pose"].HasMember("pitch"));
+        assert(document["intrinsic_pose"].HasMember("roll"));
+        get_dsm_pose(document["right_eye_open_faction"], &yaw, &pitch, &roll);
+        can_778.Head_Yaw = yaw;
+        can_778.Head_Pitch = pitch;
+        can_778.Head_Roll = roll;
+        can_778.reserved = 0;
+        can_778.Frame_Tag = frame_tag_778 & 0xFF;
+        frame_tag_778 ++;
+        
+        printf("can778:\n");
+        printbuf(&can_778, sizeof(can_778));
+        send_can_frame(0x778, (char *)&can_778);
+    }
     return 0;
 }
 
@@ -288,9 +600,10 @@ enum demo_protocols {
     DEMO_PROTOCOL_COUNT
 };
 
-void printbuf(uint8_t *buf, int len)
+void printbuf(void *buffer, int len)
 {
     int i;
+    uint8_t *buf = (uint8_t *)buffer;
 #ifdef DEBUG_BUF
     for(i=0; i<len; i++)
     {
@@ -391,9 +704,9 @@ static int callback_lws_communicate(struct lws *wsi, enum lws_callback_reasons r
             break;
 
         case LWS_CALLBACK_CLIENT_RECEIVE:
-            		//printf("receive: %ld\n", len);
-            		//printbuf((uint8_t *)in, (int)len);
-            unpack_recv_can_msg((uint8_t *)in, (int)len);
+            //printf("receive: %ld\n", len);
+            //printbuf((uint8_t *)in, (int)len);
+            unpack_recv_can_msg((char *)in, len);
             break;
 
         case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
@@ -503,7 +816,7 @@ static const struct lws_protocols protocols[] = {
         "lws-to-can-protocol",
         callback_lws_communicate,
         0,
-        200,
+        8192, //set recv len max
     },
     { NULL, NULL, 0, 0 } /* end */
 };
@@ -552,6 +865,10 @@ void *pthread_websocket_client(void *para)
     info.ws_ping_pong_interval = pp_secs;
     //   info.extensions = exts;
 
+
+
+
+
     context = lws_create_context(&info);
     if (context == NULL) {
         fprintf(stderr, "Creating libwebsocket context failed\n");
@@ -579,6 +896,86 @@ void *pthread_websocket_client(void *para)
     pthread_exit(NULL);
 }
 
+
+#define MAX_LOG_FILENAME_LEN    (128)
+struct cmd_line_param
+{
+    bool enable_camera;
+    bool enable_speed;
+    bool enable_gps;
+    bool enable_gsensor;
+    bool enable_mobileye;
+    bool enable_radar;
+    bool enable_radar2;
+    bool enable_fmu;
+    bool enable_wrs;
+    bool enable_can_dumper;
+    bool dump_display_unit;
+    bool enable_uart_receiver;
+    bool send_can;
+    bool test_display_unit;
+    bool show_car_info_on_disp;
+    bool enable_cmd_socket;
+    bool enable_baudrate_detect;
+    char *send_can_arg;
+    bool test_mtk_audio;
+
+    bool enable_led;
+    bool truncate_log;
+    int  display_test_patten;
+    int  speed_type;
+    int  radar2_index;
+    int  verbose;
+    char output_file[MAX_LOG_FILENAME_LEN];
+
+    bool          using_can_config;
+    HalioInitInfo hal_init_info;
+};
+struct cmd_line_param param;
+void *can_send_test(void *para)
+{
+
+    uint32_t i = 0;
+    uint32_t lasting_second = 0;
+    struct timespec ts = {0, 200 * 1000 * 1000};
+    HalIO &halio = HalIO::Instance();
+    prctl(PR_SET_NAME, "test_display");
+
+    char can_data[8] = {0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7};
+    uint8_t field_masks[8] = {
+        0x07, 0x20, 0xFF, 0x00,
+        0x0E, 0x00, 0x00, 0x03};
+    uint8_t hw_ldw_masks[8] = {
+        0x07, 0x20, 0xFF, 0x00,
+        0x0E, 0x00, 0x00, 0x03};
+
+    dsm_can_778 can_778;
+    memset(&can_778, 0x11, sizeof(can_778));
+
+
+
+    struct HalioInitInfo init_info;
+    memset(&init_info, 0, sizeof(init_info));
+
+    init_info.cs_speed = gs_car_speed_signals[param.speed_type];
+    init_info.cs_left  = gs_car_turn_signals[param.speed_type][0];
+    init_info.cs_right = gs_car_turn_signals[param.speed_type][1];
+    init_info.scenario = CAN_SCENARIO_NORMAL;
+    init_info.input_can_speed = CAN_SPEED_500K;
+
+    //init_info.speed_cb = speed_callback;
+    //init_info.raw_cb   = rawbuf_callback;
+    bool res = halio.Init(&init_info, 0x01020304);
+
+
+    while(1)
+    {
+        send_can_frame(0x778, (char *)&can_778);
+        sleep(1);
+        printf("can send!\n");
+    }
+
+}
 
 
 extern int req_flag;
@@ -622,17 +1019,18 @@ int main(int argc, char **argv)
     signal(SIGINT, sighandler);
     global_var_init();
     
+    pthread_create(&pth[0], NULL, can_send_test, NULL);
     if(pthread_create(&pth[0], NULL, pthread_tcp_process, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
     }
-#if 1
     if(pthread_create(&pth[1], NULL, pthread_websocket_client, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
     }
+#if 0
     if(pthread_create(&pth[2], NULL, pthread_encode_jpeg, NULL))
     {
         printf("pthread_create fail!\n");
@@ -648,7 +1046,6 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
-#endif
     if(pthread_create(&pth[5], NULL, pthread_snap_shot, NULL))
     {
         printf("pthread_create fail!\n");
@@ -660,6 +1057,7 @@ int main(int argc, char **argv)
         return -1;
     }
 
+#endif
     while(!force_exit)
     {
         sleep(1);
