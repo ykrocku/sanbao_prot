@@ -989,6 +989,7 @@ int build_dsm_warn_frame(int type, dsm_warningtext *uploadmsg)
     return (sizeof(*uploadmsg) + uploadmsg->mm_num*sizeof(sample_mm_info));
 }
 
+#if 0
 void recv_dsm_message(can_data_type *can)
 {
 #if 1
@@ -1101,6 +1102,90 @@ out:
     return;
 #endif
 }
+#else
+void recv_dsm_message(dsm_can_779 *msg)
+{
+    uint32_t playloadlen = 0;
+    uint8_t msgbuf[512];
+    uint8_t txbuf[512];
+    uint8_t i=0;
+    int alert_type = 0;
+    static unsigned int dsm_fatigue_warn = 0;
+    static unsigned int dsm_distract_warn = 0;
+    static unsigned int dsm_calling_warn = 0;
+    static unsigned int dsm_smoking_warn = 0;
+    static unsigned int dsm_abnormal_warn = 0;
+
+    static uint8_t dsm_alert_last[8] = {0,0,0,0,0,0,0,0};
+    uint8_t dsm_alert[8] = {0,0,0,0,0,0,0,0};
+    uint8_t dsm_alert_mask[8] = {0xFF,0xFF,0,0,0,0,0,0};
+
+    sample_prot_header *pSend = (sample_prot_header *) txbuf;
+    dsm_warningtext *uploadmsg = (dsm_warningtext *)&msgbuf[0];
+
+    if(!filter_alert_by_speed())
+        goto out;
+
+    memcpy(&dsm_alert, msg, sizeof(dsm_can_779));
+    for(i=0; i<sizeof(dsm_can_779); i++){
+        dsm_alert[i] &= dsm_alert_mask[i];
+    }
+
+    //filter the same alert
+    if(!memcmp(dsm_alert, dsm_alert_last, sizeof(dsm_alert))){
+        printf("alert is the same!\n");
+        goto out;
+    }
+
+    if(msg->Eye_Closure_Warning || msg->Yawn_warning){
+        alert_type = DSM_FATIGUE_WARN;
+        if(!filter_alert_by_time(&dsm_fatigue_warn, FILTER_DSM_ALERT_SET_TIME)){
+      //      printf("dsm filter alert by time!");
+            goto out;
+        }
+    }else if (msg->Look_up_warning || msg->Look_around_warning || msg->Look_down_warning){
+        alert_type = DSM_DISTRACT_WARN;
+        if(!filter_alert_by_time(&dsm_distract_warn, FILTER_DSM_ALERT_SET_TIME)){
+        //    printf("dsm filter alert by time!");
+            goto out;
+        }
+    }else if(msg->Phone_call_warning){
+        alert_type = DSM_CALLING_WARN;
+        if(!filter_alert_by_time(&dsm_calling_warn, FILTER_DSM_ALERT_SET_TIME)){
+          //  printf("dsm filter alert by time!");
+            goto out;
+        }
+    }else if(msg->Smoking_warning){
+        alert_type = DSM_SMOKING_WARN;
+        if(!filter_alert_by_time(&dsm_smoking_warn, FILTER_DSM_ALERT_SET_TIME)){
+            //printf("dsm filter alert by time!");
+            goto out;
+        }
+    }else if(msg->Absence_warning){
+        alert_type = DSM_ABNORMAL_WARN;
+        if(!filter_alert_by_time(&dsm_abnormal_warn, FILTER_DSM_ALERT_SET_TIME)){
+            //printf("dsm filter alert by time!");
+            goto out;
+        }
+    }else
+        goto out;
+
+    playloadlen = build_dsm_warn_frame(alert_type, uploadmsg);
+    printf("send dsm alert %d!\n", alert_type);
+    printf("dsm alert frame len = %ld\n", sizeof(*uploadmsg));
+    printbuf((uint8_t *)uploadmsg, playloadlen);
+    sample_assemble_msg_to_push(pSend, \
+            SAMPLE_DEVICE_ID_DSM,\
+            SAMPLE_CMD_WARNING_REPORT,\
+            (uint8_t *)uploadmsg,\
+            playloadlen);
+
+out:
+    memcpy(dsm_alert_last, dsm_alert, sizeof(dsm_alert));
+    return;
+}
+
+#endif
 
 
 #define SEND_PKG_TIME_OUT_1S    1000
