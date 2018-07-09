@@ -657,30 +657,30 @@ typedef struct _mm_node{
 #define SLOT_WRITING    1
 #define SLOT_READING    2
 
-char rw_flag;
-uint8_t devid;
-uint8_t warn_type;
-uint8_t mm_type;
-uint32_t mm_id;
-uint8_t time[6];
+    char rw_flag;
+    uint8_t devid;
+    uint8_t warn_type;
+    uint8_t mm_type;
+    uint32_t mm_id;
+    uint8_t time[6];
 
 } __attribute__((packed)) mm_node;
 
 #define WARN_SNAP_NUM_MAX   10
 typedef struct _InfoForStore{
 
-uint8_t flag;
-uint8_t warn_type;
-//uint8_t mm_type;
-uint8_t photo_enable;
-uint8_t sound_enable;
-uint8_t video_enable;
+    uint8_t flag;
+    uint8_t warn_type;
+    //uint8_t mm_type;
+    uint8_t photo_enable;
+    uint8_t sound_enable;
+    uint8_t video_enable;
 
-uint8_t video_time;
-uint8_t photo_time_period;
-uint8_t photo_num;
-uint32_t photo_id[WARN_SNAP_NUM_MAX];
-uint32_t video_id[2];
+    uint8_t video_time;
+    uint8_t photo_time_period;
+    uint8_t photo_num;
+    uint32_t photo_id[WARN_SNAP_NUM_MAX];
+    uint32_t video_id[2];
 
 } __attribute__((packed)) InfoForStore;
 
@@ -772,12 +772,10 @@ void printbuf(void *buf, int len);
 int can_message_send(can_data_type *sourcecan);
 void adas_para_check(adas_para_setting *para);
 
-
 void print_dsm_para(dsm_para_setting *para);
 void print_adas_para(adas_para_setting *para);
 int read_local_adas_para_file(const char* filename);
 int read_local_dsm_para_file(const char* filename);
-
 
 void recv_dsm_message( dsm_can_779 *can);
 
@@ -785,18 +783,11 @@ void produce_dsm_image(InfoForStore *mm);
 void set_dsm_para_setting_default();
 
 
-
 void insert_mm_resouce(mm_node m);
-
-
 int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t devid, uint8_t cmd,uint8_t *payload, int32_t payload_len);
-
 void get_local_time(uint8_t get_time[6]);
-
 int ratelimit_connects(unsigned int *last, unsigned int secs);
-
 void sem_send_init();
-
 
 void RealTimeDdata_process(real_time_data *data, int mode);
 
@@ -804,9 +795,9 @@ void RealTimeDdata_process(real_time_data *data, int mode);
 #define DEBUG_G
 #ifdef DEBUG_G 
 //#define MY_DEBUG(format,...) printf("File: "__FILE__", Line: %05d:\n", __LINE__, ##__VA_ARGS__)
-#define MY_DEBUG(format,...) printf(format, ##__VA_ARGS__)
+#define WSI_DEBUG(format,...) printf(format, ##__VA_ARGS__)
 #else
-#define MY_DEBUG(format,...)
+#define WSI_DEBUG(format,...)
 #endif
 
 
