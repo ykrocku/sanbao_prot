@@ -318,8 +318,6 @@ void msgpack_object_get(FILE* out, msgpack_object o, can_data_type *can)
     return;
 }
 
-
-
 int msgpack_object_dsm_get(FILE* out, msgpack_object o, can_data_type *can, uint8_t *buf, uint32_t *buflen)
 {
     enum MSG_DATA_TYPE{
@@ -431,10 +429,11 @@ int msgpack_object_dsm_get(FILE* out, msgpack_object o, can_data_type *can, uint
     return 0;
 }
 
-int dsm_parse_data_json(char *buffer);
+int dsm_parse_data_json(char *buffer, dsm_can_frame *can_frame);
 #define DSM_JSON_MSG_LEN (1024*1024)
 int unpack_recv_can_msg(char *data, size_t size)
 {
+    dsm_can_frame can_frame;
     uint32_t len = 0;
     msgpack_zone mempool;
     msgpack_object deserialized;
@@ -446,22 +445,13 @@ int unpack_recv_can_msg(char *data, size_t size)
 
 #if defined ENABLE_ADAS 
     msgpack_zone_init(&mempool, DSM_JSON_MSG_LEN);//1M
-
     msgpack_unpack((const char *)data, size, NULL, &mempool, &deserialized);
-
     memset(&can, 0, sizeof(can));
-
     msgpack_object_get(stdout, deserialized, &can);
-
     msgpack_zone_destroy(&mempool);
-
     can_message_send(&can);
 
 #elif defined ENABLE_DSM
-
-    //recv_dsm_message(&can);
- 
-
     msgpack_zone_init(&mempool, DSM_JSON_MSG_LEN);//1M
     //printbuf(data, size);
     msgpack_unpack((const char *)data, size, NULL, &mempool, &deserialized);
@@ -478,33 +468,32 @@ int unpack_recv_can_msg(char *data, size_t size)
     msgpack_zone_destroy(&mempool);
     printf("unpack:\n %s\n", buffer);
 
-    dsm_parse_data_json(buffer);
-
+    memset(&can_frame, 0, sizeof(dsm_can_frame));
+    dsm_parse_data_json(buffer, &can_frame);
+    if(can_frame.can_779_valid){
+        printf("can779:\n");
+        printbuf(&can_frame.can_779, sizeof(dsm_can_779));
+        halio.send_can_frame(0x779, (char *)&can_frame.can_779);
+        recv_dsm_message(&can_frame.can_779);
+    }
+    if(can_frame.can_778_valid){
+        printf("can778:\n");
+        printbuf(&can_frame.can_778, sizeof(dsm_can_778));
+        halio.send_can_frame(0x778, (char *)&can_frame.can_778);
+    }
     if(buffer)
         free(buffer);
-
 #endif
-
     return 0;
 }
 
-static bool is_dsm_alert(const rapidjson::Value& val)
-{
-    assert(val["alerting"].IsBool());
-    if (val.HasMember("alerting")) {
-        printf("alerting = %s\n", val["alerting"].GetBool() ? "true" : "false");
-        return (val["alerting"].GetBool());
-    }   
-
-    return 0;
-}
-
-
-static int get_dsm_alert_score(const rapidjson::Value& val)
+static int get_dsm_alert(const rapidjson::Value& val)
 {
     assert(val["score"].IsNumber());
     assert(val["score"].IsDouble());
     assert(val["alerting"].IsBool());
+    assert(val.HasMember("alerting"));
+
     if (val.HasMember("score")) {
         printf("score = %f\n", val["score"].GetDouble());
     }   
@@ -514,6 +503,7 @@ static int get_dsm_alert_score(const rapidjson::Value& val)
         return 0;
     }
 
+    //is alert
     if(val["alerting"].GetBool()){
         printf("alert!\n");
         return 2;
@@ -522,7 +512,6 @@ static int get_dsm_alert_score(const rapidjson::Value& val)
         return 1;
     }
 }
-
 
 static bool get_dsm_pose(const rapidjson::Value& val, uint8_t *yaw, uint8_t *pitch, uint8_t *roll)
 {
@@ -544,13 +533,10 @@ static bool get_dsm_pose(const rapidjson::Value& val, uint8_t *yaw, uint8_t *pit
     return true;
 }
 
-
-int dsm_parse_data_json(char *buffer)
+int dsm_parse_data_json(char *buffer, dsm_can_frame *can_frame)
 {
     Document document;  // Default template parameter uses UTF8 and MemoryPoolAllocator.
-    dsm_can_778 can_778;
-    dsm_can_779 can_779;
-    static uint32_t frame_tag_778 = 0, frame_tag_779 = 0;
+    static uint32_t s_frame_tag_778 = 0, s_frame_tag_779 = 0;
     uint8_t yaw = 0, pitch = 0, roll = 0;
 
     // In-situ parsing, decode strings directly in the source string. Source must be string.
@@ -569,33 +555,19 @@ int dsm_parse_data_json(char *buffer)
     assert(document.HasMember("absence_alert"));
 
     //build can 779
-#if 0
-    can_779.Eye_Closure_Warning = is_dsm_alert(document["eye_alert"]);
-    can_779.Yawn_warning = is_dsm_alert(document["yawn_alert"]);
-    can_779.Look_around_warning = is_dsm_alert(document["look_around_alert"]);
-    can_779.Look_up_warning = is_dsm_alert(document["look_up_alert"]);
-    can_779.Look_down_warning = is_dsm_alert(document["look_down_alert"]);
-    can_779.Phone_call_warning = is_dsm_alert(document["phone_alert"]);
-    can_779.Smoking_warning = is_dsm_alert(document["smoking_alert"]);
-    can_779.Absence_warning = is_dsm_alert(document["absence_alert"]);
-#else
-    can_779.Eye_Closure_Warning = get_dsm_alert_score(document["eye_alert"]);
-    can_779.Yawn_warning = get_dsm_alert_score(document["yawn_alert"]);
-    can_779.Look_around_warning = get_dsm_alert_score(document["look_around_alert"]);
-    can_779.Look_up_warning = get_dsm_alert_score(document["look_up_alert"]);
-    can_779.Look_down_warning = get_dsm_alert_score(document["look_down_alert"]);
-    can_779.Phone_call_warning = get_dsm_alert_score(document["phone_alert"]);
-    can_779.Smoking_warning = get_dsm_alert_score(document["smoking_alert"]);
-    can_779.Absence_warning = get_dsm_alert_score(document["absence_alert"]);
-#endif
+    can_frame->can_779.Eye_Closure_Warning = get_dsm_alert(document["eye_alert"]);
+    can_frame->can_779.Yawn_warning = get_dsm_alert(document["yawn_alert"]);
+    can_frame->can_779.Look_around_warning = get_dsm_alert(document["look_around_alert"]);
+    can_frame->can_779.Look_up_warning = get_dsm_alert(document["look_up_alert"]);
+    can_frame->can_779.Look_down_warning = get_dsm_alert(document["look_down_alert"]);
+    can_frame->can_779.Phone_call_warning = get_dsm_alert(document["phone_alert"]);
+    can_frame->can_779.Smoking_warning = get_dsm_alert(document["smoking_alert"]);
+    can_frame->can_779.Absence_warning = get_dsm_alert(document["absence_alert"]);
 
-    can_779.Frame_Tag = frame_tag_779 & 0xFF;
-    frame_tag_779 ++;
-    memset(can_779.reserved, 0, sizeof(can_779.reserved));
-    printf("can779:\n");
-    printbuf(&can_779, sizeof(can_779));
-    halio.send_can_frame(0x779, (char *)&can_779);
-
+    can_frame->can_779.Frame_Tag = s_frame_tag_779 & 0xFF;
+    s_frame_tag_779 ++;
+    memset(can_frame->can_779.reserved, 0, sizeof(can_frame->can_779.reserved));
+    can_frame->can_779_valid = 1;
 
     //build can 778
     assert(document["face_detected"].IsBool());
@@ -603,27 +575,24 @@ int dsm_parse_data_json(char *buffer)
         printf("face detected!\n");
         assert(document["left_eye_open_faction"].IsNumber());
         assert(document["left_eye_open_faction"].IsDouble());
-        can_778.Left_Eyelid_fraction = (uint8_t)(document["left_eye_open_faction"].GetDouble()*100);
+        can_frame->can_778.Left_Eyelid_fraction = (uint8_t)(document["left_eye_open_faction"].GetDouble()*100);
 
         assert(document["right_eye_open_faction"].IsNumber());
         assert(document["right_eye_open_faction"].IsDouble());
-        can_778.Right_Eyelid_fraction = (uint8_t)(document["right_eye_open_faction"].GetDouble()*100);
+        can_frame->can_778.Right_Eyelid_fraction = (uint8_t)(document["right_eye_open_faction"].GetDouble()*100);
 
         assert(document.HasMember("intrinsic_pose"));
         assert(document["intrinsic_pose"].HasMember("yaw"));
         assert(document["intrinsic_pose"].HasMember("pitch"));
         assert(document["intrinsic_pose"].HasMember("roll"));
         get_dsm_pose(document["intrinsic_pose"], &yaw, &pitch, &roll);
-        can_778.Head_Yaw = yaw;
-        can_778.Head_Pitch = pitch;
-        can_778.Head_Roll = roll;
-        memset(can_778.reserved, 0, sizeof(can_778.reserved));
-        can_778.Frame_Tag = frame_tag_778 & 0xFF;
-        frame_tag_778 ++;
-        
-        printf("can778:\n");
-        printbuf(&can_778, sizeof(can_778));
-        halio.send_can_frame(0x778, (char *)&can_778);
+        can_frame->can_778.Head_Yaw = yaw;
+        can_frame->can_778.Head_Pitch = pitch;
+        can_frame->can_778.Head_Roll = roll;
+        memset(can_frame->can_778.reserved, 0, sizeof(can_frame->can_778.reserved));
+        can_frame->can_778.Frame_Tag = s_frame_tag_778 & 0xFF;
+        s_frame_tag_778 ++;
+        can_frame->can_778_valid = 1;
     }
     return 0;
 }
@@ -860,6 +829,7 @@ static const struct lws_protocols protocols[] = {
 void sighandler(int sig)
 {
     force_exit = 1;
+    //exit(0);
 }
 int ratelimit_connects(unsigned int *last, unsigned int secs)
 {
@@ -900,11 +870,6 @@ void *pthread_websocket_client(void *para)
     info.uid = -1;
     info.ws_ping_pong_interval = pp_secs;
     //   info.extensions = exts;
-
-
-
-
-
     context = lws_create_context(&info);
     if (context == NULL) {
         fprintf(stderr, "Creating libwebsocket context failed\n");
@@ -948,45 +913,11 @@ size_t ReadFile(char *buf, int len, const char *filename)
     return size;
 }
 
-void *can_send_test(void *para)
-{
-
-    //HalIO &halio = HalIO::Instance();
-    prctl(PR_SET_NAME, "test_display");
-
-    char can_data[8] = {0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7};
-    uint8_t field_masks[8] = {
-        0x07, 0x20, 0xFF, 0x00,
-        0x0E, 0x00, 0x00, 0x03};
-
-    dsm_can_778 can_778;
-    memset(&can_778, 0x11, sizeof(can_778));
-    halio.Init(NULL, 0, true);
-    sleep(100000);
-
-    char buffer[1024*4];
-    if(0 == ReadFile(buffer, sizeof(buffer), "./json.txt")){
-        return NULL;
-    }
-    printf("read JSON:\n %s\n", buffer);
-    dsm_parse_data_json(buffer);
-    while(1)
-    {
-        halio.send_can_frame(0x778, (char *)&can_778);
-        //halio.send_can_frame(0x760, (char *)&can_778);
-        sleep(1);
-        printf("can send!\n");
-    }
-
-}
-
 void can_send_init(void)
 {
-
     //HalIO &halio = HalIO::Instance();
     halio.Init(NULL, 0, true);
 }
-
 
 extern int req_flag;
 extern pthread_mutex_t  req_mutex;
@@ -999,7 +930,6 @@ extern pthread_cond_t   tcp_recv_cond;
 extern int save_mp4;
 extern pthread_mutex_t  save_mp4_mutex;
 extern pthread_cond_t   save_mp4_cond;
-
 
 void pthread_exit_notice(void)
 {
@@ -1028,15 +958,13 @@ int main(int argc, char **argv)
 
     signal(SIGINT, sighandler);
     global_var_init();
-    can_send_init();
+    //can_send_init();
     
-    //pthread_create(&pth[0], NULL, can_send_test, NULL);
     if(pthread_create(&pth[0], NULL, pthread_websocket_client, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
     }
-#if 0
     if(pthread_create(&pth[1], NULL, pthread_tcp_process, NULL))
     {
         printf("pthread_create fail!\n");
@@ -1067,8 +995,7 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
-#endif
-#if 0
+#if 1
     while(!force_exit)
     {
         sleep(1);
@@ -1076,7 +1003,6 @@ int main(int argc, char **argv)
 #endif
     pthread_join(pth[0], NULL);
     printf("join %d\n", i++);
-#if 0
     pthread_join(pth[1], NULL);
     printf("join %d\n", i++);
     pthread_join(pth[2], NULL);
@@ -1091,7 +1017,6 @@ int main(int argc, char **argv)
     printf("join %d\n", i++);
     pthread_join(pth[7], NULL);
     printf("join %d\n", i++);
-#endif
     return 0;
 }
 

@@ -504,6 +504,17 @@ typedef struct __dsm_can_779 {
 
 } __attribute__((packed)) dsm_can_779;
 
+
+typedef struct __dsm_can_frame {
+    char can_779_valid;
+    char can_778_valid;
+
+    dsm_can_779 can_779;
+    dsm_can_778 can_778;
+} __attribute__((packed)) dsm_can_frame;
+
+
+
 /**********************can message*****************************/
 typedef struct _can_struct{
     uint8_t warning[8];
@@ -768,7 +779,7 @@ int read_local_adas_para_file(const char* filename);
 int read_local_dsm_para_file(const char* filename);
 
 
-void recv_dsm_message( can_data_type *can);
+void recv_dsm_message( dsm_can_779 *can);
 
 void produce_dsm_image(InfoForStore *mm);
 void set_dsm_para_setting_default();

@@ -32,7 +32,6 @@ using namespace std;
 
 static int32_t sample_send_image(uint8_t devid);
 
-
 extern volatile int force_exit;
 
 int hostsock = -1;
@@ -40,12 +39,8 @@ int hostsock = -1;
 void parse_cmd(uint8_t *buf, uint8_t *msgbuf);
 static uint32_t unescaple_msg(uint8_t *buf, uint8_t *msg, int msglen);
 
-
-
 sem_t send_data;
 //pthread_mutex_t  send_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-
 
 void sem_send_init()
 {
@@ -316,139 +311,6 @@ static int ptr_queue_pop(queue<ptr_queue_node*> *p, ptr_queue_node *out,  pthrea
     return 0;
 }
 
-void free_header_node(queue<ptr_queue_node*> *p, pthread_mutex_t *lock)
-{
-    ptr_queue_node *header = NULL;
-    if(!p)
-        return;
-
-    pthread_mutex_lock(lock);
-    if(!p->empty())
-    {
-        header = p->front();
-        p->pop();
-        free(header->buf);
-        free(header);
-    }
-    pthread_mutex_unlock(lock);
-}
-
-static int read_header_node(queue<ptr_queue_node*> *p, SendStatus *out, pthread_mutex_t *lock)
-{
-    ptr_queue_node *header = NULL;
-    int ret;
-
-    if(!p)
-        return 1;
-
-    pthread_mutex_lock(lock);
-
-    if(!p->empty())
-    {
-        header = p->front();
-        memcpy(out, &header->pkg, sizeof(header->pkg));
-        ret = 0;
-        goto out;
-    }
-    else
-    {
-        ret = 1;
-        goto out;
-    }
-
-out:
-    pthread_mutex_unlock(lock);
-    return ret;
-}
-
-
-static int pop_header_node(queue<ptr_queue_node*> *p, SendStatus *out, pthread_mutex_t *lock)
-{
-    ptr_queue_node *header = NULL;
-    int ret;
-
-    if(!p)
-        return 1;
-
-    pthread_mutex_lock(lock);
-
-    if(!p->empty())
-    {
-        header = p->front();
-        memcpy(out, &header->pkg, sizeof(header->pkg));
-        p->pop();
-        ret = 0;
-        goto out;
-    }
-    else
-    {
-        ret = 1;
-        goto out;
-    }
-
-out:
-    pthread_mutex_unlock(lock);
-    return ret;
-}
-
-
-
-static int write_header_node(queue<ptr_queue_node*> *p, SendStatus *in, pthread_mutex_t *lock)
-{
-    ptr_queue_node *header = NULL;
-    int ret;
-
-    if(!p)
-        return 1;
-
-    pthread_mutex_lock(lock);
-
-    if(!p->empty())
-    {
-        header = p->front();
-        memcpy(&header->pkg, in, sizeof(header->pkg));
-        ret = 0;
-        goto out;
-    }
-    else
-    {
-        ret = 1;
-        goto out;
-    }
-
-out:
-    pthread_mutex_unlock(lock);
-    return ret;
-}
-
-static int get_node_buf(queue<ptr_queue_node*> *p, uint8_t *out, int *len, pthread_mutex_t *lock)
-{
-    ptr_queue_node *header = NULL;
-    int ret = 0;
-
-    if(!p)
-        return -1;
-
-    pthread_mutex_lock(lock);
-    if(!p->empty())
-    {
-        header = p->front();
-        //p->pop();
-        memcpy(out, header->buf, header->len);
-        *len = header->len;
-
-        ret = 0;
-        goto out;
-    }
-    else
-    {
-        ret = 1;
-        goto out;
-    }
-out:
-    pthread_mutex_unlock(lock);
-    return ret;
-}
 
 //return 0, 超时，单位是毫秒 
 int timeout_trigger(struct timeval *tv, int ms)
@@ -497,17 +359,9 @@ static int unblock_write(int sock, uint8_t *buf, int len)
     int ret = 0;
     int offset = 0;
 
-    if(len <0 || len >1400)
-    {
-        printf("write len = %d.............\n", len);
-    }
-
-    if(sock < 0 || len < 0 || !buf)
-    {
+    if(sock < 0 || len < 0 || !buf){
         return -1;
-    }
-    else
-    {
+    } else{
         while(offset < len)
         {
             ret = write(sock, &buf[offset], len-offset);
@@ -1187,6 +1041,133 @@ out:
 
 #endif
 
+#if 0
+void free_header_node(queue<ptr_queue_node*> *p, pthread_mutex_t *lock)
+{
+    ptr_queue_node *header = NULL;
+    if(!p)
+        return;
+
+    pthread_mutex_lock(lock);
+    if(!p->empty())
+    {
+        header = p->front();
+        p->pop();
+        free(header->buf);
+        free(header);
+    }
+    pthread_mutex_unlock(lock);
+}
+static int read_header_node(queue<ptr_queue_node*> *p, SendStatus *out, pthread_mutex_t *lock)
+{
+    ptr_queue_node *header = NULL;
+    int ret;
+
+    if(!p)
+        return 1;
+
+    pthread_mutex_lock(lock);
+
+    if(!p->empty())
+    {
+        header = p->front();
+        memcpy(out, &header->pkg, sizeof(header->pkg));
+        ret = 0;
+        goto out;
+    }
+    else
+    {
+        ret = 1;
+        goto out;
+    }
+
+out:
+    pthread_mutex_unlock(lock);
+    return ret;
+}
+static int pop_header_node(queue<ptr_queue_node*> *p, SendStatus *out, pthread_mutex_t *lock)
+{
+    ptr_queue_node *header = NULL;
+    int ret;
+
+    if(!p)
+        return 1;
+
+    pthread_mutex_lock(lock);
+
+    if(!p->empty())
+    {
+        header = p->front();
+        memcpy(out, &header->pkg, sizeof(header->pkg));
+        p->pop();
+        ret = 0;
+        goto out;
+    }
+    else
+    {
+        ret = 1;
+        goto out;
+    }
+
+out:
+    pthread_mutex_unlock(lock);
+    return ret;
+}
+static int write_header_node(queue<ptr_queue_node*> *p, SendStatus *in, pthread_mutex_t *lock)
+{
+    ptr_queue_node *header = NULL;
+    int ret;
+
+    if(!p)
+        return 1;
+
+    pthread_mutex_lock(lock);
+
+    if(!p->empty())
+    {
+        header = p->front();
+        memcpy(&header->pkg, in, sizeof(header->pkg));
+        ret = 0;
+        goto out;
+    }
+    else
+    {
+        ret = 1;
+        goto out;
+    }
+
+out:
+    pthread_mutex_unlock(lock);
+    return ret;
+}
+static int get_node_buf(queue<ptr_queue_node*> *p, uint8_t *out, int *len, pthread_mutex_t *lock)
+{
+    ptr_queue_node *header = NULL;
+    int ret = 0;
+
+    if(!p)
+        return -1;
+
+    pthread_mutex_lock(lock);
+    if(!p->empty())
+    {
+        header = p->front();
+        //p->pop();
+        memcpy(out, header->buf, header->len);
+        *len = header->len;
+
+        ret = 0;
+        goto out;
+    }
+    else
+    {
+        ret = 1;
+        goto out;
+    }
+out:
+    pthread_mutex_unlock(lock);
+    return ret;
+}
 
 #define SEND_PKG_TIME_OUT_1S    1000
 static int send_pkg_to_host(int sock, uint8_t *buf)
@@ -1247,6 +1228,9 @@ static int send_pkg_to_host(int sock, uint8_t *buf)
 out:
     return retval;
 }
+#endif
+
+
 
 static int send_package(int sock, uint8_t *buf)
 {
@@ -1347,6 +1331,7 @@ out:
     pthread_exit(NULL);
 }
 
+#if 0
 static int uchar_queue_push(uint8_t *ch)
 {
     int ret = -1;
@@ -1370,7 +1355,6 @@ out:
     pthread_mutex_unlock(&uchar_queue_lock);
     return ret;
 }
-
 static int8_t uchar_queue_pop(uint8_t *ch)
 {
     int ret = -1;
@@ -1394,6 +1378,7 @@ out:
     pthread_mutex_unlock(&uchar_queue_lock);
     return ret;
 }
+#endif
 
 static uint8_t sample_calc_sum(sample_prot_header *pHeader, int32_t msg_len)
 {
@@ -2577,11 +2562,7 @@ void *pthread_tcp_process(void *para)
     int i=0;
     static int tcprecvcnt = 0;
     uint8_t *readbuf = NULL;
-    uint8_t *writebuf = NULL;
     uint8_t *msgbuf = NULL;
-
-    sample_prot_header *pHeader = NULL;
-    pHeader = (sample_prot_header *) msgbuf;
 
     prctl(PR_SET_NAME, "tcp_process");
     send_stat_pkg_init();
@@ -2622,8 +2603,7 @@ connect_again:
             //MY_DEBUG("recv raw cmd, tcprecvcnt = %d:\n", tcprecvcnt++);
             //printbuf(readbuf, ret);
             i=0;
-            while(ret--)
-            {
+            while(ret--){
                 parse_cmd(&readbuf[i++], msgbuf);
             }
         }

@@ -276,6 +276,7 @@ std::string get_latitude_msg()
             (tmp.latitude*1.0)/1000000, (tmp.longitude*1.0)/1000000,tmp.car_speed);
 
     printf("latitude: %s\n", msg);
+    return msg;
 }
 
 
