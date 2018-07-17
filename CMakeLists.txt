@@ -96,7 +96,7 @@ ELSEIF(ANDROID_ABI)
     IF (ADAS)
         ADD_DEFINITIONS(-DENABLE_ADAS)
     ELSE()
-        ADD_DEFINITIONS(-DENABLE_DSM)
+        ADD_DEFINITIONS(-DENABLE_DMS)
     ENDIF()
 
     ADD_EXECUTABLE(wsi wsi.cpp process.cpp rb_rw.cpp prot.cpp)

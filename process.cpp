@@ -500,37 +500,37 @@ void get_adas_Info_for_store(uint8_t type, InfoForStore *mm_store)
     }
 }
 
-void get_dsm_Info_for_store(uint8_t type, InfoForStore *mm_store)
+void get_dms_Info_for_store(uint8_t type, InfoForStore *mm_store)
 {
-    dsm_para_setting para;
+    dms_para_setting para;
 
-    read_dev_para(&para, SAMPLE_DEVICE_ID_DSM);
+    read_dev_para(&para, SAMPLE_DEVICE_ID_DMS);
     mm_store->warn_type = type;
     switch(type)
     {
-        case DSM_FATIGUE_WARN:
-        case DSM_CALLING_WARN:
-        case DSM_SMOKING_WARN:
-        case DSM_DISTRACT_WARN:
-        case DSM_ABNORMAL_WARN:
+        case DMS_FATIGUE_WARN:
+        case DMS_CALLING_WARN:
+        case DMS_SMOKING_WARN:
+        case DMS_DISTRACT_WARN:
+        case DMS_ABNORMAL_WARN:
 
-            if(type == DSM_FATIGUE_WARN){
+            if(type == DMS_FATIGUE_WARN){
                 mm_store->photo_num = para.FatigueDriv_PhotoNum;
                 mm_store->photo_time_period = para.FatigueDriv_PhotoInterval;
                 mm_store->video_time = para.FatigueDriv_VideoTime;
-            }else if(type == DSM_CALLING_WARN){
+            }else if(type == DMS_CALLING_WARN){
                 mm_store->photo_num = para.CallingDriv_PhotoNum;
                 mm_store->photo_time_period = para.CallingDriv_PhotoInterval;
                 mm_store->video_time = para.CallingDriv_VideoTime;
-            }else if(type == DSM_SMOKING_WARN){
+            }else if(type == DMS_SMOKING_WARN){
                 mm_store->photo_num = para.SmokingDriv_PhotoNum;
                 mm_store->photo_time_period = para.SmokingDriv_PhotoInterval;
                 mm_store->video_time = para.SmokingDriv_VideoTime;
-            }else if(type == DSM_DISTRACT_WARN){
+            }else if(type == DMS_DISTRACT_WARN){
                 mm_store->photo_num = para.DistractionDriv_PhotoNum;
                 mm_store->photo_time_period = para.DistractionDriv_PhotoInterval;
                 mm_store->video_time = para.DistractionDriv_VideoTime;
-            }else if(type == DSM_ABNORMAL_WARN){
+            }else if(type == DMS_ABNORMAL_WARN){
                 mm_store->photo_num = para.AbnormalDriv_PhotoNum;
                 mm_store->photo_time_period = para.AbnormalDriv_PhotoInterval;
                 mm_store->video_time = para.AbnormalDriv_VideoTime;
@@ -548,10 +548,10 @@ void get_dsm_Info_for_store(uint8_t type, InfoForStore *mm_store)
                 mm_store->photo_enable = 0; 
 
 
-        case DSM_DRIVER_CHANGE:
+        case DMS_DRIVER_CHANGE:
             break;
 
-        case DSM_SANPSHOT_EVENT:
+        case DMS_SANPSHOT_EVENT:
             mm_store->photo_num = para.photo_num;
             mm_store->photo_time_period = para.photo_time_period;
             mm_store->photo_enable = 1; 
@@ -658,7 +658,7 @@ int build_adas_warn_frame(int type, warningtext *uploadmsg)
             push_mm_queue(&mm);
 
 #if 1
-            //add dsm video
+            //add dms video
 
             if(mm.video_enable){
                 mm.video_enable = 1; 
@@ -708,19 +708,19 @@ int build_adas_warn_frame(int type, warningtext *uploadmsg)
 
 
 /*********************************
-* func: build dsm warning package
+* func: build dms warning package
 * return: framelen
 *********************************/
-int build_dsm_warn_frame(int type, dsm_warningtext *uploadmsg)
+int build_dms_warn_frame(int type, dms_warningtext *uploadmsg)
 {
     int i=0;
     InfoForStore mm;
-    dsm_para_setting para;
+    dms_para_setting para;
     real_time_data tmp;
 
-    read_dev_para(&para, SAMPLE_DEVICE_ID_DSM);
+    read_dev_para(&para, SAMPLE_DEVICE_ID_DMS);
     memset(&mm, 0, sizeof(mm));
-    get_dsm_Info_for_store(type, &mm);
+    get_dms_Info_for_store(type, &mm);
 
     uploadmsg->warning_id = MY_HTONL(get_next_id(WARNING_ID_MODE, NULL, 0));
     uploadmsg->sound_type = type;
@@ -739,15 +739,15 @@ int build_dsm_warn_frame(int type, dsm_warningtext *uploadmsg)
 
     switch(type)
     {
-        case DSM_FATIGUE_WARN:
-        case DSM_CALLING_WARN:
-        case DSM_SMOKING_WARN:
-        case DSM_DISTRACT_WARN:
-        case DSM_ABNORMAL_WARN:
+        case DMS_FATIGUE_WARN:
+        case DMS_CALLING_WARN:
+        case DMS_SMOKING_WARN:
+        case DMS_DISTRACT_WARN:
+        case DMS_ABNORMAL_WARN:
             
             if(mm.photo_enable)
             {
-                WSI_DEBUG("dsm photo_enbale! num = %d\n", mm.photo_num);
+                WSI_DEBUG("dms photo_enbale! num = %d\n", mm.photo_num);
                 get_next_id(MM_ID_MODE, mm.photo_id, mm.photo_num);
                 for(i=0; i<mm.photo_num; i++)
                 {
@@ -759,7 +759,7 @@ int build_dsm_warn_frame(int type, dsm_warningtext *uploadmsg)
             }
             if(mm.video_enable)
             {
-                WSI_DEBUG("dsm video_enbale!\n");
+                WSI_DEBUG("dms video_enbale!\n");
                 get_next_id(MM_ID_MODE, mm.video_id, 1);
                 uploadmsg->mm_num++;
                 uploadmsg->mm[i].type = MM_VIDEO;
@@ -790,10 +790,10 @@ int build_dsm_warn_frame(int type, dsm_warningtext *uploadmsg)
 
             break;
 
-        case DSM_DRIVER_CHANGE:
+        case DMS_DRIVER_CHANGE:
             break;
 
-        case DSM_SANPSHOT_EVENT:
+        case DMS_SANPSHOT_EVENT:
             if(mm.photo_enable)
             {
                 mm.warn_type = type;
@@ -816,27 +816,27 @@ int build_dsm_warn_frame(int type, dsm_warningtext *uploadmsg)
 }
 
 #if 0
-void recv_dsm_message(can_data_type *can)
+void recv_dms_message(can_data_type *can)
 {
 #if 1
-    dsm_alert_info msg;
+    dms_alert_info msg;
     uint32_t playloadlen = 0;
     uint8_t msgbuf[512];
     uint8_t txbuf[512];
     uint8_t i=0;
     int alert_type = 0;
-    static unsigned int dsm_fatigue_warn = 0;
-    static unsigned int dsm_distract_warn = 0;
-    static unsigned int dsm_calling_warn = 0;
-    static unsigned int dsm_smoking_warn = 0;
-    static unsigned int dsm_abnormal_warn = 0;
+    static unsigned int dms_fatigue_warn = 0;
+    static unsigned int dms_distract_warn = 0;
+    static unsigned int dms_calling_warn = 0;
+    static unsigned int dms_smoking_warn = 0;
+    static unsigned int dms_abnormal_warn = 0;
 
-    static uint8_t dsm_alert_last[8] = {0,0,0,0,0,0,0,0};
-    uint8_t dsm_alert[8] = {0,0,0,0,0,0,0,0};
-    uint8_t dsm_alert_mask[8] = {0xFF,0xFF,0,0,0,0,0,0};
+    static uint8_t dms_alert_last[8] = {0,0,0,0,0,0,0,0};
+    uint8_t dms_alert[8] = {0,0,0,0,0,0,0,0};
+    uint8_t dms_alert_mask[8] = {0xFF,0xFF,0,0,0,0,0,0};
 
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
-    dsm_warningtext *uploadmsg = (dsm_warningtext *)&msgbuf[0];
+    dms_warningtext *uploadmsg = (dms_warningtext *)&msgbuf[0];
 
 #if 0
     printf("soure: %s\n", can->source);
@@ -852,11 +852,11 @@ void recv_dsm_message(can_data_type *can)
 
     for(i=0; i<sizeof(can->warning); i++)
     {
-        dsm_alert[i] = can->warning[i] & dsm_alert_mask[i];
+        dms_alert[i] = can->warning[i] & dms_alert_mask[i];
     }
 
     //filter the same alert
-    if(!memcmp(dsm_alert, dsm_alert_last, sizeof(dsm_alert)))
+    if(!memcmp(dms_alert, dms_alert_last, sizeof(dms_alert)))
     {
         printf("alert is the same!\n");
         goto out;
@@ -874,140 +874,140 @@ void recv_dsm_message(can_data_type *can)
 #endif
 
     if(msg.alert_eye_close1 || msg.alert_eye_close2 || msg.alert_yawn || msg.alert_bow){
-        alert_type = DSM_FATIGUE_WARN;
-        if(!filter_alert_by_time(&dsm_fatigue_warn, FILTER_DSM_ALERT_SET_TIME))
+        alert_type = DMS_FATIGUE_WARN;
+        if(!filter_alert_by_time(&dms_fatigue_warn, FILTER_DMS_ALERT_SET_TIME))
         {
-      //      printf("dsm filter alert by time!");
+      //      printf("dms filter alert by time!");
             goto out;
         }
     }else if (msg.alert_look_around ){
-        alert_type = DSM_DISTRACT_WARN;
-        if(!filter_alert_by_time(&dsm_distract_warn, FILTER_DSM_ALERT_SET_TIME))
+        alert_type = DMS_DISTRACT_WARN;
+        if(!filter_alert_by_time(&dms_distract_warn, FILTER_DMS_ALERT_SET_TIME))
         {
-        //    printf("dsm filter alert by time!");
+        //    printf("dms filter alert by time!");
             goto out;
         }
     }else if(msg.alert_phone){
-        alert_type = DSM_CALLING_WARN;
-        if(!filter_alert_by_time(&dsm_calling_warn, FILTER_DSM_ALERT_SET_TIME))
+        alert_type = DMS_CALLING_WARN;
+        if(!filter_alert_by_time(&dms_calling_warn, FILTER_DMS_ALERT_SET_TIME))
         {
-          //  printf("dsm filter alert by time!");
+          //  printf("dms filter alert by time!");
             goto out;
         }
     }else if(msg.alert_smoking){
-        alert_type = DSM_SMOKING_WARN;
-        if(!filter_alert_by_time(&dsm_smoking_warn, FILTER_DSM_ALERT_SET_TIME))
+        alert_type = DMS_SMOKING_WARN;
+        if(!filter_alert_by_time(&dms_smoking_warn, FILTER_DMS_ALERT_SET_TIME))
         {
-            //printf("dsm filter alert by time!");
+            //printf("dms filter alert by time!");
             goto out;
         }
     }else if(msg.alert_absence){
-        alert_type = DSM_ABNORMAL_WARN;
-        if(!filter_alert_by_time(&dsm_abnormal_warn, FILTER_DSM_ALERT_SET_TIME))
+        alert_type = DMS_ABNORMAL_WARN;
+        if(!filter_alert_by_time(&dms_abnormal_warn, FILTER_DMS_ALERT_SET_TIME))
         {
-            //printf("dsm filter alert by time!");
+            //printf("dms filter alert by time!");
             goto out;
         }
     }else
         goto out;
 
 #if 1
-    playloadlen = build_dsm_warn_frame(alert_type, uploadmsg);
-    printf("send dsm alert %d!\n", alert_type);
-    printf("dsm alert frame len = %ld\n", sizeof(*uploadmsg));
+    playloadlen = build_dms_warn_frame(alert_type, uploadmsg);
+    printf("send dms alert %d!\n", alert_type);
+    printf("dms alert frame len = %ld\n", sizeof(*uploadmsg));
     printbuf((uint8_t *)uploadmsg, playloadlen);
     sample_assemble_msg_to_push(pSend, \
-            SAMPLE_DEVICE_ID_DSM,\
+            SAMPLE_DEVICE_ID_DMS,\
             SAMPLE_CMD_WARNING_REPORT,\
             (uint8_t *)uploadmsg,\
             playloadlen);
 #endif
 
 out:
-    memcpy(dsm_alert_last, dsm_alert, sizeof(dsm_alert));
+    memcpy(dms_alert_last, dms_alert, sizeof(dms_alert));
     return;
 #endif
 }
 #else
-void recv_dsm_message(dsm_can_779 *msg)
+void recv_dms_message(dms_can_779 *msg)
 {
     uint32_t playloadlen = 0;
     uint8_t msgbuf[512];
     uint8_t txbuf[512];
     uint8_t i=0;
     int alert_type = 0;
-    static unsigned int dsm_fatigue_warn = 0;
-    static unsigned int dsm_distract_warn = 0;
-    static unsigned int dsm_calling_warn = 0;
-    static unsigned int dsm_smoking_warn = 0;
-    static unsigned int dsm_abnormal_warn = 0;
+    static unsigned int dms_fatigue_warn = 0;
+    static unsigned int dms_distract_warn = 0;
+    static unsigned int dms_calling_warn = 0;
+    static unsigned int dms_smoking_warn = 0;
+    static unsigned int dms_abnormal_warn = 0;
 
-    static uint8_t dsm_alert_last[8] = {0,0,0,0,0,0,0,0};
-    uint8_t dsm_alert[8] = {0,0,0,0,0,0,0,0};
-    uint8_t dsm_alert_mask[8] = {0xFF,0xFF,0,0,0,0,0,0};
+    static uint8_t dms_alert_last[8] = {0,0,0,0,0,0,0,0};
+    uint8_t dms_alert[8] = {0,0,0,0,0,0,0,0};
+    uint8_t dms_alert_mask[8] = {0xFF,0xFF,0,0,0,0,0,0};
 
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
-    dsm_warningtext *uploadmsg = (dsm_warningtext *)&msgbuf[0];
+    dms_warningtext *uploadmsg = (dms_warningtext *)&msgbuf[0];
 
     if(!filter_alert_by_speed())
         goto out;
 
-    memcpy(&dsm_alert, msg, sizeof(dsm_can_779));
-    for(i=0; i<sizeof(dsm_can_779); i++){
-        dsm_alert[i] &= dsm_alert_mask[i];
+    memcpy(&dms_alert, msg, sizeof(dms_can_779));
+    for(i=0; i<sizeof(dms_can_779); i++){
+        dms_alert[i] &= dms_alert_mask[i];
     }
 
     //filter the same alert
-    if(!memcmp(dsm_alert, dsm_alert_last, sizeof(dsm_alert))){
+    if(!memcmp(dms_alert, dms_alert_last, sizeof(dms_alert))){
         printf("filter the same alert!\n");
         goto out;
     }
 
     if(msg->Eye_Closure_Warning || msg->Yawn_warning){
-        alert_type = DSM_FATIGUE_WARN;
-        if(!filter_alert_by_time(&dsm_fatigue_warn, FILTER_DSM_ALERT_SET_TIME)){
-      //      printf("dsm filter alert by time!");
+        alert_type = DMS_FATIGUE_WARN;
+        if(!filter_alert_by_time(&dms_fatigue_warn, FILTER_DMS_ALERT_SET_TIME)){
+      //      printf("dms filter alert by time!");
             goto out;
         }
     }else if (msg->Look_up_warning || msg->Look_around_warning || msg->Look_down_warning){
-        alert_type = DSM_DISTRACT_WARN;
-        if(!filter_alert_by_time(&dsm_distract_warn, FILTER_DSM_ALERT_SET_TIME)){
-        //    printf("dsm filter alert by time!");
+        alert_type = DMS_DISTRACT_WARN;
+        if(!filter_alert_by_time(&dms_distract_warn, FILTER_DMS_ALERT_SET_TIME)){
+        //    printf("dms filter alert by time!");
             goto out;
         }
     }else if(msg->Phone_call_warning){
-        alert_type = DSM_CALLING_WARN;
-        if(!filter_alert_by_time(&dsm_calling_warn, FILTER_DSM_ALERT_SET_TIME)){
-          //  printf("dsm filter alert by time!");
+        alert_type = DMS_CALLING_WARN;
+        if(!filter_alert_by_time(&dms_calling_warn, FILTER_DMS_ALERT_SET_TIME)){
+          //  printf("dms filter alert by time!");
             goto out;
         }
     }else if(msg->Smoking_warning){
-        alert_type = DSM_SMOKING_WARN;
-        if(!filter_alert_by_time(&dsm_smoking_warn, FILTER_DSM_ALERT_SET_TIME)){
-            //printf("dsm filter alert by time!");
+        alert_type = DMS_SMOKING_WARN;
+        if(!filter_alert_by_time(&dms_smoking_warn, FILTER_DMS_ALERT_SET_TIME)){
+            //printf("dms filter alert by time!");
             goto out;
         }
     }else if(msg->Absence_warning){
-        alert_type = DSM_ABNORMAL_WARN;
-        if(!filter_alert_by_time(&dsm_abnormal_warn, FILTER_DSM_ALERT_SET_TIME)){
-            //printf("dsm filter alert by time!");
+        alert_type = DMS_ABNORMAL_WARN;
+        if(!filter_alert_by_time(&dms_abnormal_warn, FILTER_DMS_ALERT_SET_TIME)){
+            //printf("dms filter alert by time!");
             goto out;
         }
     }else
         goto out;
 
-    playloadlen = build_dsm_warn_frame(alert_type, uploadmsg);
-    WSI_DEBUG("send dsm alert %d!\n", alert_type);
-    WSI_DEBUG("dsm alert frame len = %ld\n", sizeof(*uploadmsg));
+    playloadlen = build_dms_warn_frame(alert_type, uploadmsg);
+    WSI_DEBUG("send dms alert %d!\n", alert_type);
+    WSI_DEBUG("dms alert frame len = %ld\n", sizeof(*uploadmsg));
     printbuf((uint8_t *)uploadmsg, playloadlen);
     sample_assemble_msg_to_push(pSend, \
-            SAMPLE_DEVICE_ID_DSM,\
+            SAMPLE_DEVICE_ID_DMS,\
             SAMPLE_CMD_WARNING_REPORT,\
             (uint8_t *)uploadmsg,\
             playloadlen);
 
 out:
-    memcpy(dsm_alert_last, dsm_alert, sizeof(dsm_alert));
+    memcpy(dms_alert_last, dms_alert, sizeof(dms_alert));
     return;
 }
 
@@ -1250,8 +1250,8 @@ int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t devid, 
 
 #if defined ENABLE_ADAS
     pHeader->device_id= SAMPLE_DEVICE_ID_ADAS;
-#elif defined ENABLE_DSM
-    pHeader->device_id= SAMPLE_DEVICE_ID_DSM;
+#elif defined ENABLE_DMS
+    pHeader->device_id= SAMPLE_DEVICE_ID_DMS;
 #endif
     pHeader->cmd = cmd;
 
@@ -1300,11 +1300,11 @@ int do_snap_shot()
     uint8_t txbuf[512];
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
 
-#if defined ENABLE_DSM
-    dsm_warningtext *uploadmsg = (dsm_warningtext *)&msgbuf[0];
-    playloadlen = build_dsm_warn_frame(DSM_SANPSHOT_EVENT, uploadmsg);
+#if defined ENABLE_DMS
+    dms_warningtext *uploadmsg = (dms_warningtext *)&msgbuf[0];
+    playloadlen = build_dms_warn_frame(DMS_SANPSHOT_EVENT, uploadmsg);
     sample_assemble_msg_to_push(pSend, \
-            SAMPLE_DEVICE_ID_DSM,\
+            SAMPLE_DEVICE_ID_DMS,\
             SAMPLE_CMD_WARNING_REPORT,\
             (uint8_t *)uploadmsg,\
             playloadlen);
@@ -1808,16 +1808,16 @@ void do_factory_reset(uint8_t dev_id)
         set_adas_para_setting_default();
         write_local_adas_para_file(LOCAL_ADAS_PRAR_FILE);
 
-    }else if(dev_id == SAMPLE_DEVICE_ID_DSM){
-        set_dsm_para_setting_default();
-        write_local_dsm_para_file(LOCAL_DSM_PRAR_FILE);
+    }else if(dev_id == SAMPLE_DEVICE_ID_DMS){
+        set_dms_para_setting_default();
+        write_local_dms_para_file(LOCAL_DMS_PRAR_FILE);
     }
 }
 
 void recv_para_setting(sample_prot_header *pHeader, int32_t len)
 {
     adas_para_setting recv_adas_para;
-    dsm_para_setting recv_dsm_para;
+    dms_para_setting recv_dms_para;
     uint8_t ack = 0;
     char cmd[100];
     uint8_t txbuf[128] = {0};
@@ -1841,26 +1841,26 @@ void recv_para_setting(sample_prot_header *pHeader, int32_t len)
         }else{
             printf("recv cmd:0x%x, adas data len=%d maybe error!\n",len, pHeader->cmd);
         }
-    }else if(pHeader->device_id == SAMPLE_DEVICE_ID_DSM){
-        if(len == sizeof(sample_prot_header) + 1 + sizeof(recv_dsm_para)){
-            memcpy(&recv_dsm_para, pHeader+1, sizeof(recv_dsm_para));
+    }else if(pHeader->device_id == SAMPLE_DEVICE_ID_DMS){
+        if(len == sizeof(sample_prot_header) + 1 + sizeof(recv_dms_para)){
+            memcpy(&recv_dms_para, pHeader+1, sizeof(recv_dms_para));
 
 
 
             //大端传输
-            recv_dsm_para.auto_photo_time_period = MY_HTONS(recv_dsm_para.auto_photo_time_period);
-            recv_dsm_para.auto_photo_distance_period = MY_HTONS(recv_dsm_para.auto_photo_distance_period);
-            recv_dsm_para.Smoke_TimeIntervalThreshold = MY_HTONS(recv_dsm_para.Smoke_TimeIntervalThreshold);
-            recv_dsm_para.Call_TimeIntervalThreshold = MY_HTONS(recv_dsm_para.Call_TimeIntervalThreshold);
+            recv_dms_para.auto_photo_time_period = MY_HTONS(recv_dms_para.auto_photo_time_period);
+            recv_dms_para.auto_photo_distance_period = MY_HTONS(recv_dms_para.auto_photo_distance_period);
+            recv_dms_para.Smoke_TimeIntervalThreshold = MY_HTONS(recv_dms_para.Smoke_TimeIntervalThreshold);
+            recv_dms_para.Call_TimeIntervalThreshold = MY_HTONS(recv_dms_para.Call_TimeIntervalThreshold);
 
-            printf("recv dsm para...\n");
-            print_dsm_para(&recv_dsm_para);
+            printf("recv dms para...\n");
+            print_dms_para(&recv_dms_para);
 
-            write_dev_para(&recv_dsm_para, SAMPLE_DEVICE_ID_DSM);
-            ret = write_local_dsm_para_file(LOCAL_DSM_PRAR_FILE);
+            write_dev_para(&recv_dms_para, SAMPLE_DEVICE_ID_DMS);
+            ret = write_local_dms_para_file(LOCAL_DMS_PRAR_FILE);
 
         }else{
-            printf("recv cmd:0x%x, dsm data len=%d maybe error!\n", len, pHeader->cmd);
+            printf("recv cmd:0x%x, dms data len=%d maybe error!\n", len, pHeader->cmd);
         }
     }
 
@@ -1891,7 +1891,7 @@ void recv_para_setting(sample_prot_header *pHeader, int32_t len)
 void send_para_setting(sample_prot_header *pHeader, int32_t len)
 {
     adas_para_setting send_adas_para;
-    dsm_para_setting send_dsm_para;
+    dms_para_setting send_dms_para;
     uint8_t txbuf[256] = {0};
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
 
@@ -1904,14 +1904,14 @@ void send_para_setting(sample_prot_header *pHeader, int32_t len)
             sample_assemble_msg_to_push(pSend,pHeader->device_id, SAMPLE_CMD_GET_PARAM, \
                     (uint8_t*)&send_adas_para, sizeof(send_adas_para));
 
-        }else if(pHeader->device_id == SAMPLE_DEVICE_ID_DSM){
-            read_dev_para(&send_dsm_para, SAMPLE_DEVICE_ID_DSM);
-            send_dsm_para.auto_photo_time_period = MY_HTONS(send_dsm_para.auto_photo_time_period);
-            send_dsm_para.auto_photo_distance_period = MY_HTONS(send_dsm_para.auto_photo_distance_period);
-            send_dsm_para.Smoke_TimeIntervalThreshold = MY_HTONS(send_dsm_para.Smoke_TimeIntervalThreshold);
-            send_dsm_para.Call_TimeIntervalThreshold = MY_HTONS(send_dsm_para.Call_TimeIntervalThreshold);
+        }else if(pHeader->device_id == SAMPLE_DEVICE_ID_DMS){
+            read_dev_para(&send_dms_para, SAMPLE_DEVICE_ID_DMS);
+            send_dms_para.auto_photo_time_period = MY_HTONS(send_dms_para.auto_photo_time_period);
+            send_dms_para.auto_photo_distance_period = MY_HTONS(send_dms_para.auto_photo_distance_period);
+            send_dms_para.Smoke_TimeIntervalThreshold = MY_HTONS(send_dms_para.Smoke_TimeIntervalThreshold);
+            send_dms_para.Call_TimeIntervalThreshold = MY_HTONS(send_dms_para.Call_TimeIntervalThreshold);
             sample_assemble_msg_to_push(pSend, pHeader->device_id, SAMPLE_CMD_GET_PARAM, \
-                    (uint8_t*)&send_dsm_para, sizeof(send_dsm_para));
+                    (uint8_t*)&send_dms_para, sizeof(send_dms_para));
         }
     }else{
         printf("recv cmd:0x%x, data len maybe error!\n", pHeader->cmd);
@@ -2133,8 +2133,8 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
             pHeader->device_id != SAMPLE_DEVICE_ID_BRDCST)
         return 0;
 
-#elif defined ENABLE_DSM
-    if((pHeader->device_id != SAMPLE_DEVICE_ID_DSM) && (pHeader->device_id != SAMPLE_DEVICE_ID_BRDCST)){
+#elif defined ENABLE_DMS
+    if((pHeader->device_id != SAMPLE_DEVICE_ID_DMS) && (pHeader->device_id != SAMPLE_DEVICE_ID_BRDCST)){
         return 0;
     }
 #else
@@ -2323,8 +2323,8 @@ connect_again:
 
 #if defined ENABLE_ADAS
     send_work_status(SAMPLE_DEVICE_ID_ADAS);
-#elif defined ENABLE_DSM
-    send_work_status(SAMPLE_DEVICE_ID_DSM);
+#elif defined ENABLE_DMS
+    send_work_status(SAMPLE_DEVICE_ID_DMS);
 #endif
 
     while (!force_exit) {
@@ -2458,8 +2458,8 @@ void *pthread_snap_shot(void *p)
     adas_para_setting tmp;
     uint8_t para_type = SAMPLE_DEVICE_ID_ADAS;
 #else
-    dsm_para_setting tmp;
-    uint8_t para_type = SAMPLE_DEVICE_ID_DSM;
+    dms_para_setting tmp;
+    uint8_t para_type = SAMPLE_DEVICE_ID_DMS;
 #endif
     real_time_data rt_data;;
     uint32_t mileage_last = 0;

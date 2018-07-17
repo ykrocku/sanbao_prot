@@ -365,7 +365,7 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
             }
 
 
-#if defined ENABLE_DSM
+#if defined ENABLE_DMS
             if(pFrame->frameNo % 3 == 0){
                 framecnt_old = pFrame->frameNo;
                 usleep(20000);
@@ -427,7 +427,7 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
 
     EncodeRingBufWrite(pwRB, jpg_vec.data(), jpg_size, width, height);
 
-//#if defined ENABLE_DSM
+//#if defined ENABLE_DMS
 #if 1
 
     EncodeRingBufWrite(pwRB, jpg_vec.data(), jpg_size, width, height);
@@ -456,9 +456,9 @@ void GetConfigResolution(int *w, int *h)
     index = para.image_Resolution%6;
     *w = ConfigResolution[index][0];
     *h = ConfigResolution[index][1];
-#elif defined ENABLE_DSM
-    dsm_para_setting para;
-    read_dev_para(&para, SAMPLE_DEVICE_ID_DSM);
+#elif defined ENABLE_DMS
+    dms_para_setting para;
+    read_dev_para(&para, SAMPLE_DEVICE_ID_DMS);
     index = para.image_Resolution%6;
     *w = ConfigResolution[index][0];
     *h = ConfigResolution[index][1];
@@ -513,8 +513,8 @@ void *pthread_encode_jpeg(void *p)
     printf("get rb_size: %d\n", rb_size);
     ma_api_open_camera(MA_CAMERA_IDX_ADAS);
     ma_api_open_camera(MA_CAMERA_IDX_DRIVER);
-    CRingBuf* pRb = new CRingBuf("dsm_encode_jpeg", rb_name, rb_size, CRB_PERSONALITY_READER, true);
-    CRingBuf* pwjpg = new CRingBuf("dsm_producer", "dsm_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_WRITER);
+    CRingBuf* pRb = new CRingBuf("dms_encode_jpeg", rb_name, rb_size, CRB_PERSONALITY_READER, true);
+    CRingBuf* pwjpg = new CRingBuf("dms_producer", "dms_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_WRITER);
 #endif
 
     if(!pwjpg || !pRb)
@@ -1142,8 +1142,8 @@ void global_var_init()
 
 #if defined ENABLE_ADAS
     printf("adas device enter!\n");
-#elif defined ENABLE_DSM
-    printf("dsm device enter!\n");
+#elif defined ENABLE_DMS
+    printf("dms device enter!\n");
 #else
     #define ENABLE_ADAS
     printf("using default, ENABLE_ADAS!\n");
@@ -1152,7 +1152,7 @@ void global_var_init()
 
     sem_send_init();
     read_local_adas_para_file(LOCAL_ADAS_PRAR_FILE);
-    read_local_dsm_para_file(LOCAL_DSM_PRAR_FILE);
+    read_local_dms_para_file(LOCAL_DMS_PRAR_FILE);
 
     sprintf(cmd, "busybox mkdir -p %s", SNAP_SHOT_JPEG_PATH);
     system(cmd);
@@ -1160,7 +1160,7 @@ void global_var_init()
     //    system(DO_DELETE_SNAP_SHOT_FILES);
     //    printf("do %s\n", DO_DELETE_SNAP_SHOT_FILES);
 
-    system("rm /mnt/obb/dsm/* -f");
+    system("rm /mnt/obb/dms/* -f");
     system("rm /mnt/obb/adas/* -f");
 
     //read_local_file_to_list();
@@ -1189,7 +1189,7 @@ int read_pthread_num(uint32_t i)
     return pstat.NumThreads;
 }
 
-void produce_dsm_image(InfoForStore *mm)
+void produce_dms_image(InfoForStore *mm)
 {
     char produce_file[50];
     int i=0;
@@ -1199,7 +1199,7 @@ void produce_dsm_image(InfoForStore *mm)
 
     for(i=0; i<mm->photo_num; i++){
         printf("photo id = %d\n", mm->photo_id[i]);
-        snprintf(produce_file, sizeof(produce_file), "cp /data/dsm.jpg %s/%08d.jpg",SNAP_SHOT_JPEG_PATH, mm->photo_id[i]);
+        snprintf(produce_file, sizeof(produce_file), "cp /data/dms.jpg %s/%08d.jpg",SNAP_SHOT_JPEG_PATH, mm->photo_id[i]);
         printf("--%s\n", produce_file);
         system(produce_file);
         node.mm_type = MM_PHOTO;
@@ -1207,7 +1207,7 @@ void produce_dsm_image(InfoForStore *mm)
         insert_mm_resouce(node);
     }
     printf("video id = %d\n", mm->video_id[0]);
-    snprintf(produce_file, sizeof(produce_file), "cp /data/dsm.mp4 %s/%08d.mp4",SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
+    snprintf(produce_file, sizeof(produce_file), "cp /data/dms.mp4 %s/%08d.mp4",SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
     printf("--%s\n", produce_file);
     system(produce_file);
     node.mm_type = MM_VIDEO;
@@ -1234,9 +1234,9 @@ void *pthread_sav_warning_jpg(void *p)
         "customer_FLC_mp4","customer_TSRW_mp4","customer_TSR_mp4","customer_SNAP_mp4",
     };
 
-    char dsm_user_name[CUSTOMER_NUM][20]={
-        "DSM_FATIGUE_WARN","DSM_CALLING_WARN","DSM_SMOKING_WARN","DSM_DISTRACT_WARN",
-        "DSM_ABNORMAL_WARN","DSM_SANPSHOT_EVENT","DSM_DRIVER_CHANGE","DSM_RESV",
+    char dms_user_name[CUSTOMER_NUM][20]={
+        "DMS_FATIGUE_WARN","DMS_CALLING_WARN","DMS_SMOKING_WARN","DMS_DISTRACT_WARN",
+        "DMS_ABNORMAL_WARN","DMS_SANPSHOT_EVENT","DMS_DRIVER_CHANGE","DMS_RESV",
     };
 
     //for(i=0; i<WARN_TYPE_NUM; i++)
@@ -1246,16 +1246,16 @@ void *pthread_sav_warning_jpg(void *p)
 #if defined ENABLE_ADAS 
         printf("name:%s\n", user_name[i]);
         pr[i] = new CRingBuf(user_name[i], "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
-#elif defined ENABLE_DSM
-        printf("name:%s\n", dsm_user_name[i]);
-        pr[i] = new CRingBuf(dsm_user_name[i], "dsm_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
+#elif defined ENABLE_DMS
+        printf("name:%s\n", dms_user_name[i]);
+        pr[i] = new CRingBuf(dms_user_name[i], "dms_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
 #endif
     }
 
 #if defined ENABLE_ADAS 
-    ptest = new CRingBuf("adas_get_dsm", "dsm_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
-#elif defined ENABLE_DSM
-    ptest = new CRingBuf("dsm_get_adas", "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
+    ptest = new CRingBuf("adas_get_dms", "dms_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
+#elif defined ENABLE_DMS
+    ptest = new CRingBuf("dms_get_adas", "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
 #endif
 
     pool.SetMinThreads(8);
@@ -1289,9 +1289,9 @@ void *pthread_sav_warning_jpg(void *p)
             continue;
         }
 
-#ifdef ENABLE_DSM
+#ifdef ENABLE_DMS
         //printf("photo num: 0x%x\n", mm.photo_num);
-        //produce_dsm_image(&mm);
+        //produce_dms_image(&mm);
 
         // continue;
 #endif
@@ -1347,15 +1347,15 @@ void *pthread_sav_warning_jpg(void *p)
 #if defined ENABLE_ADAS 
         printf("name:%s\n", user_name[i]);
         delete pr[i];
-#elif defined ENABLE_DSM
-        printf("name:%s\n", dsm_user_name[i]);
+#elif defined ENABLE_DMS
+        printf("name:%s\n", dms_user_name[i]);
         delete pr[i];
 #endif
     }
 
 #if defined ENABLE_ADAS 
     delete ptest;
-#elif defined ENABLE_DSM
+#elif defined ENABLE_DMS
     delete ptest;
 #endif
     pthread_exit(NULL);

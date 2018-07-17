@@ -13,20 +13,20 @@
 #include "prot.h"
 
 static adas_para_setting adas_para;
-static dsm_para_setting dsm_para;
+static dms_para_setting dms_para;
 
 static pthread_mutex_t para_lock = PTHREAD_MUTEX_INITIALIZER;
 void read_dev_para(void *para, uint8_t para_type)
 {
-    //dsm_para_setting *dsm_para = (dsm_para_setting *)para;
+    //dms_para_setting *dms_para = (dms_para_setting *)para;
     //adas_para_setting *adas_para = (adas_para_setting *)para;
 
     pthread_mutex_lock(&para_lock);
 
     if(para_type == SAMPLE_DEVICE_ID_ADAS)
         memcpy(para, &adas_para, sizeof(adas_para));
-    else if(para_type == SAMPLE_DEVICE_ID_DSM)
-        memcpy(para, &dsm_para, sizeof(dsm_para));
+    else if(para_type == SAMPLE_DEVICE_ID_DMS)
+        memcpy(para, &dms_para, sizeof(dms_para));
 
     pthread_mutex_unlock(&para_lock);
 }
@@ -35,7 +35,7 @@ void write_dev_para(void *para, uint8_t para_type)
     uint32_t i;
     uint8_t *in8 = NULL;
     uint8_t *out8 = NULL;
-    dsm_para_setting *pDsmPara = (dsm_para_setting *)para;
+    dms_para_setting *pDsmPara = (dms_para_setting *)para;
     adas_para_setting *pAdasPara = (adas_para_setting *)para;
 
     in8 = (uint8_t *)para;
@@ -61,22 +61,22 @@ void write_dev_para(void *para, uint8_t para_type)
         }
 
         adas_para_check(&adas_para);
-    }else if(para_type == SAMPLE_DEVICE_ID_DSM){
-        printf("writing dsm para...\n");
-        out8 = (uint8_t *)&dsm_para;
+    }else if(para_type == SAMPLE_DEVICE_ID_DMS){
+        printf("writing dms para...\n");
+        out8 = (uint8_t *)&dms_para;
 
         if(pDsmPara->auto_photo_time_period != 0xFFFF)
-            dsm_para.auto_photo_time_period = pDsmPara->auto_photo_time_period;
+            dms_para.auto_photo_time_period = pDsmPara->auto_photo_time_period;
         if(pDsmPara->auto_photo_distance_period != 0xFFFF)
-            dsm_para.auto_photo_distance_period = pDsmPara->auto_photo_distance_period;
+            dms_para.auto_photo_distance_period = pDsmPara->auto_photo_distance_period;
 
         if(pDsmPara->Smoke_TimeIntervalThreshold != 0xFFFF)
-            dsm_para.Smoke_TimeIntervalThreshold= pDsmPara->Smoke_TimeIntervalThreshold;
+            dms_para.Smoke_TimeIntervalThreshold= pDsmPara->Smoke_TimeIntervalThreshold;
 
         if(pDsmPara->Call_TimeIntervalThreshold!= 0xFFFF)
-            dsm_para.Call_TimeIntervalThreshold= pDsmPara->Call_TimeIntervalThreshold;
+            dms_para.Call_TimeIntervalThreshold= pDsmPara->Call_TimeIntervalThreshold;
 
-        for(i=0; i< sizeof(dsm_para_setting); i++)
+        for(i=0; i< sizeof(dms_para_setting); i++)
         {
             if(i==3)
                 i+=4;
@@ -134,43 +134,43 @@ void print_adas_para(adas_para_setting *para)
 }
 
 
-void print_dsm_para(dsm_para_setting *para)
+void print_dms_para(dms_para_setting *para)
 {
-    printf("print dsm para.................\n");
-    printf("dsm_para->warning_speed_val             = %d\n", para->warning_speed_val);
-    printf("dsm_para->warning_volume                = %d\n", para->warning_volume);
-    printf("dsm_para->auto_photo_mode               = %d\n", para->auto_photo_mode);
-    printf("dsm_para->auto_photo_time_period        = %d\n", para->auto_photo_time_period);
-    printf("dsm_para->auto_photo_distance_period    = %d\n", para->auto_photo_distance_period);
-    printf("dsm_para->photo_num                     = %d\n", para->photo_num);
-    printf("dsm_para->photo_time_period             = %d\n", para->photo_time_period);
-    printf("dsm_para->image_Resolution              = %d\n", para->image_Resolution);
-    printf("dsm_para->video_Resolution              = %d\n", para->video_Resolution);
-    printf("dsm_para->Smoke_TimeIntervalThreshold   = %d\n", para->Smoke_TimeIntervalThreshold);
-    printf("dsm_para->Call_TimeIntervalThreshold    = %d\n", para->Call_TimeIntervalThreshold);
-    printf("dsm_para->FatigueDriv_VideoTime         = %d\n", para->FatigueDriv_VideoTime);
-    printf("dsm_para->FatigueDriv_PhotoNum          = %d\n", para->FatigueDriv_PhotoNum);
-    printf("dsm_para->FatigueDriv_PhotoInterval     = %d\n", para->FatigueDriv_PhotoInterval);
-    printf("dsm_para->FatigueDriv_resv              = %d\n", para->FatigueDriv_resv);
-    printf("dsm_para->CallingDriv_VideoTime         = %d\n", para->CallingDriv_VideoTime);
-    printf("dsm_para->CallingDriv_PhotoNum          = %d\n", para->CallingDriv_PhotoNum);
-    printf("dsm_para->CallingDriv_PhotoInterval     = %d\n", para->CallingDriv_PhotoInterval);
-    printf("dsm_para->SmokingDriv_VideoTime         = %d\n", para->SmokingDriv_VideoTime);
-    printf("dsm_para->SmokingDriv_PhotoNum          = %d\n", para->SmokingDriv_PhotoNum);
-    printf("dsm_para->SmokingDriv_PhotoInterval     = %d\n", para->SmokingDriv_PhotoInterval);
+    printf("print dms para.................\n");
+    printf("dms_para->warning_speed_val             = %d\n", para->warning_speed_val);
+    printf("dms_para->warning_volume                = %d\n", para->warning_volume);
+    printf("dms_para->auto_photo_mode               = %d\n", para->auto_photo_mode);
+    printf("dms_para->auto_photo_time_period        = %d\n", para->auto_photo_time_period);
+    printf("dms_para->auto_photo_distance_period    = %d\n", para->auto_photo_distance_period);
+    printf("dms_para->photo_num                     = %d\n", para->photo_num);
+    printf("dms_para->photo_time_period             = %d\n", para->photo_time_period);
+    printf("dms_para->image_Resolution              = %d\n", para->image_Resolution);
+    printf("dms_para->video_Resolution              = %d\n", para->video_Resolution);
+    printf("dms_para->Smoke_TimeIntervalThreshold   = %d\n", para->Smoke_TimeIntervalThreshold);
+    printf("dms_para->Call_TimeIntervalThreshold    = %d\n", para->Call_TimeIntervalThreshold);
+    printf("dms_para->FatigueDriv_VideoTime         = %d\n", para->FatigueDriv_VideoTime);
+    printf("dms_para->FatigueDriv_PhotoNum          = %d\n", para->FatigueDriv_PhotoNum);
+    printf("dms_para->FatigueDriv_PhotoInterval     = %d\n", para->FatigueDriv_PhotoInterval);
+    printf("dms_para->FatigueDriv_resv              = %d\n", para->FatigueDriv_resv);
+    printf("dms_para->CallingDriv_VideoTime         = %d\n", para->CallingDriv_VideoTime);
+    printf("dms_para->CallingDriv_PhotoNum          = %d\n", para->CallingDriv_PhotoNum);
+    printf("dms_para->CallingDriv_PhotoInterval     = %d\n", para->CallingDriv_PhotoInterval);
+    printf("dms_para->SmokingDriv_VideoTime         = %d\n", para->SmokingDriv_VideoTime);
+    printf("dms_para->SmokingDriv_PhotoNum          = %d\n", para->SmokingDriv_PhotoNum);
+    printf("dms_para->SmokingDriv_PhotoInterval     = %d\n", para->SmokingDriv_PhotoInterval);
 
-    printf("dsm_para->DistractionDriv_VideoTime        = %d\n", para->DistractionDriv_VideoTime);
-    printf("dsm_para->DistractionDriv_PhotoNum         = %d\n", para->DistractionDriv_PhotoNum);
-    printf("dsm_para->DistractionDriv_PhotoInterval    = %d\n", para->DistractionDriv_PhotoInterval);
-    printf("dsm_para->AbnormalDriv_VideoTime     = %d\n", para->AbnormalDriv_VideoTime);
-    printf("dsm_para->AbnormalDriv_PhotoNum      = %d\n", para->AbnormalDriv_PhotoNum);
-    printf("dsm_para->AbnormalDriv_PhotoInterval = %d\n", para->AbnormalDriv_PhotoInterval);
+    printf("dms_para->DistractionDriv_VideoTime        = %d\n", para->DistractionDriv_VideoTime);
+    printf("dms_para->DistractionDriv_PhotoNum         = %d\n", para->DistractionDriv_PhotoNum);
+    printf("dms_para->DistractionDriv_PhotoInterval    = %d\n", para->DistractionDriv_PhotoInterval);
+    printf("dms_para->AbnormalDriv_VideoTime     = %d\n", para->AbnormalDriv_VideoTime);
+    printf("dms_para->AbnormalDriv_PhotoNum      = %d\n", para->AbnormalDriv_PhotoNum);
+    printf("dms_para->AbnormalDriv_PhotoInterval = %d\n", para->AbnormalDriv_PhotoInterval);
 }
 
 
-void dsm_para_check(dsm_para_setting *p)
+void dms_para_check(dms_para_setting *p)
 {
-    dsm_para_setting *para = (dsm_para_setting *)p;
+    dms_para_setting *para = (dms_para_setting *)p;
 
     printf("adas para checking...!\n");
     if(para->warning_speed_val < 0 || para->warning_speed_val > 60)
@@ -585,9 +585,9 @@ void set_adas_para_setting_default()
     printf("write default adas para to global para!\n");
 }
 
-void set_dsm_para_setting_default()
+void set_dms_para_setting_default()
 {
-    dsm_para_setting para;
+    dms_para_setting para;
 
     printf("%s!\n", __FUNCTION__);
     para.warning_speed_val = 30;// km/h, 0-60
@@ -627,8 +627,8 @@ void set_dsm_para_setting_default()
 
     memset(&para.reserve2[0], 0, sizeof(para.reserve2));
 
-    write_dev_para(&para, SAMPLE_DEVICE_ID_DSM);
-    printf("write default dsm para to global para!\n");
+    write_dev_para(&para, SAMPLE_DEVICE_ID_DMS);
+    printf("write default dms para to global para!\n");
 }
 
 int read_local_adas_para_file(const char* filename)
@@ -681,9 +681,9 @@ int read_local_adas_para_file(const char* filename)
 }
 
 
-int read_local_dsm_para_file(const char* filename)
+int read_local_dms_para_file(const char* filename)
 {
-    dsm_para_setting para;
+    dms_para_setting para;
     char cmd[512];
 
     FILE* fp = fopen(filename, "r");
@@ -697,8 +697,8 @@ int read_local_dsm_para_file(const char* filename)
         fclose(fp);
 
         //no para file ,so set default to file
-        set_dsm_para_setting_default();
-        write_local_dsm_para_file(filename);
+        set_dms_para_setting_default();
+        write_local_dms_para_file(filename);
     }else{
         size_t nb = fread(&para, 1, sizeof(para), fp);
         if (nb != sizeof(para)) {
@@ -706,9 +706,9 @@ int read_local_dsm_para_file(const char* filename)
             fclose(fp);
             return 2;
         }
-        printf("write local file to global dsm para\n");
-        write_dev_para(&para, SAMPLE_DEVICE_ID_DSM);
-        print_dsm_para(&para);
+        printf("write local file to global dms para\n");
+        write_dev_para(&para, SAMPLE_DEVICE_ID_DMS);
+        print_dms_para(&para);
 
 #if 0
         //set alog detect.flag
@@ -741,13 +741,13 @@ int write_local_adas_para_file(const char* filename) {
 
     return ret;
 }
-int write_local_dsm_para_file(const char* filename) {
+int write_local_dms_para_file(const char* filename) {
     int ret = 0;
-    dsm_para_setting dsm_para;
+    dms_para_setting dms_para;
 
-    read_dev_para(&dsm_para, SAMPLE_DEVICE_ID_DSM);
-    print_dsm_para(&dsm_para);
-    ret = write_file(filename, &dsm_para, sizeof(dsm_para));
+    read_dev_para(&dms_para, SAMPLE_DEVICE_ID_DMS);
+    print_dms_para(&dms_para);
+    ret = write_file(filename, &dms_para, sizeof(dms_para));
 
     return ret;
 }

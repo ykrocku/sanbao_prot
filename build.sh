@@ -4,6 +4,6 @@ cd arm
 if [ "$1" == "a" ] ; then
 ../adas_cmake.sh
 else
-../dsm_cmake.sh
+../dms_cmake.sh
 fi
 make

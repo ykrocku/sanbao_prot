@@ -13,14 +13,14 @@
 
 
 //#define ENABLE_ADAS
-//#define ENABLE_DSM
+//#define ENABLE_DMS
 
 #define FILTER_ALERT_BY_SPEED
 #define FILTER_ALERT_BY_TIME
 
 //30 sec
 #define FILTER_ADAS_ALERT_SET_TIME 30u
-#define FILTER_DSM_ALERT_SET_TIME 30u
+#define FILTER_DMS_ALERT_SET_TIME 30u
 
 
 #define EXIT_MSG      2
@@ -50,17 +50,17 @@
 //#define SNAP_SHOT_JPEG_PATH "/data/snap/"
 #define SNAP_SHOT_JPEG_PATH "/mnt/obb/adas/"
 
-#elif defined ENABLE_DSM
-#define DO_DELETE_SNAP_SHOT_FILES "rm -r /data/snap/dsm/*"
+#elif defined ENABLE_DMS
+#define DO_DELETE_SNAP_SHOT_FILES "rm -r /data/snap/dms/*"
 //#define SNAP_SHOT_JPEG_PATH "/data/snap/"
-#define SNAP_SHOT_JPEG_PATH "/mnt/obb/dsm/"
+#define SNAP_SHOT_JPEG_PATH "/mnt/obb/dms/"
 
 #endif
 
 
 
 #define LOCAL_ADAS_PRAR_FILE     "/data/adas_para"
-#define LOCAL_DSM_PRAR_FILE     "/data/dsm_para"
+#define LOCAL_DMS_PRAR_FILE     "/data/dms_para"
 
 #if 0
 #define UPGRADE_FILE_PATH     "/data/upgrade.mpk"
@@ -73,8 +73,8 @@
 
 #if defined ENABLE_ADAS
     #define UPGRADE_FILE_CMD      "/data/adas_upgrade.sh"
-#elif defined ENABLE_DSM
-    #define UPGRADE_FILE_CMD      "/data/dsm_upgrade.sh"
+#elif defined ENABLE_DMS
+    #define UPGRADE_FILE_CMD      "/data/dms_upgrade.sh"
 #endif
 
 
@@ -98,7 +98,7 @@
 
 #define SAMPLE_DEVICE_ID_BRDCST         (0x0)
 #define SAMPLE_DEVICE_ID_ADAS           (0x64)
-#define SAMPLE_DEVICE_ID_DSM            (0x65)
+#define SAMPLE_DEVICE_ID_DMS            (0x65)
 #define SAMPLE_DEVICE_ID_TPMS           (0x66)
 #define SAMPLE_DEVICE_ID_BSD            (0x67)
 
@@ -360,16 +360,16 @@ typedef struct __warningtext {
 } __attribute__((packed)) warningtext;
 
 
-#define DSM_FATIGUE_WARN            0x01
-#define DSM_CALLING_WARN            0x02
-#define DSM_SMOKING_WARN            0x03
-#define DSM_DISTRACT_WARN           0x04
-#define DSM_ABNORMAL_WARN           0x05
+#define DMS_FATIGUE_WARN            0x01
+#define DMS_CALLING_WARN            0x02
+#define DMS_SMOKING_WARN            0x03
+#define DMS_DISTRACT_WARN           0x04
+#define DMS_ABNORMAL_WARN           0x05
 
-#define DSM_SANPSHOT_EVENT          0x10
-#define DSM_DRIVER_CHANGE           0x11
+#define DMS_SANPSHOT_EVENT          0x10
+#define DMS_DRIVER_CHANGE           0x11
 
-typedef struct __dsm_warningtext {
+typedef struct __dms_warningtext {
 
     uint32_t	warning_id;
     uint8_t		status_flag;
@@ -387,7 +387,7 @@ typedef struct __dsm_warningtext {
     uint8_t		mm_num;
     sample_mm_info mm[0];
 
-} __attribute__((packed)) dsm_warningtext;
+} __attribute__((packed)) dms_warningtext;
 
 
 
@@ -443,7 +443,7 @@ typedef struct __car_info {
 
 
 
-typedef struct __dsm_alert_info {
+typedef struct __dms_alert_info {
     //#ifdef BIG_ENDIAN
 #if 0
 
@@ -476,9 +476,9 @@ typedef struct __dsm_alert_info {
     uint8_t byte7_recv;
 
 #endif
-} __attribute__((packed)) dsm_alert_info;
+} __attribute__((packed)) dms_alert_info;
 
-typedef struct __dsm_can_778 {
+typedef struct __dms_can_778 {
     uint8_t Left_Eyelid_fraction;
     uint8_t Right_Eyelid_fraction;
     uint8_t Head_Yaw;
@@ -486,9 +486,9 @@ typedef struct __dsm_can_778 {
     uint8_t Head_Roll;
     uint8_t Frame_Tag;
     uint8_t reserved[2];
-} __attribute__((packed)) dsm_can_778;
+} __attribute__((packed)) dms_can_778;
 
-typedef struct __dsm_can_779 {
+typedef struct __dms_can_779 {
     uint8_t Eye_Closure_Warning:2;
     uint8_t Yawn_warning:2;
     uint8_t Look_around_warning:2;
@@ -502,16 +502,16 @@ typedef struct __dsm_can_779 {
     uint8_t Frame_Tag;
     uint8_t reserved[5];
 
-} __attribute__((packed)) dsm_can_779;
+} __attribute__((packed)) dms_can_779;
 
 
-typedef struct __dsm_can_frame {
+typedef struct __dms_can_frame {
     char can_779_valid;
     char can_778_valid;
 
-    dsm_can_779 can_779;
-    dsm_can_778 can_778;
-} __attribute__((packed)) dsm_can_frame;
+    dms_can_779 can_779;
+    dms_can_778 can_778;
+} __attribute__((packed)) dms_can_frame;
 
 
 
@@ -607,7 +607,7 @@ typedef struct _adas_para_setting{
 } __attribute__((packed)) adas_para_setting;
 
 
-typedef struct _dsm_para_setting{
+typedef struct _dms_para_setting{
 
     //uint8_t Warn_SpeedThreshold;
     uint8_t warning_speed_val;
@@ -649,7 +649,7 @@ typedef struct _dsm_para_setting{
     uint8_t AbnormalDriv_PhotoInterval;
 
     uint8_t reserve2[2];
-} __attribute__((packed)) dsm_para_setting;
+} __attribute__((packed)) dms_para_setting;
 
 
 typedef struct _mm_node{
@@ -753,7 +753,7 @@ void read_dev_para(void *para, uint8_t para_type);
 void write_dev_para(void *para, uint8_t para_type);
 
 int write_local_adas_para_file(const char* filename);
-int write_local_dsm_para_file(const char* filename);
+int write_local_dms_para_file(const char* filename);
 
 void set_adas_para_setting_default();
 void global_var_init();
@@ -772,15 +772,15 @@ void printbuf(void *buf, int len);
 int can_message_send(can_data_type *sourcecan);
 void adas_para_check(adas_para_setting *para);
 
-void print_dsm_para(dsm_para_setting *para);
+void print_dms_para(dms_para_setting *para);
 void print_adas_para(adas_para_setting *para);
 int read_local_adas_para_file(const char* filename);
-int read_local_dsm_para_file(const char* filename);
+int read_local_dms_para_file(const char* filename);
 
-void recv_dsm_message( dsm_can_779 *can);
+void recv_dms_message( dms_can_779 *can);
 
-void produce_dsm_image(InfoForStore *mm);
-void set_dsm_para_setting_default();
+void produce_dms_image(InfoForStore *mm);
+void set_dms_para_setting_default();
 
 
 void insert_mm_resouce(mm_node m);

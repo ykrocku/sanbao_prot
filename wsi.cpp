@@ -43,67 +43,67 @@ using namespace std;
 
 HalIO &halio = HalIO::Instance();
 
-#ifndef _DSM_INFO_SIMPLE_BUFFER_H
-#define _DSM_INFO_SIMPLE_BUFFER_H
+#ifndef _DMS_INFO_SIMPLE_BUFFER_H
+#define _DMS_INFO_SIMPLE_BUFFER_H
 
 
 
-/* 八字节格式的DSM数据 */
+/* 八字节格式的DMS数据 */
 /*
 报警信息协议对接格式
-"topic"     "dsm.alert.0x100"    str
+"topic"     "dms.alert.0x100"    str
 "time"      uint64_t usec        MSGPACK_OBJECT_POSITIVE_INTEGER
-"soucre"    "DSMNEWS"            str
+"soucre"    "DMSNEWS"            str
 "data"      uint8_t buf[8]       bin
 */
 
 
-//#define DSM_INFO_TOPIC  ("dsm.alert.0x100")
-#define DSM_INFO_TOPIC  ("output.info.v1")
-#define DSM_INFO_SOURCE  ("DSMNEWS")
+//#define DMS_INFO_TOPIC  ("dms.alert.0x100")
+#define DMS_INFO_TOPIC  ("output.info.v1")
+#define DMS_INFO_SOURCE  ("DMSNEWS")
 
-#define DSM_INFO_ALERT_BIT_NUM  (2)
-#define DSM_INFO_ALERT_PER_BYTE (8/DSM_INFO_ALERT_BIT_NUM)
-#define DSM_INFO_ALERT_BYTE_INDEX(index) (index / DSM_INFO_ALERT_PER_BYTE)
-#define DSM_INFO_ALERT_MASK_OFFSET(index) (2 * (index % DSM_INFO_ALERT_PER_BYTE))
-#define DSM_INFO_ALERT_MASK(index) (0x03 << DSM_INFO_ALERT_MASK_OFFSET(index)) 
+#define DMS_INFO_ALERT_BIT_NUM  (2)
+#define DMS_INFO_ALERT_PER_BYTE (8/DMS_INFO_ALERT_BIT_NUM)
+#define DMS_INFO_ALERT_BYTE_INDEX(index) (index / DMS_INFO_ALERT_PER_BYTE)
+#define DMS_INFO_ALERT_MASK_OFFSET(index) (2 * (index % DMS_INFO_ALERT_PER_BYTE))
+#define DMS_INFO_ALERT_MASK(index) (0x03 << DMS_INFO_ALERT_MASK_OFFSET(index)) 
 
 /* 报警枚举 */
 enum
 {
     /* 短时间闭眼报警 */
-    DSM_INFO_ALERT_EYE_CLOSE1 = 0,
+    DMS_INFO_ALERT_EYE_CLOSE1 = 0,
     /* 长时间闭眼报警 */
-    DSM_INFO_ALERT_EYE_CLOSE2,
+    DMS_INFO_ALERT_EYE_CLOSE2,
     /* 左顾右盼 */
-    DSM_INFO_ALERT_LOOK_AROUND,
+    DMS_INFO_ALERT_LOOK_AROUND,
     /* 打哈欠 */
-    DSM_INFO_ALERT_YAWN,
+    DMS_INFO_ALERT_YAWN,
     /* 打电话 */
-    DSM_INFO_ALERT_PHONE,
+    DMS_INFO_ALERT_PHONE,
     /* 吸烟 */
-    DSM_INFO_ALERT_SMOKING,
+    DMS_INFO_ALERT_SMOKING,
     /* 离岗 */
-    DSM_INFO_ALERT_ABSENCE,
+    DMS_INFO_ALERT_ABSENCE,
     /* 低头 */
-    DSM_INFO_ALERT_BOW,
+    DMS_INFO_ALERT_BOW,
 
-    DSM_INFO_ALERT_NUM,
+    DMS_INFO_ALERT_NUM,
 };
 
-#define DSM_INFO_GET_ALERT_FROM_BUFFER(buffer, index) \
-    (((buffer[DSM_INFO_ALERT_BYTE_INDEX((index))] & DSM_INFO_ALERT_MASK((index))) >> DSM_INFO_ALERT_MASK_OFFSET((index))) & 0x03)
+#define DMS_INFO_GET_ALERT_FROM_BUFFER(buffer, index) \
+    (((buffer[DMS_INFO_ALERT_BYTE_INDEX((index))] & DMS_INFO_ALERT_MASK((index))) >> DMS_INFO_ALERT_MASK_OFFSET((index))) & 0x03)
 
-#define DSM_INFO_CLEAR_ALERT(buffer, index) \
-    (buffer[DSM_INFO_ALERT_BYTE_INDEX((index))] &= ~(DSM_INFO_ALERT_MASK((index))))
+#define DMS_INFO_CLEAR_ALERT(buffer, index) \
+    (buffer[DMS_INFO_ALERT_BYTE_INDEX((index))] &= ~(DMS_INFO_ALERT_MASK((index))))
 
-#define DSM_INFO_SET_ALERT_TO_BUFFER(buffer, index, val) \
+#define DMS_INFO_SET_ALERT_TO_BUFFER(buffer, index, val) \
     do{\
-        DSM_INFO_CLEAR_ALERT(buffer, (index));\
-        buffer[DSM_INFO_ALERT_BYTE_INDEX(index)] |= (((val) & 0x03) << DSM_INFO_ALERT_MASK_OFFSET(index));\
+        DMS_INFO_CLEAR_ALERT(buffer, (index));\
+        buffer[DMS_INFO_ALERT_BYTE_INDEX(index)] |= (((val) & 0x03) << DMS_INFO_ALERT_MASK_OFFSET(index));\
     } while(0)
 
-#endif /* _DSM_INFO_SIMPLE_BUFFER_H */
+#endif /* _DMS_INFO_SIMPLE_BUFFER_H */
 
 
 
@@ -121,7 +121,7 @@ enum
  *
  *  topic: subscribe
  *  source: client-name
- *  data: dsm.alert.0x100
+ *  data: dms.alert.0x100
  *
  * ****************/
 int pack_req_can_cmd(uint8_t *data, uint32_t len, const char *name)
@@ -149,9 +149,9 @@ int pack_req_can_cmd(uint8_t *data, uint32_t len, const char *name)
     {
         PACK_MAP_MSG("data", strlen("data"), "output.can.0x760", strlen("output.can.0x700"));
     }
-    else if(!memcmp(name, "dsm_alert", strlen("dsm_alert")))
+    else if(!memcmp(name, "dms_alert", strlen("dms_alert")))
     {
-        PACK_MAP_MSG("data", strlen("data"), DSM_INFO_TOPIC, strlen("dsm.alert.0x100"));
+        PACK_MAP_MSG("data", strlen("data"), DMS_INFO_TOPIC, strlen("dms.alert.0x100"));
     }
     else
         ;
@@ -304,7 +304,7 @@ void msgpack_object_get(FILE* out, msgpack_object o, can_data_type *can)
     return;
 }
 
-int msgpack_object_dsm_get(FILE* out, msgpack_object o, can_data_type *can, uint8_t *buf, uint32_t *buflen)
+int msgpack_object_dms_get(FILE* out, msgpack_object o, can_data_type *can, uint8_t *buf, uint32_t *buflen)
 {
     enum MSG_DATA_TYPE{
         CAN_DATA=1,
@@ -396,12 +396,12 @@ int msgpack_object_dsm_get(FILE* out, msgpack_object o, can_data_type *can, uint
             if(o.via.map.size != 0) {
                 msgpack_object_kv* p = o.via.map.ptr;
                 msgpack_object_kv* const pend = o.via.map.ptr + o.via.map.size;
-                msgpack_object_dsm_get(out, p->key, NULL, buf, buflen);
-                msgpack_object_dsm_get(out, p->val, can, buf, buflen);
+                msgpack_object_dms_get(out, p->key, NULL, buf, buflen);
+                msgpack_object_dms_get(out, p->val, can, buf, buflen);
                 ++p;
                 for(; p < pend; ++p) {
-                    msgpack_object_dsm_get(out, p->key, NULL, buf, buflen);
-                    msgpack_object_dsm_get(out, p->val, can, buf, buflen);
+                    msgpack_object_dms_get(out, p->key, NULL, buf, buflen);
+                    msgpack_object_dms_get(out, p->val, can, buf, buflen);
                 }
             }
             break;
@@ -415,11 +415,11 @@ int msgpack_object_dsm_get(FILE* out, msgpack_object o, can_data_type *can, uint
     return 0;
 }
 
-int dsm_parse_data_json(char *buffer, dsm_can_frame *can_frame);
-#define DSM_JSON_MSG_LEN (1024*1024)
+int dms_parse_data_json(char *buffer, dms_can_frame *can_frame);
+#define DMS_JSON_MSG_LEN (1024*1024)
 int unpack_recv_can_msg(char *data, size_t size)
 {
-    dsm_can_frame can_frame;
+    dms_can_frame can_frame;
     uint32_t len = 0;
     msgpack_zone mempool;
     msgpack_object deserialized;
@@ -430,41 +430,41 @@ int unpack_recv_can_msg(char *data, size_t size)
  //       return -1;
 
 #if defined ENABLE_ADAS 
-    msgpack_zone_init(&mempool, DSM_JSON_MSG_LEN);//1M
+    msgpack_zone_init(&mempool, DMS_JSON_MSG_LEN);//1M
     msgpack_unpack((const char *)data, size, NULL, &mempool, &deserialized);
     memset(&can, 0, sizeof(can));
     msgpack_object_get(stdout, deserialized, &can);
     msgpack_zone_destroy(&mempool);
     can_message_send(&can);
 
-#elif defined ENABLE_DSM
-    msgpack_zone_init(&mempool, DSM_JSON_MSG_LEN);//1M
+#elif defined ENABLE_DMS
+    msgpack_zone_init(&mempool, DMS_JSON_MSG_LEN);//1M
     //printbuf(data, size);
     msgpack_unpack((const char *)data, size, NULL, &mempool, &deserialized);
     //get bin data
     len = sizeof(data_msg);
-    msgpack_object_dsm_get(stdout, deserialized, &can, data_msg, &len);
+    msgpack_object_dms_get(stdout, deserialized, &can, data_msg, &len);
     WSI_DEBUG("get bin data len = %d\n", len);
     //printbuf(data_msg, len);
 
     //second unpack
-    char *buffer = (char *)malloc(DSM_JSON_MSG_LEN);
+    char *buffer = (char *)malloc(DMS_JSON_MSG_LEN);
     msgpack_unpack((const char *)data_msg, len, NULL, &mempool, &deserialized);
-    msgpack_object_print_buffer(buffer, DSM_JSON_MSG_LEN, deserialized);
+    msgpack_object_print_buffer(buffer, DMS_JSON_MSG_LEN, deserialized);
     msgpack_zone_destroy(&mempool);
     WSI_DEBUG("unpack:\n %s\n", buffer);
 
-    memset(&can_frame, 0, sizeof(dsm_can_frame));
-    dsm_parse_data_json(buffer, &can_frame);
+    memset(&can_frame, 0, sizeof(dms_can_frame));
+    dms_parse_data_json(buffer, &can_frame);
     if(can_frame.can_779_valid){
         WSI_DEBUG("can779:\n");
-        //printbuf(&can_frame.can_779, sizeof(dsm_can_779));
+        //printbuf(&can_frame.can_779, sizeof(dms_can_779));
         halio.send_can_frame(0x779, (char *)&can_frame.can_779);
-        recv_dsm_message(&can_frame.can_779);
+        recv_dms_message(&can_frame.can_779);
     }
     if(can_frame.can_778_valid){
         WSI_DEBUG("can778:\n");
-        //printbuf(&can_frame.can_778, sizeof(dsm_can_778));
+        //printbuf(&can_frame.can_778, sizeof(dms_can_778));
         halio.send_can_frame(0x778, (char *)&can_frame.can_778);
     }
     if(buffer)
@@ -473,7 +473,7 @@ int unpack_recv_can_msg(char *data, size_t size)
     return 0;
 }
 
-static int get_dsm_alert(const rapidjson::Value& val)
+static int get_dms_alert(const rapidjson::Value& val)
 {
     assert(val["score"].IsNumber());
     assert(val["score"].IsDouble());
@@ -499,7 +499,7 @@ static int get_dsm_alert(const rapidjson::Value& val)
     }
 }
 
-static bool get_dsm_pose(const rapidjson::Value& val, uint8_t *yaw, uint8_t *pitch, uint8_t *roll)
+static bool get_dms_pose(const rapidjson::Value& val, uint8_t *yaw, uint8_t *pitch, uint8_t *roll)
 {
     assert(val["yaw"].IsNumber());
     assert(val["yaw"].IsDouble());
@@ -519,7 +519,7 @@ static bool get_dsm_pose(const rapidjson::Value& val, uint8_t *yaw, uint8_t *pit
     return true;
 }
 
-int dsm_parse_data_json(char *buffer, dsm_can_frame *can_frame)
+int dms_parse_data_json(char *buffer, dms_can_frame *can_frame)
 {
     Document document;  // Default template parameter uses UTF8 and MemoryPoolAllocator.
     static uint32_t s_frame_tag_778 = 0, s_frame_tag_779 = 0;
@@ -541,14 +541,14 @@ int dsm_parse_data_json(char *buffer, dsm_can_frame *can_frame)
     assert(document.HasMember("absence_alert"));
 
     //build can 779
-    can_frame->can_779.Eye_Closure_Warning = get_dsm_alert(document["eye_alert"]);
-    can_frame->can_779.Yawn_warning = get_dsm_alert(document["yawn_alert"]);
-    can_frame->can_779.Look_around_warning = get_dsm_alert(document["look_around_alert"]);
-    can_frame->can_779.Look_up_warning = get_dsm_alert(document["look_up_alert"]);
-    can_frame->can_779.Look_down_warning = get_dsm_alert(document["look_down_alert"]);
-    can_frame->can_779.Phone_call_warning = get_dsm_alert(document["phone_alert"]);
-    can_frame->can_779.Smoking_warning = get_dsm_alert(document["smoking_alert"]);
-    can_frame->can_779.Absence_warning = get_dsm_alert(document["absence_alert"]);
+    can_frame->can_779.Eye_Closure_Warning = get_dms_alert(document["eye_alert"]);
+    can_frame->can_779.Yawn_warning = get_dms_alert(document["yawn_alert"]);
+    can_frame->can_779.Look_around_warning = get_dms_alert(document["look_around_alert"]);
+    can_frame->can_779.Look_up_warning = get_dms_alert(document["look_up_alert"]);
+    can_frame->can_779.Look_down_warning = get_dms_alert(document["look_down_alert"]);
+    can_frame->can_779.Phone_call_warning = get_dms_alert(document["phone_alert"]);
+    can_frame->can_779.Smoking_warning = get_dms_alert(document["smoking_alert"]);
+    can_frame->can_779.Absence_warning = get_dms_alert(document["absence_alert"]);
 
     can_frame->can_779.Frame_Tag = s_frame_tag_779 & 0xFF;
     s_frame_tag_779 ++;
@@ -571,7 +571,7 @@ int dsm_parse_data_json(char *buffer, dsm_can_frame *can_frame)
         assert(document["intrinsic_pose"].HasMember("yaw"));
         assert(document["intrinsic_pose"].HasMember("pitch"));
         assert(document["intrinsic_pose"].HasMember("roll"));
-        get_dsm_pose(document["intrinsic_pose"], &yaw, &pitch, &roll);
+        get_dms_pose(document["intrinsic_pose"], &yaw, &pitch, &roll);
         can_frame->can_778.Head_Yaw = yaw;
         can_frame->can_778.Head_Pitch = pitch;
         can_frame->can_778.Head_Roll = roll;
@@ -755,8 +755,8 @@ static int callback_lws_communicate(struct lws *wsi, enum lws_callback_reasons r
                     msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), "700");
                     sendflag = 2;
                 }
-#elif defined ENABLE_DSM
-                msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), "dsm_alert");
+#elif defined ENABLE_DMS
+                msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), "dms_alert");
                 sendflag = 0;
 #endif
                 printf("client send request, ret = %d!\n", msgpacklen);
@@ -844,7 +844,7 @@ void *pthread_websocket_client(void *para)
 
 #if defined ENABLE_ADAS
     i.port = 24012;
-#elif defined ENABLE_DSM
+#elif defined ENABLE_DMS
     i.port = 24011;
 #endif
     i.address = "127.0.0.1";
