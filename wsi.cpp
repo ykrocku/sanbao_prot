@@ -32,7 +32,8 @@
 
 
 #include "prot.h"
-#include "dms_interface.h"
+//#include "dms_interface.h"
+#include "dms_info_simple_buffer.h"
 
 
 using namespace rapidjson;
@@ -364,10 +365,15 @@ int unpack_recv_can_msg(char *data, size_t size)
     //adas_parse_data_json(json_buf);
     msgpack_object_get(stdout, deserialized, &can);
 
+
     msgpack_zone_destroy(&mempool);
     can_message_send(&can);
 
 #elif defined ENABLE_DMS
+
+    recv_dms_message(&can);
+
+#if 0
     msgpack_zone_init(&mempool, DMS_JSON_MSG_LEN);//1M
     //printbuf(data, size);
     msgpack_unpack((const char *)data, size, NULL, &mempool, &deserialized);
@@ -399,6 +405,7 @@ int unpack_recv_can_msg(char *data, size_t size)
     }
     if(buffer)
         free(buffer);
+#endif
 #endif
     return 0;
 }

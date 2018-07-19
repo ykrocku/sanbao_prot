@@ -815,7 +815,7 @@ int build_dms_warn_frame(int type, dms_warningtext *uploadmsg)
     return (sizeof(*uploadmsg) + uploadmsg->mm_num*sizeof(sample_mm_info));
 }
 
-#if 0
+#if 1
 void recv_dms_message(can_data_type *can)
 {
 #if 1
@@ -2212,6 +2212,26 @@ static int32_t sample_on_cmd(sample_prot_header *pHeader, int32_t len)
     return 0;
 }
 
+
+#include <arpa/inet.h>
+#include <linux/if_arp.h>
+
+void bond_net_device(int sock)
+{
+	int ret;
+	struct ifreq interface;
+	const char *inf = "eth0";
+	
+	
+	memset(&interface, 0x00, sizeof(interface));
+	strncpy(interface.ifr_name, inf, IFNAMSIZ);
+	if(setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, (char *)&interface, sizeof(interface)) < 0)
+	{
+		perror("setsockopt error:");
+        return;
+	}
+}
+
 static int try_connect()
 {
 #define HOST_SERVER_PORT (8888)
@@ -2281,6 +2301,7 @@ static int try_connect()
         if( 0 == connect(sock, (struct sockaddr *)&host_serv_addr, sizeof(host_serv_addr)))
         {
             printf("connect ok!\n");
+            bond_net_device(sock);
             return sock;
         }
         else
