@@ -11,7 +11,6 @@
 
 #include <libwebsockets.h>
 #include <msgpack.h>
-#include "prot.h"
 #include <sys/prctl.h>
 #include <queue>
 
@@ -32,10 +31,8 @@
 #include "common/hal/camctl.h"
 
 
-#define MOBILEYE_WARNING_ID     (0x700)
-#define MOBILEYE_CARSIGNAL_ID   (0x760)
-
-//#include "can_signal.cpp"
+#include "prot.h"
+#include "dms_interface.h"
 
 
 using namespace rapidjson;
@@ -43,86 +40,19 @@ using namespace std;
 
 HalIO &halio = HalIO::Instance();
 
-#ifndef _DMS_INFO_SIMPLE_BUFFER_H
-#define _DMS_INFO_SIMPLE_BUFFER_H
+#define MOBILEYE_WARNING_ID     (0x700)
+#define MOBILEYE_CARSIGNAL_ID   (0x760)
 
 
 
-/* 八字节格式的DMS数据 */
-/*
-报警信息协议对接格式
-"topic"     "dms.alert.0x100"    str
-"time"      uint64_t usec        MSGPACK_OBJECT_POSITIVE_INTEGER
-"soucre"    "DMSNEWS"            str
-"data"      uint8_t buf[8]       bin
-*/
-
-
-//#define DMS_INFO_TOPIC  ("dms.alert.0x100")
-#define DMS_INFO_TOPIC  ("output.info.v1")
-#define DMS_INFO_SOURCE  ("DMSNEWS")
-
-#define DMS_INFO_ALERT_BIT_NUM  (2)
-#define DMS_INFO_ALERT_PER_BYTE (8/DMS_INFO_ALERT_BIT_NUM)
-#define DMS_INFO_ALERT_BYTE_INDEX(index) (index / DMS_INFO_ALERT_PER_BYTE)
-#define DMS_INFO_ALERT_MASK_OFFSET(index) (2 * (index % DMS_INFO_ALERT_PER_BYTE))
-#define DMS_INFO_ALERT_MASK(index) (0x03 << DMS_INFO_ALERT_MASK_OFFSET(index)) 
-
-/* 报警枚举 */
-enum
-{
-    /* 短时间闭眼报警 */
-    DMS_INFO_ALERT_EYE_CLOSE1 = 0,
-    /* 长时间闭眼报警 */
-    DMS_INFO_ALERT_EYE_CLOSE2,
-    /* 左顾右盼 */
-    DMS_INFO_ALERT_LOOK_AROUND,
-    /* 打哈欠 */
-    DMS_INFO_ALERT_YAWN,
-    /* 打电话 */
-    DMS_INFO_ALERT_PHONE,
-    /* 吸烟 */
-    DMS_INFO_ALERT_SMOKING,
-    /* 离岗 */
-    DMS_INFO_ALERT_ABSENCE,
-    /* 低头 */
-    DMS_INFO_ALERT_BOW,
-
-    DMS_INFO_ALERT_NUM,
-};
-
-#define DMS_INFO_GET_ALERT_FROM_BUFFER(buffer, index) \
-    (((buffer[DMS_INFO_ALERT_BYTE_INDEX((index))] & DMS_INFO_ALERT_MASK((index))) >> DMS_INFO_ALERT_MASK_OFFSET((index))) & 0x03)
-
-#define DMS_INFO_CLEAR_ALERT(buffer, index) \
-    (buffer[DMS_INFO_ALERT_BYTE_INDEX((index))] &= ~(DMS_INFO_ALERT_MASK((index))))
-
-#define DMS_INFO_SET_ALERT_TO_BUFFER(buffer, index, val) \
-    do{\
-        DMS_INFO_CLEAR_ALERT(buffer, (index));\
-        buffer[DMS_INFO_ALERT_BYTE_INDEX(index)] |= (((val) & 0x03) << DMS_INFO_ALERT_MASK_OFFSET(index));\
-    } while(0)
-
-#endif /* _DMS_INFO_SIMPLE_BUFFER_H */
-
-
-
-
-
-
-
-#define PACK_MAP_MSG(type, type_len, content, content_len)\
-    msgpack_pack_str(&pk, type_len);\
-    msgpack_pack_str_body(&pk, type, type_len);\
-    msgpack_pack_str(&pk, content_len);\
-    msgpack_pack_str_body(&pk, content, content_len);
+#define DMS_ALERT_0X100 "dms.alert.0x100"
+#define ADAS_0X700_DATA "output.can.0x700"
+#define ADAS_0X760_DATA "output.can.0x760"
 
 /**************
- *
  *  topic: subscribe
  *  source: client-name
  *  data: dms.alert.0x100
- *
  * ****************/
 int pack_req_can_cmd(uint8_t *data, uint32_t len, const char *name)
 {
@@ -138,23 +68,16 @@ int pack_req_can_cmd(uint8_t *data, uint32_t len, const char *name)
     msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
     msgpack_pack_map(&pk, map_size);
 
-    PACK_MAP_MSG("source", strlen("source"), "client-name", strlen("client-name"));
-    PACK_MAP_MSG("topic", strlen("topic"), "subscribe", strlen("subscribe"));
+#define PACK_MAP_MSG(type, type_len, content, content_len)\
+    msgpack_pack_str(&pk, type_len);\
+    msgpack_pack_str_body(&pk, type, type_len);\
+    msgpack_pack_str(&pk, content_len);\
+    msgpack_pack_str_body(&pk, content, content_len);
 
-    if(!memcmp(name, "700", strlen("700")))
-    {
-        PACK_MAP_MSG("data", strlen("data"), "output.can.0x700", strlen("output.can.0x700"));
-    }
-    else if(!memcmp(name, "760", strlen("760")))
-    {
-        PACK_MAP_MSG("data", strlen("data"), "output.can.0x760", strlen("output.can.0x700"));
-    }
-    else if(!memcmp(name, "dms_alert", strlen("dms_alert")))
-    {
-        PACK_MAP_MSG("data", strlen("data"), DMS_INFO_TOPIC, strlen("dms.alert.0x100"));
-    }
-    else
-        ;
+    PACK_MAP_MSG("topic", strlen("topic"), "subscribe", strlen("subscribe"));
+    PACK_MAP_MSG("source", strlen("source"), "client-name", strlen("client-name"));
+
+    PACK_MAP_MSG("data", strlen("data"), name, strlen(name));
 
     minlen = (sbuf.size<len) ? sbuf.size : len;
     memcpy(data, sbuf.data, minlen);
@@ -195,7 +118,6 @@ const char* type_to_str(uint8_t type)
             return "DEFAULT";
     }
 }
-
 #endif
 
 void msgpack_object_get(FILE* out, msgpack_object o, can_data_type *can)
@@ -415,6 +337,7 @@ int msgpack_object_dms_get(FILE* out, msgpack_object o, can_data_type *can, uint
     return 0;
 }
 
+int adas_parse_data_json(char *buffer);
 int dms_parse_data_json(char *buffer, dms_can_frame *can_frame);
 #define DMS_JSON_MSG_LEN (1024*1024)
 int unpack_recv_can_msg(char *data, size_t size)
@@ -433,7 +356,14 @@ int unpack_recv_can_msg(char *data, size_t size)
     msgpack_zone_init(&mempool, DMS_JSON_MSG_LEN);//1M
     msgpack_unpack((const char *)data, size, NULL, &mempool, &deserialized);
     memset(&can, 0, sizeof(can));
+
+    //char json_buf[1024];
+    //msgpack_object_print_buffer(json_buf, sizeof(json_buf), deserialized);
+    //WSI_DEBUG("get json:\n %s\n", json_buf);
+
+    //adas_parse_data_json(json_buf);
     msgpack_object_get(stdout, deserialized, &can);
+
     msgpack_zone_destroy(&mempool);
     can_message_send(&can);
 
@@ -459,13 +389,13 @@ int unpack_recv_can_msg(char *data, size_t size)
     if(can_frame.can_779_valid){
         WSI_DEBUG("can779:\n");
         //printbuf(&can_frame.can_779, sizeof(dms_can_779));
-        halio.send_can_frame(0x779, (char *)&can_frame.can_779);
+        //halio.send_can_frame(0x779, (char *)&can_frame.can_779);
         recv_dms_message(&can_frame.can_779);
     }
     if(can_frame.can_778_valid){
         WSI_DEBUG("can778:\n");
         //printbuf(&can_frame.can_778, sizeof(dms_can_778));
-        halio.send_can_frame(0x778, (char *)&can_frame.can_778);
+        //halio.send_can_frame(0x778, (char *)&can_frame.can_778);
     }
     if(buffer)
         free(buffer);
@@ -517,6 +447,40 @@ static bool get_dms_pose(const rapidjson::Value& val, uint8_t *yaw, uint8_t *pit
     WSI_DEBUG("roll = %g\n", val["roll"].GetDouble());
 
     return true;
+}
+
+int adas_parse_data_json(char *buffer)
+{
+    Document document;  // Default template parameter uses UTF8 and MemoryPoolAllocator.
+
+    // In-situ parsing, decode strings directly in the source string. Source must be string.
+    if (document.ParseInsitu(buffer).HasParseError()){
+        printf("Parsing to document error\n");
+        return 1;
+    }
+
+    WSI_DEBUG("Parsing to document succeeded.\n");
+    assert(document.IsObject()); 
+    assert(document.HasMember("topic"));
+    assert(document.HasMember("source"));
+    assert(document.HasMember("time"));
+    assert(document.HasMember("data"));
+
+
+    assert(document["topic"].IsString());
+    printf("topic = %s\n", document["topic"].GetString());
+    assert(document["source"].IsString());
+    printf("source = %s\n", document["source"].GetString());
+
+    assert(document["time"].IsNumber());   // Number is a JSON type, but C++ needs more specific type.
+    assert(document["time"].IsUint64());      // In this case, IsUint()/IsInt64()/IsUInt64() also return true.
+    printf("time = %ld\n", document["time"].GetUint64()); // Alternative (int)document["i"]
+
+    assert(document["data"].IsNumber());   // Number is a JSON type, but C++ needs more specific type.
+    assert(document["data"].IsUint64());      // In this case, IsUint()/IsInt64()/IsUInt64() also return true.
+    printf("data = %ld\n", document["data"].GetUint64()); // Alternative (int)document["i"]
+
+    return 0;
 }
 
 int dms_parse_data_json(char *buffer, dms_can_frame *can_frame)
@@ -746,17 +710,17 @@ static int callback_lws_communicate(struct lws *wsi, enum lws_callback_reasons r
                 if(sendflag == 2)
                 {
                     printf("request 760!\n");
-                    msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), "760");
+                    msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), ADAS_0X760_DATA);
                     sendflag = 0;
                 }
                 if(sendflag == 1)
                 {
                     printf("request 700!\n");
-                    msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), "700");
+                    msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), ADAS_0X700_DATA);
                     sendflag = 2;
                 }
 #elif defined ENABLE_DMS
-                msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), "dms_alert");
+                msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), DMS_ALERT_0X100);
                 sendflag = 0;
 #endif
                 printf("client send request, ret = %d!\n", msgpacklen);
