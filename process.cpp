@@ -322,7 +322,7 @@ int timeout_trigger(struct timespec *tv, int sec)
 
     //if((cur.tv_sec >= tv->tv_sec + sec) && (cur.tv_nsec > tv->tv_nsec)){
     if(now - last > sec*1000){
-        printf("timeout_trigger! %d s\n", sec);
+        //printf("timeout_trigger! %d s\n", sec);
         return 1;
     }
     else
@@ -2528,6 +2528,8 @@ void *pthread_req_cmd_process(void *para)
                 {
                     if(timeout_trigger(&req_time, 10))//timeout
                     {
+                        
+                        printf("try find mm file timeout!\n");
                         g_pkg_status_p->mm_data_trans_waiting = 0;
                         break;
                     }
