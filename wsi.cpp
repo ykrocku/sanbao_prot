@@ -33,7 +33,7 @@
 
 #include "prot.h"
 //#include "dms_interface.h"
-#include "dms_info_simple_buffer.h"
+//#include "dms_info_simple_buffer.h"
 
 
 using namespace rapidjson;
@@ -45,8 +45,9 @@ HalIO &halio = HalIO::Instance();
 #define MOBILEYE_CARSIGNAL_ID   (0x760)
 
 
-
+#define DMS_INFO_TOPIC  ("output.info.v1")
 #define DMS_ALERT_0X100 "dms.alert.0x100"
+
 #define ADAS_0X700_DATA "output.can.0x700"
 #define ADAS_0X760_DATA "output.can.0x760"
 
@@ -363,6 +364,7 @@ int unpack_recv_can_msg(char *data, size_t size)
     //WSI_DEBUG("get json:\n %s\n", json_buf);
 
     //adas_parse_data_json(json_buf);
+
     msgpack_object_get(stdout, deserialized, &can);
 
 
@@ -370,6 +372,12 @@ int unpack_recv_can_msg(char *data, size_t size)
     can_message_send(&can);
 
 #elif defined ENABLE_DMS
+
+    msgpack_zone_init(&mempool, DMS_JSON_MSG_LEN);//1M
+    msgpack_unpack((const char *)data, size, NULL, &mempool, &deserialized);
+    msgpack_object_print(stdout, deserialized);
+    msgpack_object_get(stdout, deserialized, &can);
+    msgpack_zone_destroy(&mempool);
 
     recv_dms_message(&can);
 
@@ -396,7 +404,7 @@ int unpack_recv_can_msg(char *data, size_t size)
         WSI_DEBUG("can779:\n");
         //printbuf(&can_frame.can_779, sizeof(dms_can_779));
         //halio.send_can_frame(0x779, (char *)&can_frame.can_779);
-        recv_dms_message(&can_frame.can_779);
+        recv_dms_message2(&can_frame.can_779);
     }
     if(can_frame.can_778_valid){
         WSI_DEBUG("can778:\n");
@@ -666,7 +674,7 @@ static int callback_lws_communicate(struct lws *wsi, enum lws_callback_reasons r
             break;
 
         case LWS_CALLBACK_CLIENT_RECEIVE:
-            //printf("receive: %ld\n", len);
+            //printf("receive websocket: %ld\n", len);
             //printbuf((uint8_t *)in, (int)len);
             unpack_recv_can_msg((char *)in, len);
             break;
@@ -727,6 +735,7 @@ static int callback_lws_communicate(struct lws *wsi, enum lws_callback_reasons r
                     sendflag = 2;
                 }
 #elif defined ENABLE_DMS
+                printf("request %s\n", DMS_ALERT_0X100);
                 msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), DMS_ALERT_0X100);
                 sendflag = 0;
 #endif

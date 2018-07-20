@@ -91,10 +91,10 @@ void get_latitude_info(char *buffer, int len)
     real_time_data tmp;
     RealTimeDdata_process(&tmp, READ_REAL_TIME_MSG);
 
-    snprintf(buffer, len, " BD:%.6fN,%.6fE",\
+    snprintf(buffer, len, "BD:%.6fN,%.6fE",\
             (MY_HTONL(tmp.latitude)*1.0)/1000000, (MY_HTONL(tmp.longitude)*1.0)/1000000);
 
-    printf("latitude: %s\n", buffer);
+    //printf("latitude: %s\n", buffer);
 
 }
 
@@ -838,7 +838,7 @@ void recv_dms_message(can_data_type *can)
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
     dms_warningtext *uploadmsg = (dms_warningtext *)&msgbuf[0];
 
-#if 0
+#if 1
     printf("soure: %s\n", can->source);
     printf("time: %ld\n", can->time);
     printf("topic: %s\n", can->topic);
@@ -862,7 +862,7 @@ void recv_dms_message(can_data_type *can)
         goto out;
     }
 
-#if 0
+#if 1
     printf("msg.alert_eye_close1 %d\n", msg.alert_eye_close1);
     printf("msg.alert_eye_close2 %d\n", msg.alert_eye_close2);
     printf("msg.alert_look_around %d\n", msg.alert_look_around);
@@ -929,7 +929,7 @@ out:
 #endif
 }
 #else
-void recv_dms_message(dms_can_779 *msg)
+void recv_dms_message2(dms_can_779 *msg)
 {
     uint32_t playloadlen = 0;
     uint8_t msgbuf[512];
@@ -1375,7 +1375,7 @@ int can_message_send(can_data_type *sourcecan)
 
     if(!memcmp(sourcecan->topic, MESSAGE_CAN700, strlen(MESSAGE_CAN700)))
     {
-       // printf("700 come********************************\n");
+        //printf("700 come********************************\n");
         //printbuf(sourcecan->warning, 8);
 #if 0
 
@@ -1430,10 +1430,7 @@ int can_message_send(can_data_type *sourcecan)
         //LDW and FCW event
         if (0 != memcmp(trigger_data, &g_last_trigger_warning, sizeof(g_last_trigger_warning)) && 0 != trigger_data[4]) {
             //printf("------LDW/FCW event-----------\n");
-
             if (can.left_ldw || can.right_ldw) {
-
-
                 if(!filter_alert_by_time(&ldw_alert, FILTER_ADAS_ALERT_SET_TIME))
                 {
                     printf("ldw filter alert by time!");
@@ -1478,7 +1475,6 @@ int can_message_send(can_data_type *sourcecan)
             //printf("headway_warning_level:%d\n", can.headway_warning_level);
             //printf("headway_measurement:%d\n", can.headway_measurement);
 
-
             if(!filter_alert_by_time(&hw_alert, FILTER_ADAS_ALERT_SET_TIME))
             {
                 printf("ldw filter alert by time!");
@@ -1509,8 +1505,6 @@ int can_message_send(can_data_type *sourcecan)
                         playloadlen);
             }
         }
-
-
 out:
         memcpy(&g_last_can_msg, &can, sizeof(g_last_can_msg));
         memcpy(&g_last_warning_data, all_warning_data, sizeof(g_last_warning_data));
@@ -2222,7 +2216,6 @@ void bond_net_device(int sock)
 	struct ifreq interface;
 	const char *inf = "eth0";
 	
-	
 	memset(&interface, 0x00, sizeof(interface));
 	strncpy(interface.ifr_name, inf, IFNAMSIZ);
 	if(setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, (char *)&interface, sizeof(interface)) < 0)
@@ -2295,13 +2288,13 @@ static int try_connect()
         return -2;
     }
 
+    bond_net_device(sock);
     while(1)
     {
 
         if( 0 == connect(sock, (struct sockaddr *)&host_serv_addr, sizeof(host_serv_addr)))
         {
             printf("connect ok!\n");
-            bond_net_device(sock);
             return sock;
         }
         else

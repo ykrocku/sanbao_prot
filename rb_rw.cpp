@@ -187,7 +187,7 @@ std::vector<uint8_t> jpeg_encode(uint8_t* data,\
     std::vector<uint8_t> jpg_vec(512 * 1024);
 
 #ifdef USE_HW_JPEG
-    fprintf(stderr, "Using hardware JPEG encoder.\n");
+    //fprintf(stderr, "Using hardware JPEG encoder.\n");
     int32_t bytes = ma_api_hw_jpeg_encode(data,\
             cols, rows, MA_COLOR_FMT_RGB888,\
             jpg_vec.data(), out_cols, out_rows, quality);
@@ -231,7 +231,7 @@ RBFrame* request_jpeg_frame(CRingBuf* pRB, uint32_t repeat_times)
 
     return pFrame;
 }
-#if 0
+#if 1
 std::string GetTimestamp() {
   time_t rawtime;
   struct tm* timeinfo;
@@ -254,30 +254,26 @@ std::string GetTimestamp() {
 
     real_time_data tmp;
     RealTimeDdata_process(&tmp, READ_REAL_TIME_MSG);
-
     snprintf(&buffer[strlen(buffer)], sizeof(buffer), " BD:%.6fN,%.6fE",\
             (MY_HTONL(tmp.latitude)*1.0)/1000000, (MY_HTONL(tmp.longitude)*1.0)/1000000);
-
     printf("latitude: %s\n", buffer);
 
   return buffer;
 }
 #endif
 
+
 //填写报警信息的一些实时数据
 std::string get_latitude_msg()
 {
-    char msg[100];
-    real_time_data tmp;
-    RealTimeDdata_process(&tmp, READ_REAL_TIME_MSG);
+    char buffer[80];
 
-    //printf("high altitude %f\n", (tmp.altitude*1.0)/1000000);
-    snprintf(msg, sizeof(msg), "BD: %.6fN, %.6fE\nspeed:%d km/h",\
-            (tmp.latitude*1.0)/1000000, (tmp.longitude*1.0)/1000000,tmp.car_speed);
-
-    printf("latitude: %s\n", msg);
-    return msg;
+    get_latitude_info(buffer, sizeof(buffer));
+    printf("latitude: %s\n", buffer);
+    return buffer;
 }
+
+
 
 
 #if 1
@@ -321,10 +317,11 @@ int EncodeRingBufWrite(CRingBuf* pRB, void *buf, int len, int width, int height)
     memcpy(pwFrame->data, buf, len);
     //memcpy(pwFrame->data, info.addr, 2 * 1024 * 1024);
     pRB->CommitWrite();
-    print_frame("producer", pwFrame);
+    //print_frame("producer", pwFrame);
 
     return 0;
 }
+
 
 
 int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int height) {
@@ -380,19 +377,6 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
                 usleep(20000);
             }
 #endif
-
-
-
-#if 0
-            //if(pFrame->frameNo % 2 == 0){
-
-            if(pFrame->frameNo % 2 == 0 && pFrame->frameNo % 3 == 0){
-                framecnt_old = pFrame->frameNo;
-                usleep(25000);
-            }else{
-                break;
-            }
-#endif
         }
     }while(1);
 
@@ -408,13 +392,13 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
     pRB->CommitRead();
 
     std::string time = GetTimestamp();
-
-    //std::string latitude =  get_latitude_msg();
+    std::string latitude =  get_latitude_msg();
 
     cv::putText(new_image, time, cv::Point(20, 60),
                 CV_FONT_HERSHEY_DUPLEX, 1.5, COLOR_BLUE, 2, CV_AA);
 
-
+    cv::putText(new_image, latitude, cv::Point(20, 120),
+                CV_FONT_HERSHEY_DUPLEX, 1.5, COLOR_BLUE, 2, CV_AA);
 
     std::vector<uint8_t> jpg_vec = jpeg_encode(new_image.data,
         new_image.cols, new_image.rows, width, height, quality);
@@ -426,12 +410,7 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
     jpg_size = jpg_vec.size();
 
     EncodeRingBufWrite(pwRB, jpg_vec.data(), jpg_size, width, height);
-
-//#if defined ENABLE_DMS
-#if 1
-
     EncodeRingBufWrite(pwRB, jpg_vec.data(), jpg_size, width, height);
-#endif
 
     return 0;
 }

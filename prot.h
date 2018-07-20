@@ -777,7 +777,8 @@ void print_adas_para(adas_para_setting *para);
 int read_local_adas_para_file(const char* filename);
 int read_local_dms_para_file(const char* filename);
 
-void recv_dms_message( dms_can_779 *can);
+void recv_dms_message( can_data_type *can);
+void recv_dms_message2( dms_can_779 *can);
 
 void produce_dms_image(InfoForStore *mm);
 void set_dms_para_setting_default();
@@ -791,6 +792,7 @@ void sem_send_init();
 
 void RealTimeDdata_process(real_time_data *data, int mode);
 
+void get_latitude_info(char *buffer, int len);
 
 #define DEBUG_G
 #ifdef DEBUG_G 
