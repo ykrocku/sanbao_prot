@@ -45,11 +45,7 @@ HalIO &halio = HalIO::Instance();
 #define MOBILEYE_CARSIGNAL_ID   (0x760)
 
 
-#define DMS_INFO_TOPIC  ("output.info.v1")
-#define DMS_ALERT_0X100 "dms.alert.0x100"
 
-#define ADAS_0X700_DATA "output.can.0x700"
-#define ADAS_0X760_DATA "output.can.0x760"
 
 /**************
  *  topic: subscribe
@@ -122,7 +118,7 @@ const char* type_to_str(uint8_t type)
 }
 #endif
 
-void msgpack_object_get(FILE* out, msgpack_object o, can_data_type *can)
+void msgpack_object_get(FILE* out, msgpack_object o, WsiFrame *can)
 {
     enum MSG_DATA_TYPE{
         CAN_DATA=1,
@@ -228,7 +224,7 @@ void msgpack_object_get(FILE* out, msgpack_object o, can_data_type *can)
     return;
 }
 
-int msgpack_object_dms_get(FILE* out, msgpack_object o, can_data_type *can, uint8_t *buf, uint32_t *buflen)
+int msgpack_object_dms_get(FILE* out, msgpack_object o, WsiFrame *can, uint8_t *buf, uint32_t *buflen)
 {
     enum MSG_DATA_TYPE{
         CAN_DATA=1,
@@ -340,15 +336,15 @@ int msgpack_object_dms_get(FILE* out, msgpack_object o, can_data_type *can, uint
 }
 
 int adas_parse_data_json(char *buffer);
-int dms_parse_data_json(char *buffer, dms_can_frame *can_frame);
+int dms_parse_data_json(char *buffer, DmsCanFrame *can_frame);
 #define DMS_JSON_MSG_LEN (1024*1024)
 int unpack_recv_can_msg(char *data, size_t size)
 {
-    dms_can_frame can_frame;
+    DmsCanFrame can_frame;
     uint32_t len = 0;
     msgpack_zone mempool;
     msgpack_object deserialized;
-    can_data_type can;
+    WsiFrame can;
     uint8_t data_msg[8192];
 
  //   if(!data || size < 0)
@@ -369,7 +365,7 @@ int unpack_recv_can_msg(char *data, size_t size)
 
 
     msgpack_zone_destroy(&mempool);
-    can_message_send(&can);
+    deal_wsi_adas_info(&can);
 
 #elif defined ENABLE_DMS
 
@@ -381,7 +377,7 @@ int unpack_recv_can_msg(char *data, size_t size)
     msgpack_object_get(stdout, deserialized, &can);
     msgpack_zone_destroy(&mempool);
 
-    recv_dms_message(&can);
+    deal_wsi_dms_info(&can);
 
 #if 0
     msgpack_zone_init(&mempool, DMS_JSON_MSG_LEN);//1M
@@ -400,17 +396,17 @@ int unpack_recv_can_msg(char *data, size_t size)
     msgpack_zone_destroy(&mempool);
     WSI_DEBUG("unpack:\n %s\n", buffer);
 
-    memset(&can_frame, 0, sizeof(dms_can_frame));
+    memset(&can_frame, 0, sizeof(DmsCanFrame));
     dms_parse_data_json(buffer, &can_frame);
     if(can_frame.can_779_valid){
         WSI_DEBUG("can779:\n");
-        //printbuf(&can_frame.can_779, sizeof(dms_can_779));
+        //printbuf(&can_frame.can_779, sizeof(DmsCan779));
         //halio.send_can_frame(0x779, (char *)&can_frame.can_779);
-        recv_dms_message2(&can_frame.can_779);
+        deal_wsi_dms_info2(&can_frame.can_779);
     }
     if(can_frame.can_778_valid){
         WSI_DEBUG("can778:\n");
-        //printbuf(&can_frame.can_778, sizeof(dms_can_778));
+        //printbuf(&can_frame.can_778, sizeof(DmsCan778));
         //halio.send_can_frame(0x778, (char *)&can_frame.can_778);
     }
     if(buffer)
@@ -500,7 +496,7 @@ int adas_parse_data_json(char *buffer)
     return 0;
 }
 
-int dms_parse_data_json(char *buffer, dms_can_frame *can_frame)
+int dms_parse_data_json(char *buffer, DmsCanFrame *can_frame)
 {
     Document document;  // Default template parameter uses UTF8 and MemoryPoolAllocator.
     static uint32_t s_frame_tag_778 = 0, s_frame_tag_779 = 0;
@@ -727,13 +723,13 @@ static int callback_lws_communicate(struct lws *wsi, enum lws_callback_reasons r
                 if(sendflag == 2)
                 {
                     printf("request 760!\n");
-                    msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), ADAS_0X760_DATA);
+                    msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), MESSAGE_CAN760);
                     sendflag = 0;
                 }
                 if(sendflag == 1)
                 {
                     printf("request 700!\n");
-                    msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), ADAS_0X700_DATA);
+                    msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), MESSAGE_CAN700);
                     sendflag = 2;
                 }
 #elif defined ENABLE_DMS
@@ -948,7 +944,7 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
-    if(pthread_create(&pth[1], NULL, pthread_tcp_process, NULL))
+    if(pthread_create(&pth[1], NULL, pthread_tcp_recv, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
@@ -958,12 +954,12 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
-    if(pthread_create(&pth[4], NULL, pthread_sav_warning_jpg, NULL))
+    if(pthread_create(&pth[4], NULL, pthread_save_media, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;
     }
-    if(pthread_create(&pth[6], NULL, pthread_req_cmd_process, NULL))
+    if(pthread_create(&pth[6], NULL, pthread_req_media_process, NULL))
     {
         printf("pthread_create fail!\n");
         return -1;

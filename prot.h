@@ -4,13 +4,15 @@
 #include <stdint.h>
 #include <arpa/inet.h>
 
-#include <queue>
 
+//for websocket
+#define DMS_INFO_TOPIC  ("output.info.v1")
+#define DMS_ALERT_0X100 "dms.alert.0x100"
+#define MESSAGE_CAN700	"output.can.0x700"
+#define MESSAGE_CAN760	"output.can.0x760"
 
 #define WRITE_REAL_TIME_MSG 0
 #define READ_REAL_TIME_MSG  1
-
-
 
 //#define ENABLE_ADAS
 //#define ENABLE_DMS
@@ -22,13 +24,10 @@
 #define FILTER_ADAS_ALERT_SET_TIME 30u
 #define FILTER_DMS_ALERT_SET_TIME 30u
 
-
 #define EXIT_MSG      2
 #define NOTICE_MSG    1
 #define WAIT_MSG      0
 #define IS_EXIT_MSG(flag)   (flag == EXIT_MSG)
-
-
 
 #define IS_BRDCST(id)   (SAMPLE_DEVICE_ID_BRDCST == (id))
 
@@ -43,11 +42,7 @@
 #define MM_AUDIO 1
 #define MM_VIDEO 2
 
-
-
-
 #define IMAGE_NUM_CACHED    40
-
 
 #if defined ENABLE_ADAS
 #define DO_DELETE_SNAP_SHOT_FILES "rm -r /data/snap/adas/*"
@@ -58,9 +53,7 @@
 #define DO_DELETE_SNAP_SHOT_FILES "rm -r /data/snap/dms/*"
 #define SNAP_SHOT_JPEG_PATH "/data/snap/"
 //#define SNAP_SHOT_JPEG_PATH "/mnt/obb/dms/"
-
 #endif
-
 
 
 #define LOCAL_ADAS_PRAR_FILE     "/data/adas_para"
@@ -74,13 +67,11 @@
 #define UPGRADE_FILE_PATH     "/mnt/obb/package.bin"
 #define CLEAN_MPK             "rm /mnt/obb/package.bin"
 
-
 #if defined ENABLE_ADAS
     #define UPGRADE_FILE_CMD      "/data/adas_upgrade.sh"
 #elif defined ENABLE_DMS
     #define UPGRADE_FILE_CMD      "/data/dms_upgrade.sh"
 #endif
-
 
 #endif
 
@@ -95,9 +86,6 @@
 #define MY_HTONL(x)     (x)
 #define MY_HTONS(x)     (x)
 #endif
-
-#define MESSAGE_CAN700	"output.can.0x700"
-#define MESSAGE_CAN760	"output.can.0x760"
 
 
 #define SAMPLE_DEVICE_ID_BRDCST         (0x0)
@@ -122,38 +110,35 @@
 
 #define SAMPLE_PROT_MAGIC               (0x7E)
 #define SAMPLE_PROT_ESC_CHAR            (0x7D)
-typedef struct _sample_prot_heade
+
+
+//*****************苏标 SB ********************/
+typedef struct __SBProtHeader
 {
     uint8_t     magic;
     uint8_t     checksum;
-//    uint16_t    version;//modify
     uint16_t    serial_num;
     uint16_t    vendor_id;
     uint8_t     device_id;
     uint8_t     cmd;
     //uint8_t     payload[n];
     //uint8_t     magic1;
-} __attribute__((packed)) sample_prot_header;
+} __attribute__((packed)) SBProtHeader;
 
-typedef struct _sample_mm_info
+typedef struct __SBMmHeader
 {
     uint8_t  type;
     uint32_t id;
-} __attribute__((packed)) sample_mm_info;
+} __attribute__((packed)) SBMmHeader;
 
-
-
-typedef struct _send_mm_info
+typedef struct __SBMmHeader2
 {
     uint8_t  devid;
     uint8_t  type;
     uint32_t id;
-} __attribute__((packed)) send_mm_info;
+} __attribute__((packed)) SBMmHeader2;
 
-
-
-
-typedef struct _sample_dev_info
+typedef struct __M4DevInfo
 {
     uint8_t     vendor_name_len;
     uint8_t     vendor_name[15];
@@ -167,14 +152,13 @@ typedef struct _sample_dev_info
     uint8_t     dev_id[15];
     uint8_t     custom_code_len;
     uint8_t     custom_code[15];
-} __attribute__((packed)) sample_dev_info;
+} __attribute__((packed)) M4DevInfo;
 
 #define SW_STATUS_BEGIN (0x1)
 #define SW_STATUS_END   (0x2)
 #define SW_STATUS_EVENT (0x0)
 
 #define WARN_TYPE_NUM       (8)
-
 #define SW_TYPE_FCW     (0x1)
 #define SW_TYPE_LDW     (0x2)
 #define SW_TYPE_HW      (0x3)
@@ -189,35 +173,23 @@ typedef struct _sample_dev_info
 #define SW_TSR_TYPE_SPEED   (0x1)
 #define SW_TSR_TYPE_HIGHT   (0x2)
 #define SW_TSR_TYPE_WEIGHT  (0x3)
-typedef struct _sample_warning
-{
-    uint8_t     reserve0;
-    uint8_t     status;
-    uint8_t     type;
-    uint8_t     reserve1;
-    uint8_t     tsr_type;
-    uint8_t     tsr_data;
-    uint8_t     reserve2[2];
-    uint8_t     mm_count;
-} __attribute__((packed)) sample_warning;
 
-typedef struct _sample_mm
+typedef struct __MmPacketIndex
 {
     uint8_t     type;
     uint32_t    id;
     uint16_t    packet_total_num;
     uint16_t    packet_index;
-} __attribute__((packed)) sample_mm;
+} __attribute__((packed)) MmPacketIndex;
 
-
-typedef struct _sample_mm_ack
+typedef struct __MmAckInfo
 {
     uint8_t     req_type;
     uint32_t    mm_id;
     uint16_t    packet_total_num;
     uint16_t    packet_index;
     uint8_t     ack;
-} __attribute__((packed)) sample_mm_ack;
+} __attribute__((packed)) MmAckInfo;
 
 typedef struct __MECANWarningMessage {
     //#ifdef BIG_ENDIAN
@@ -286,9 +258,7 @@ typedef struct __MECANWarningMessage {
 #endif
 } __attribute__((packed)) MECANWarningMessage;
 
-
-
-typedef struct __car_status {
+typedef struct __CarStatus{
     uint16_t    acc:1;
     uint16_t    left_signal:1;
     uint16_t    right_signal:1;
@@ -296,15 +266,13 @@ typedef struct __car_status {
     uint16_t    brakes:1;
     uint16_t    card:1;
     uint16_t    byte_resv:10;
+} __attribute__((packed)) CarStatus;
 
-} __attribute__((packed)) car_status_s;
-
-
-typedef struct _real_time_data{
+typedef struct __RealTimeData{
 
     uint8_t     car_speed;
     uint8_t     reserve1;
-    uint32_t     mileage;
+    uint32_t    mileage;
     uint8_t     reserve2[2];
 
     uint16_t	altitude;
@@ -312,19 +280,18 @@ typedef struct _real_time_data{
     uint32_t	longitude;
 
     uint8_t     time[6];
-    car_status_s    car_status;
+    CarStatus car_status;
 
-} __attribute__((packed)) real_time_data;
+} __attribute__((packed)) RealTimeData;
 
 
-typedef struct _module_status{
+typedef struct __ModuleStatus{
     
 #define MODULE_STANDBY          0x01
 #define MODULE_WORKING          0x02
 #define MODULE_MAINTAIN         0x03
 #define MODULE_ABNORMAL         0x04
     uint8_t work_status;
-
     uint32_t camera_err:1;
     uint32_t main_memory_err:1;
     uint32_t aux_memory_err:1;
@@ -338,12 +305,9 @@ typedef struct _module_status{
     uint32_t comm_module_err:1;
     uint32_t def_module_err:1;
     uint32_t reserve_err:20;
+} __attribute__((packed)) ModuleStatus;
 
-} __attribute__((packed)) module_status;
-
-
-typedef struct __warningtext {
-
+typedef struct __AdasWarnFrame {
     uint32_t	warning_id;
     uint8_t		start_flag;
     uint8_t		sound_type;
@@ -357,13 +321,12 @@ typedef struct __warningtext {
     uint32_t	latitude;
     uint32_t	longitude;
     uint8_t		time[6];
-    car_status_s	car_status;	
+    CarStatus	car_status;	
     uint8_t		mm_num;
-    sample_mm_info mm[0];
+    SBMmHeader mm[0];
+} __attribute__((packed)) AdasWarnFrame;
 
-} __attribute__((packed)) warningtext;
-
-
+// DMS warn Frame
 #define DMS_FATIGUE_WARN            0x01
 #define DMS_CALLING_WARN            0x02
 #define DMS_SMOKING_WARN            0x03
@@ -373,8 +336,7 @@ typedef struct __warningtext {
 #define DMS_SANPSHOT_EVENT          0x10
 #define DMS_DRIVER_CHANGE           0x11
 
-typedef struct __dms_warningtext {
-
+typedef struct __DsmWarnFrame {
     uint32_t	warning_id;
     uint8_t		status_flag;
     uint8_t		sound_type;
@@ -387,23 +349,18 @@ typedef struct __dms_warningtext {
     uint32_t	longitude; //经度
 
     uint8_t		time[6];
-    car_status_s	car_status;	
+    CarStatus	car_status;	
     uint8_t		mm_num;
-    sample_mm_info mm[0];
+    SBMmHeader mm[0];
 
-} __attribute__((packed)) dms_warningtext;
-
-
+} __attribute__((packed)) DsmWarnFrame;
 
 
 
 
 
-
-
-typedef struct __car_info {
+typedef struct __CAN760Info {
 //#ifdef BIG_ENDIAN
-
 #if 0
     uint8_t     byte0_resv1:1;
     uint8_t     byte0_resv0:1;
@@ -443,16 +400,13 @@ typedef struct __car_info {
     uint8_t     speed;
 
 #endif
-} __attribute__((packed)) car_info;
+} __attribute__((packed)) CAN760Info;
 
 
-
-typedef struct __dms_alert_info {
+typedef struct __DmsAlertInfo {
     //#ifdef BIG_ENDIAN
 #if 0
-
 #else /*Little Endian*/
-
 
     /* 短时间闭眼报警 */
     uint8_t alert_eye_close1:2;
@@ -471,7 +425,6 @@ typedef struct __dms_alert_info {
     /* 低头 */
     uint8_t alert_bow:2;
 
-
     uint8_t byte2_recv;
     uint8_t byte3_recv;
     uint8_t byte4_recv;
@@ -480,9 +433,9 @@ typedef struct __dms_alert_info {
     uint8_t byte7_recv;
 
 #endif
-} __attribute__((packed)) dms_alert_info;
+} __attribute__((packed)) DmsAlertInfo;
 
-typedef struct __dms_can_778 {
+typedef struct __DmsCan778 {
     uint8_t Left_Eyelid_fraction;
     uint8_t Right_Eyelid_fraction;
     uint8_t Head_Yaw;
@@ -490,9 +443,9 @@ typedef struct __dms_can_778 {
     uint8_t Head_Roll;
     uint8_t Frame_Tag;
     uint8_t reserved[2];
-} __attribute__((packed)) dms_can_778;
+} __attribute__((packed)) DmsCan778;
 
-typedef struct __dms_can_779 {
+typedef struct __DmsCan779 {
     uint8_t Eye_Closure_Warning:2;
     uint8_t Yawn_warning:2;
     uint8_t Look_around_warning:2;
@@ -506,26 +459,26 @@ typedef struct __dms_can_779 {
     uint8_t Frame_Tag;
     uint8_t reserved[5];
 
-} __attribute__((packed)) dms_can_779;
+} __attribute__((packed)) DmsCan779;
 
 
-typedef struct __dms_can_frame {
+typedef struct __DmsCanFrame {
     char can_779_valid;
     char can_778_valid;
 
-    dms_can_779 can_779;
-    dms_can_778 can_778;
-} __attribute__((packed)) dms_can_frame;
+    DmsCan779 can_779;
+    DmsCan778 can_778;
+} __attribute__((packed)) DmsCanFrame;
 
 
 
 /**********************can message*****************************/
-typedef struct _can_struct{
+typedef struct __WsiFrame{
     uint8_t warning[8];
     char source[20];
     uint64_t time;
     char topic[20];
-}can_data_type;
+}WsiFrame;
 
 #define HW_LEVEL_NO_CAR     (0)
 #define HW_LEVEL_WHITE_CAR  (1)
@@ -544,22 +497,10 @@ typedef struct _can_struct{
 #endif
 
 
-#if 0
-#define INDEX_SILENCE  (0)
-#define INDEX_LLDW     (1)
-#define INDEX_RLDW     (2)
-#define INDEX_HW       (3)
-#define INDEX_TSR      (4)
-#define INDEX_VB       (5)
-#define FCW_PCW        (6)
-
-#endif
-
 #define MINIEYE_WARNING_CAN_ID  (0x700)
-#define MINIEYE_CAR_INFO_CAN_ID (0x760)
+#define MINIEYE_CAN760Info_CAN_ID (0x760)
 
-
-typedef struct _adas_para_setting{
+typedef struct __AdasParaSetting{
 
     uint8_t warning_speed_val;
     uint8_t warning_volume;
@@ -608,10 +549,10 @@ typedef struct _adas_para_setting{
     uint8_t TSR_photo_time_period;
 
     uint8_t reserve2[4];
-} __attribute__((packed)) adas_para_setting;
+} __attribute__((packed)) AdasParaSetting;
 
 
-typedef struct _dms_para_setting{
+typedef struct _DmsParaSetting{
 
     //uint8_t Warn_SpeedThreshold;
     uint8_t warning_speed_val;
@@ -653,25 +594,23 @@ typedef struct _dms_para_setting{
     uint8_t AbnormalDriv_PhotoInterval;
 
     uint8_t reserve2[2];
-} __attribute__((packed)) dms_para_setting;
+} __attribute__((packed)) DmsParaSetting;
 
 
-typedef struct _mm_node{
+typedef struct __MmInfo_node{
 #define SLOT_STABLE     0
 #define SLOT_WRITING    1
 #define SLOT_READING    2
-
     char rw_flag;
     uint8_t devid;
     uint8_t warn_type;
     uint8_t mm_type;
     uint32_t mm_id;
     uint8_t time[6];
-
-} __attribute__((packed)) mm_node;
+} __attribute__((packed)) MmInfo_node;
 
 #define WARN_SNAP_NUM_MAX   10
-typedef struct _InfoForStore{
+typedef struct __InfoForStore{
 
     uint8_t flag;
     uint8_t warn_type;
@@ -685,119 +624,39 @@ typedef struct _InfoForStore{
     uint8_t photo_num;
     uint32_t photo_id[WARN_SNAP_NUM_MAX];
     uint32_t video_id[2];
-
 } __attribute__((packed)) InfoForStore;
 
 
-/**********queue and repeat_send struct****************/
-//#define IMAGE_SIZE_PER_PACKET   (1024*16)
-#define IMAGE_SIZE_PER_PACKET   (64*1024)
-//#define IMAGE_SIZE_PER_PACKET   (4*1024)
-
-#define PTR_QUEUE_BUF_SIZE   (2*(IMAGE_SIZE_PER_PACKET + 64)) //加64, 大于 header + tail, 
-#define PTR_QUEUE_BUF_CNT    (16)
-#define UCHAR_QUEUE_SIZE    (128*1024)
 
 
-
-#define MSG_ACK_READY           0
-#define MSG_ACK_WAITING         1
-#define MSG_NO_NEED_ACK         2
-
-#define NO_MESSAGE_TO_SEND      1
-#define NO_MESSAGE_TO_SEND      1
-
-typedef struct queue_node_status{
-    uint8_t ack_status;
-    uint8_t send_repeat;
-    struct timeval send_time;
-    sample_mm mm;
-    bool mm_data_trans_waiting;
-}SendStatus;
-
-typedef struct _ptr_queue_node{
-    uint8_t cmd;
-    
-    send_mm_info mm_info;
-    SendStatus pkg;
-    InfoForStore mm;
-
-    uint32_t len;
-    uint8_t *buf;
-} __attribute__((packed)) ptr_queue_node;
-
-typedef struct _package_repeat_status{
-#define REPEAT_SEND_TIMES_MAX   3
-
-
-    char filepath[100];
-    sample_mm mm;
-
-    bool mm_data_trans_waiting;
-    uint8_t repeat_cnt;
-    struct timeval msg_sendtime;
-    bool start_wait_ack;
-    ptr_queue_node msgsend;
-} __attribute__((packed)) pkg_repeat_status;
-
-
-
-void *pthread_snap_shot(void *p);
-void *pthread_sav_warning_jpg(void *p);
+//pthread
+void *pthread_websocket_client(void *para);
+void *pthread_tcp_recv(void *para);
 void *pthread_encode_jpeg(void *p);
-void *pthread_tcp_process(void *para);
-void *pthread_parse_cmd(void *para);
-void *pthread_req_cmd_process(void *para);
+void *pthread_save_media(void *p);
+void *pthread_req_media_process(void *para);
+void *pthread_snap_shot(void *p);
 void *pthread_tcp_send(void *para);
 
-
-void set_algo_para();
-
+//para file
+void global_var_init();
 void read_dev_para(void *para, uint8_t para_type);
 void write_dev_para(void *para, uint8_t para_type);
-
 int write_local_adas_para_file(const char* filename);
 int write_local_dms_para_file(const char* filename);
+void set_AdasParaSetting_default();
 
-void set_adas_para_setting_default();
-void global_var_init();
+int write_file(const char* filename, const void* data, size_t size);
+
+//queue
 int pull_mm_queue(InfoForStore *mm);
 void push_mm_queue(InfoForStore *mm);
-int write_file(const char* filename, const void* data, size_t size);
-int record_snap_shot();
-int do_snap_shot();
 void display_mm_resource();
-int32_t find_mm_resource(uint32_t id, mm_node *m);
+int32_t find_mm_resource(uint32_t id, MmInfo_node *m);
 int32_t delete_mm_resource(uint32_t id);
-char *warning_type_to_str(uint8_t type);
-int timeout_trigger(struct timespec *tv, int sec);
-void repeat_send_pkg_status_init();
-void printbuf(void *buf, int len);
-int can_message_send(can_data_type *sourcecan);
-void adas_para_check(adas_para_setting *para);
+void insert_mm_resouce(MmInfo_node m);
 
-void print_dms_para(dms_para_setting *para);
-void print_adas_para(adas_para_setting *para);
-int read_local_adas_para_file(const char* filename);
-int read_local_dms_para_file(const char* filename);
-
-void recv_dms_message( can_data_type *can);
-void recv_dms_message2( dms_can_779 *can);
-
-void produce_dms_image(InfoForStore *mm);
-void set_dms_para_setting_default();
-
-
-void insert_mm_resouce(mm_node m);
-int32_t sample_assemble_msg_to_push(sample_prot_header *pHeader, uint8_t devid, uint8_t cmd,uint8_t *payload, int32_t payload_len);
-void get_local_time(uint8_t get_time[6]);
-int ratelimit_connects(unsigned int *last, unsigned int secs);
-void sem_send_init();
-
-void RealTimeDdata_process(real_time_data *data, int mode);
-
-void get_latitude_info(char *buffer, int len);
-
+//common
 #define DEBUG_G
 #ifdef DEBUG_G 
 //#define MY_DEBUG(format,...) printf("File: "__FILE__", Line: %05d:\n", __LINE__, ##__VA_ARGS__)
@@ -805,7 +664,30 @@ void get_latitude_info(char *buffer, int len);
 #else
 #define WSI_DEBUG(format,...)
 #endif
+void printbuf(void *buf, int len);
+int timeout_trigger(struct timespec *tv, int sec);
+int ratelimit_connects(unsigned int *last, unsigned int secs);
 
+//prot
+int do_snap_shot();
+char *warning_type_to_str(uint8_t type);
+int deal_wsi_adas_info(WsiFrame *sourcecan);
+void adas_para_check(AdasParaSetting *para);
+
+void print_dms_para(DmsParaSetting *para);
+void print_adas_para(AdasParaSetting *para);
+int read_local_adas_para_file(const char* filename);
+int read_local_dms_para_file(const char* filename);
+void set_DmsParaSetting_default();
+void deal_wsi_dms_info( WsiFrame *can);
+void deal_wsi_dms_info2( DmsCan779 *can);
+
+int32_t message_queue_send(SBProtHeader *pHeader, uint8_t devid, uint8_t cmd,uint8_t *payload, int32_t payload_len);
+void get_local_time(uint8_t get_time[6]);
+void sem_send_init();
+
+void RealTimeDdata_process(RealTimeData *data, int mode);
+void get_latitude_info(char *buffer, int len);
 
 
 #endif

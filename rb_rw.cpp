@@ -50,101 +50,6 @@ extern volatile int force_exit;
 
 #define  ADAS_JPEG_SIZE (16* 1024 * 1024)
 
-// global variables
-static const char* version = "1.1.0";
-
-static list<mm_node> mmlist;
-static pthread_mutex_t mm_resource_lock = PTHREAD_MUTEX_INITIALIZER;
-
-void display_mm_resource()
-{
-    list<mm_node>::iterator it;  
-
-    pthread_mutex_lock(&mm_resource_lock);
-    for(it=mmlist.begin();it!=mmlist.end();it++)  
-    {  
-        printf("display list id = %d\n",it->mm_id);
-        printf("warn_type = %d, mm_type=%d\n",it->warn_type, it->mm_type);
-    }  
-    pthread_mutex_unlock(&mm_resource_lock);
-}
-
-int32_t find_mm_resource(uint32_t id, mm_node *m)
-{
-    list<mm_node>::iterator it;  
-    int ret = -1;
-
-    pthread_mutex_lock(&mm_resource_lock);
-    for(it=mmlist.begin();it!=mmlist.end();it++)  
-    {  
-        //  printf("find id=%d,list id = %d\n",id, it->mm_id);
-        //  printf("warn_type = %d, mm_type=%d\n",it->warn_type, it->mm_type);
-        if(it->mm_id == id)
-        {
-            memcpy(m, &it->rw_flag, sizeof(mm_node));  
-            ret = 0;
-            break;
-        }
-    }  
-    pthread_mutex_unlock(&mm_resource_lock);
-    return ret;
-}
-
-int32_t delete_mm_resource(uint32_t id)
-{
-    list<mm_node>::iterator it;  
-    int ret = -1;
-    char filepath[100];
-
-    pthread_mutex_lock(&mm_resource_lock);
-    for(it=mmlist.begin();it!=mmlist.end();it++)  
-    {  
-        //   printf("delete id=%d, list id = %d\n",id, it->mm_id);
-        //   printf("warn_type = %d, mm_type=%d\n",it->warn_type, it->mm_type);
-        if(it->mm_id == id)
-        {
-            if(it->mm_type == MM_PHOTO)
-            {
-#if 0
-                sprintf(filepath, "%s%s-%08d.jpg",SNAP_SHOT_JPEG_PATH,\
-                        warning_type_to_str(it->warn_type), id);
-#endif
-                sprintf(filepath, "%s%08d.jpg",SNAP_SHOT_JPEG_PATH,id);
-                printf("rm jpeg %s\n", filepath);
-                remove(filepath);
-                it = mmlist.erase(it);  
-                ret = 0;
-                break;
-            }
-            if(it->mm_type == MM_VIDEO)
-            {
-#if 0
-                sprintf(filepath,"%s%s-%08d.mp4",SNAP_SHOT_JPEG_PATH,\
-                        warning_type_to_str(it->warn_type), id);
-#endif
-
-                sprintf(filepath,"%s%08d.mp4",SNAP_SHOT_JPEG_PATH,id);
-
-                printf("rm mp4 %s\n", filepath);
-                remove(filepath);
-                it = mmlist.erase(it);  
-                ret = 0;
-                break;
-            }
-
-        }
-    }  
-    pthread_mutex_unlock(&mm_resource_lock);
-
-    return ret;
-}
-
-void insert_mm_resouce(mm_node m)
-{
-    pthread_mutex_lock(&mm_resource_lock);
-    mmlist.push_back(m); 
-    pthread_mutex_unlock(&mm_resource_lock);
-}
 
 void print_frame(const char * name, RBFrame* pFrame)
 {
@@ -433,13 +338,13 @@ void GetConfigResolution(int *w, int *h)
     int index = 0;
 
 #if defined ENABLE_ADAS
-    adas_para_setting para;
+    AdasParaSetting para;
     read_dev_para(&para, SAMPLE_DEVICE_ID_ADAS);
     index = para.image_Resolution%6;
     *w = ConfigResolution[index][0];
     *h = ConfigResolution[index][1];
 #elif defined ENABLE_DMS
-    dms_para_setting para;
+    DmsParaSetting para;
     read_dev_para(&para, SAMPLE_DEVICE_ID_DMS);
     index = para.image_Resolution%6;
     *w = ConfigResolution[index][0];
@@ -530,94 +435,11 @@ void *pthread_encode_jpeg(void *p)
     pthread_exit(NULL);
 }
 
-#define FCW_NAME            "FCW"
-#define LDW_NAME            "LDW"
-#define HW_NAME             "HW"
-#define PCW_NAME            "PCW"
-#define FLC_NAME            "FLC"
-#define TSRW_NAME           "TSRW"
-#define TSR_NAME            "TSR"
-#define SNAP_NAME           "SNAP"
-char *warning_type_to_str(uint8_t type)
-{
-    static char name[20];
-
-    strcpy(name, "default");
-    switch(type)
-    {
-        case SW_TYPE_FCW:
-            return strcpy(name, FCW_NAME);
-        case SW_TYPE_LDW:
-            return strcpy(name, LDW_NAME);
-        case SW_TYPE_HW:
-            return strcpy(name, HW_NAME);
-        case SW_TYPE_PCW:
-            return strcpy(name, PCW_NAME);
-        case SW_TYPE_FLC:
-            return strcpy(name, FLC_NAME);
-        case SW_TYPE_TSRW:
-            return strcpy(name, TSRW_NAME);
-        case SW_TYPE_TSR:
-            return strcpy(name, TSR_NAME);
-        case SW_TYPE_SNAP:
-            return strcpy(name, SNAP_NAME);
-
-            // case SW_TYPE_TIMER_SNAP:
-            //   return strcpy(name, "TIMER_SNAP");
-        default:
-            return name;
-    }
-}
-
-int str_to_warning_type(char *type, uint8_t *val)
-{
-
-    if(!strncmp(FCW_NAME, type, sizeof(FCW_NAME)))
-    {
-        *val = SW_TYPE_FCW;
-    }
-    else if(!strncmp(LDW_NAME, type, sizeof(LDW_NAME)))
-    {
-        *val = SW_TYPE_LDW;
-    }
-    else if(!strncmp(HW_NAME, type, sizeof(HW_NAME)))
-    {
-        *val = SW_TYPE_HW;
-    }
-    else if(!strncmp(PCW_NAME, type, sizeof(PCW_NAME)))
-    {
-        *val = SW_TYPE_PCW;
-    }
-    else if(!strncmp(FLC_NAME, type, sizeof(FLC_NAME)))
-    {
-        *val = SW_TYPE_FLC;
-    }
-    else if(!strncmp(TSRW_NAME, type, sizeof(TSRW_NAME)))
-    {
-        *val = SW_TYPE_TSRW;
-    }
-    else if(!strncmp(TSR_NAME, type, sizeof(TSR_NAME)))
-    {
-        *val = SW_TYPE_TSR;
-    }
-    else if(!strncmp(SNAP_NAME, type, sizeof(SNAP_NAME)))
-    {
-        *val = SW_TYPE_SNAP;
-    }
-    else
-    {
-        printf("unknow warn type: %s\n", type);
-        return -1;   
-    }
-
-    return 0;
-}
-
 void store_one_jpeg(InfoForStore *mm, RBFrame* pFrame, int index)
 {
     char filepath[100];
     char writefile_link[100];
-    mm_node node;
+    MmInfo_node node;
 
     sprintf(filepath,"%s%08d.jpg", SNAP_SHOT_JPEG_PATH,mm->photo_id[index]);
 
@@ -671,7 +493,7 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
     RBFrame* pFrame = nullptr;
     char mp4filepath[100];
     char testfilepath[100];
-    mm_node node;
+    MmInfo_node node;
     uint32_t FrameNumEnd = 0;
     int jpeg_index = 0;
     uint32_t interval= 0; //ms
@@ -830,7 +652,7 @@ void record_mm_infor(CRingBuf* pRB, InfoForStore info)
     RBFrame* pFrame = nullptr;
     char mp4filepath[100];
     InfoForStore mm;
-    mm_node node;
+    MmInfo_node node;
     uint64_t timestart = 0;
     struct timeval record_time;  
     int cnt = 1;
@@ -884,7 +706,7 @@ void parse_filename(char *filename)
     char warn_name[32];
     char mm_id[32];
     char file_type[32];
-    mm_node node;
+    MmInfo_node node;
     uint32_t i=0, j=0;
     int ret = 0;
     char *pos = NULL;
@@ -1046,37 +868,11 @@ int read_pthread_num(uint32_t i)
     return pstat.NumThreads;
 }
 
-void produce_dms_image(InfoForStore *mm)
-{
-    char produce_file[50];
-    int i=0;
-    mm_node node;
-
-
-
-    for(i=0; i<mm->photo_num; i++){
-        printf("photo id = %d\n", mm->photo_id[i]);
-        snprintf(produce_file, sizeof(produce_file), "cp /data/dms.jpg %s/%08d.jpg",SNAP_SHOT_JPEG_PATH, mm->photo_id[i]);
-        printf("--%s\n", produce_file);
-        system(produce_file);
-        node.mm_type = MM_PHOTO;
-        node.mm_id = mm->photo_id[i];
-        insert_mm_resouce(node);
-    }
-    printf("video id = %d\n", mm->video_id[0]);
-    snprintf(produce_file, sizeof(produce_file), "cp /data/dms.mp4 %s/%08d.mp4",SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
-    printf("--%s\n", produce_file);
-    system(produce_file);
-    node.mm_type = MM_VIDEO;
-    node.mm_id = mm->video_id[0];
-    insert_mm_resouce(node);
-}
-
 extern int save_mp4;
 extern pthread_mutex_t  save_mp4_mutex;
 extern pthread_cond_t   save_mp4_cond;
 
-void *pthread_sav_warning_jpg(void *p)
+void *pthread_save_media(void *p)
 {
 #define CUSTOMER_NUM   8 
     int cnt = 0;

@@ -99,7 +99,7 @@ ELSEIF(ANDROID_ABI)
         ADD_DEFINITIONS(-DENABLE_DMS)
     ENDIF()
 
-    ADD_EXECUTABLE(wsi wsi.cpp process.cpp rb_rw.cpp prot.cpp)
+    ADD_EXECUTABLE(wsi wsi.cpp process.cpp rb_rw.cpp para.cpp common.cpp)
     #ADD_DEPENDENCIES(wsi MINIEYE_VERSION)
     TARGET_LINK_LIBRARIES(wsi
         #        halio concurrency

@@ -12,14 +12,14 @@
 
 #include "prot.h"
 
-static adas_para_setting adas_para;
-static dms_para_setting dms_para;
+static AdasParaSetting adas_para;
+static DmsParaSetting dms_para;
 
 static pthread_mutex_t para_lock = PTHREAD_MUTEX_INITIALIZER;
 void read_dev_para(void *para, uint8_t para_type)
 {
-    //dms_para_setting *dms_para = (dms_para_setting *)para;
-    //adas_para_setting *adas_para = (adas_para_setting *)para;
+    //DmsParaSetting *dms_para = (DmsParaSetting *)para;
+    //AdasParaSetting *adas_para = (AdasParaSetting *)para;
 
     pthread_mutex_lock(&para_lock);
 
@@ -35,8 +35,8 @@ void write_dev_para(void *para, uint8_t para_type)
     uint32_t i;
     uint8_t *in8 = NULL;
     uint8_t *out8 = NULL;
-    dms_para_setting *pDsmPara = (dms_para_setting *)para;
-    adas_para_setting *pAdasPara = (adas_para_setting *)para;
+    DmsParaSetting *pDsmPara = (DmsParaSetting *)para;
+    AdasParaSetting *pAdasPara = (AdasParaSetting *)para;
 
     in8 = (uint8_t *)para;
 
@@ -49,7 +49,7 @@ void write_dev_para(void *para, uint8_t para_type)
         if(pAdasPara->auto_photo_distance_period != 0xFFFF)
             adas_para.auto_photo_distance_period = pAdasPara->auto_photo_distance_period;
 
-        for(i=0; i< sizeof(adas_para_setting); i++)
+        for(i=0; i< sizeof(AdasParaSetting); i++)
         {
             if(i==3)
                 i+=4;
@@ -76,7 +76,7 @@ void write_dev_para(void *para, uint8_t para_type)
         if(pDsmPara->Call_TimeIntervalThreshold!= 0xFFFF)
             dms_para.Call_TimeIntervalThreshold= pDsmPara->Call_TimeIntervalThreshold;
 
-        for(i=0; i< sizeof(dms_para_setting); i++)
+        for(i=0; i< sizeof(DmsParaSetting); i++)
         {
             if(i==3)
                 i+=4;
@@ -92,7 +92,7 @@ void write_dev_para(void *para, uint8_t para_type)
     pthread_mutex_unlock(&para_lock);
 }
 
-void print_adas_para(adas_para_setting *para)
+void print_adas_para(AdasParaSetting *para)
 {
     printf("print adas para.................\n");
 
@@ -134,7 +134,7 @@ void print_adas_para(adas_para_setting *para)
 }
 
 
-void print_dms_para(dms_para_setting *para)
+void print_dms_para(DmsParaSetting *para)
 {
     printf("print dms para.................\n");
     printf("dms_para->warning_speed_val             = %d\n", para->warning_speed_val);
@@ -168,9 +168,9 @@ void print_dms_para(dms_para_setting *para)
 }
 
 
-void dms_para_check(dms_para_setting *p)
+void dms_para_check(DmsParaSetting *p)
 {
-    dms_para_setting *para = (dms_para_setting *)p;
+    DmsParaSetting *para = (DmsParaSetting *)p;
 
     printf("adas para checking...!\n");
     if(para->warning_speed_val < 0 || para->warning_speed_val > 60)
@@ -317,20 +317,10 @@ void dms_para_check(dms_para_setting *p)
 
 }
 
-
-
-
-
-
-
-
-
-
-
 //if para error, set default val
-void adas_para_check(adas_para_setting *p)
+void adas_para_check(AdasParaSetting *p)
 {
-    adas_para_setting *para = (adas_para_setting *)p;
+    AdasParaSetting *para = (AdasParaSetting *)p;
 
     printf("adas para checking...!\n");
     
@@ -529,9 +519,9 @@ void adas_para_check(adas_para_setting *p)
     }
 }
 
-void set_adas_para_setting_default()
+void set_AdasParaSetting_default()
 {
-    adas_para_setting para;
+    AdasParaSetting para;
     
     printf("%s!\n", __FUNCTION__);
     para.warning_speed_val = 30;// km/h, 0-60
@@ -585,9 +575,9 @@ void set_adas_para_setting_default()
     printf("write default adas para to global para!\n");
 }
 
-void set_dms_para_setting_default()
+void set_DmsParaSetting_default()
 {
-    dms_para_setting para;
+    DmsParaSetting para;
 
     printf("%s!\n", __FUNCTION__);
     para.warning_speed_val = 30;// km/h, 0-60
@@ -633,7 +623,7 @@ void set_dms_para_setting_default()
 
 int read_local_adas_para_file(const char* filename)
 {
-    adas_para_setting para;
+    AdasParaSetting para;
     char cmd[512];
 
     FILE* fp = fopen(filename, "r");
@@ -647,7 +637,7 @@ int read_local_adas_para_file(const char* filename)
         fclose(fp);
 
         //no para file ,so set default to file
-        set_adas_para_setting_default();
+        set_AdasParaSetting_default();
         write_local_adas_para_file(filename);
     }else{
         size_t nb = fread(&para, 1, sizeof(para), fp);
@@ -683,7 +673,7 @@ int read_local_adas_para_file(const char* filename)
 
 int read_local_dms_para_file(const char* filename)
 {
-    dms_para_setting para;
+    DmsParaSetting para;
     char cmd[512];
 
     FILE* fp = fopen(filename, "r");
@@ -697,7 +687,7 @@ int read_local_dms_para_file(const char* filename)
         fclose(fp);
 
         //no para file ,so set default to file
-        set_dms_para_setting_default();
+        set_DmsParaSetting_default();
         write_local_dms_para_file(filename);
     }else{
         size_t nb = fread(&para, 1, sizeof(para), fp);
@@ -733,7 +723,7 @@ int read_local_dms_para_file(const char* filename)
 
 int write_local_adas_para_file(const char* filename) {
     int ret = 0;
-    adas_para_setting para;
+    AdasParaSetting para;
 
     read_dev_para(&para, SAMPLE_DEVICE_ID_ADAS);
     print_adas_para(&para);
@@ -743,7 +733,7 @@ int write_local_adas_para_file(const char* filename) {
 }
 int write_local_dms_para_file(const char* filename) {
     int ret = 0;
-    dms_para_setting dms_para;
+    DmsParaSetting dms_para;
 
     read_dev_para(&dms_para, SAMPLE_DEVICE_ID_DMS);
     print_dms_para(&dms_para);
