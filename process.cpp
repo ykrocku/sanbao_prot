@@ -83,7 +83,7 @@ void RealTimeDdata_process(real_time_data *data, int mode)
     }
     pthread_mutex_unlock(&real_time_msg_lock);
     
-    printf("get car speed: %d\n", data->car_speed);
+    //printf("get car speed: %d\n", data->car_speed);
 }
 
 void get_latitude_info(char *buffer, int len)
@@ -308,21 +308,21 @@ static int ptr_queue_pop(queue<ptr_queue_node*> *p, ptr_queue_node *out,  pthrea
 }
 
 
+
 //return 0, 超时，单位是毫秒 
-int timeout_trigger(struct timeval *tv, int ms)
+int timeout_trigger(struct timespec *tv, int sec)
 {
-    struct timeval tv_cur;
-    int timeout_sec, timeout_usec;
+    struct timespec cur;
+    long last = 0, now = 0;
 
-    timeout_sec = (ms)/1000;
-    timeout_usec  = ((ms)%1000)*1000;
+	clock_gettime(CLOCK_MONOTONIC, &cur);
 
-    gettimeofday(&tv_cur, NULL);
+    last =  tv->tv_sec*1000 + tv->tv_nsec/1000000;
+    now =  cur.tv_sec*1000 + cur.tv_nsec/1000000;
 
-    if((tv_cur.tv_sec > tv->tv_sec + timeout_sec) || \
-            ((tv_cur.tv_sec == tv->tv_sec + timeout_sec) && (tv_cur.tv_usec > tv->tv_usec + timeout_usec)))
-    {
-        printf("timeout_trigger! %d ms\n", ms);
+    //if((cur.tv_sec >= tv->tv_sec + sec) && (cur.tv_nsec > tv->tv_nsec)){
+    if(now - last > sec*1000){
+        printf("timeout_trigger! %d s\n", sec);
         return 1;
     }
     else
@@ -564,14 +564,13 @@ void get_dms_Info_for_store(uint8_t type, InfoForStore *mm_store)
 
 int filter_alert_by_time(unsigned int *last, unsigned int secs)
 {
-    struct timeval tv; 
+    struct timespec tv;
 
 #ifndef FILTER_ALERT_BY_SPEED
     return 1;
 #endif
 
-    gettimeofday(&tv, NULL);
-
+	clock_gettime(CLOCK_MONOTONIC, &tv);
     if (tv.tv_sec - (*last) < secs)
         return 0;
 
@@ -838,7 +837,7 @@ void recv_dms_message(can_data_type *can)
     sample_prot_header *pSend = (sample_prot_header *) txbuf;
     dms_warningtext *uploadmsg = (dms_warningtext *)&msgbuf[0];
 
-#if 1
+#if 0
     printf("soure: %s\n", can->source);
     printf("time: %ld\n", can->time);
     printf("topic: %s\n", can->topic);
@@ -846,9 +845,6 @@ void recv_dms_message(can_data_type *can)
 #endif
 
     memcpy(&msg, can->warning, sizeof(can->warning));
-    if(!filter_alert_by_speed())
-        goto out;
-
 
     for(i=0; i<sizeof(can->warning); i++)
     {
@@ -858,11 +854,14 @@ void recv_dms_message(can_data_type *can)
     //filter the same alert
     if(!memcmp(dms_alert, dms_alert_last, sizeof(dms_alert)))
     {
-        printf("alert is the same!\n");
+        //printf("alert is the same!\n");
         goto out;
     }
 
-#if 1
+    if(!filter_alert_by_speed())
+        goto out;
+
+#if 0
     printf("msg.alert_eye_close1 %d\n", msg.alert_eye_close1);
     printf("msg.alert_eye_close2 %d\n", msg.alert_eye_close2);
     printf("msg.alert_look_around %d\n", msg.alert_look_around);
@@ -1342,7 +1341,6 @@ void set_BCD_time(warningtext *uploadmsg, uint64_t usec)
     printf("%d-%d-%d %d:%d:%d\n", (1900 + p->tm_year), ( 1 + p->tm_mon), p->tm_mday,(p->tm_hour), p->tm_min, p->tm_sec); 
 }
 
-static struct timeval test_time;  
 
 static MECANWarningMessage g_last_warning_data;
 static MECANWarningMessage g_last_can_msg;
@@ -1377,28 +1375,6 @@ int can_message_send(can_data_type *sourcecan)
     {
         //printf("700 come********************************\n");
         //printbuf(sourcecan->warning, 8);
-#if 0
-
-        if(!filter_alert_by_time(&ldw_alert, FILTER_ADAS_ALERT_SET_TIME))
-        {
-            printf("ldw filter alert by time!");
-            return 0;
-        }
-
-        if(timeout_trigger(&test_time, 5*1000))//timeout
-        {
-            gettimeofday(&test_time, NULL);
-            playloadlen = build_adas_warn_frame(SW_TYPE_FCW, uploadmsg);
-            uploadmsg->start_flag = SW_STATUS_EVENT;
-            uploadmsg->sound_type = SW_TYPE_FCW;
-            sample_assemble_msg_to_push(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
-                    (uint8_t *)uploadmsg, \
-                    playloadlen);
-
-            return 0;
-        }
-        
-#endif
         memcpy(&can, sourcecan->warning, sizeof(sourcecan->warning));
         //printf("ldw_off = %d\n",can.ldw_off);
         //printf("left_ldw= %d\n",can.left_ldw);
@@ -1538,11 +1514,12 @@ void get_local_time(uint8_t get_time[6])
 {
     struct tm a;
     struct tm *p = &a;
-    time_t timep = 0;   
+    time_t rawtime = 0;   
 
-    timep = time(NULL);
+    rawtime += 8*3600;
+    rawtime = time(NULL);
 
-    p = localtime(&timep);
+    p = localtime(&rawtime);
     get_time[0] = p->tm_year;
     get_time[1] = p->tm_mon+1;
     get_time[2] = p->tm_mday;
@@ -1786,9 +1763,13 @@ out:
 
 void write_real_time_data(sample_prot_header *pHeader, int32_t len)
 {
+    real_time_data *data;
+
     if(len == sizeof(sample_prot_header) + 1 + sizeof(real_time_data))
     {
         RealTimeDdata_process((real_time_data *)(pHeader+1), WRITE_REAL_TIME_MSG);
+        data = (real_time_data *)(pHeader+1);
+        printf("recv car speed: %d\n", data->car_speed);
     }
     else
     {
@@ -2452,7 +2433,7 @@ void parse_cmd(uint8_t *buf, uint8_t *msgbuf)
     ret = unescaple_msg(buf, msgbuf, RECV_HOST_DATA_BUF_SIZE);
     if(ret>0){
         framelen = ret;
-        printf("recv framelen = %d\n", framelen);
+        //printf("recv framelen = %d\n", framelen);
         sum = sample_calc_sum(pHeader, framelen);
         if (sum != pHeader->checksum) {
             printf("Checksum missmatch calcated: 0x%02hhx != 0x%2hhx\n",
@@ -2526,15 +2507,10 @@ void *pthread_req_cmd_process(void *para)
     uint32_t filesize = 0;
     send_mm_info send_mm;
     send_mm_info *send_mm_ptr = &send_mm;
-    struct timeval req_time;  
+    struct timespec req_time;  
     int ret = 0;
 
-    uint8_t recv_time[6];
-    get_local_time(recv_time);
-
     prctl(PR_SET_NAME, "cache_GetVideocmd");
-    gettimeofday(&test_time, NULL);
-
 
     while(1)
     {
@@ -2542,7 +2518,7 @@ void *pthread_req_cmd_process(void *para)
         {
             printf("pull mm_info!\n");
 
-            gettimeofday(&req_time, NULL);
+	        clock_gettime(CLOCK_MONOTONIC, &req_time);
             while(1){
 
                 mm_id = MY_HTONL(send_mm_ptr->id);
@@ -2550,7 +2526,7 @@ void *pthread_req_cmd_process(void *para)
                 ret = find_local_image_name(mm_type, mm_id,  g_pkg_status_p->filepath, &filesize);
                 if(ret != 0)
                 {
-                    if(timeout_trigger(&req_time, 10*1000))//timeout
+                    if(timeout_trigger(&req_time, 10))//timeout
                     {
                         g_pkg_status_p->mm_data_trans_waiting = 0;
                         break;

@@ -46,8 +46,6 @@
 
 using namespace std;
 
-
-
 extern volatile int force_exit;
 
 #define  ADAS_JPEG_SIZE (16* 1024 * 1024)
@@ -233,14 +231,18 @@ RBFrame* request_jpeg_frame(CRingBuf* pRB, uint32_t repeat_times)
 }
 #if 1
 std::string GetTimestamp() {
-  time_t rawtime;
-  struct tm* timeinfo;
-  char buffer[80];
-  memset(buffer, 0, sizeof buffer);
-  time(&rawtime);
-  timeinfo = localtime(&rawtime);
-  strftime(buffer, sizeof buffer, "%Y-%m-%d %H:%M:%S", timeinfo);
-  return buffer;
+    time_t rawtime;
+    struct tm* timeinfo;
+    char buffer[80];
+    memset(buffer, 0, sizeof buffer);
+    time(&rawtime);
+    
+    //convert to CST
+    rawtime += 8*3600;
+
+    timeinfo = localtime(&rawtime);
+    strftime(buffer, sizeof buffer, "%Y-%m-%d %H:%M:%S", timeinfo);
+    return buffer;
 }
 #else
 std::string GetTimestamp() {
@@ -269,7 +271,7 @@ std::string get_latitude_msg()
     char buffer[80];
 
     get_latitude_info(buffer, sizeof(buffer));
-    printf("latitude: %s\n", buffer);
+    //printf("latitude: %s\n", buffer);
     return buffer;
 }
 
@@ -308,12 +310,10 @@ int EncodeRingBufWrite(CRingBuf* pRB, void *buf, int len, int width, int height)
     pwFrame->video.VHeight = height;
 
     struct timespec t;
-    struct timeval tv;
     clock_gettime(CLOCK_MONOTONIC, &t);
-    gettimeofday(&tv, NULL);
 
-    pwFrame->time = tv.tv_sec * 1000 + tv.tv_usec/1000;
-    pwFrame->pts = t.tv_sec * 1000 + t.tv_nsec/(1000 * 1000);
+    pwFrame->time = t.tv_sec * 1000 + t.tv_nsec/1000000;
+    pwFrame->pts = pwFrame->time;
     memcpy(pwFrame->data, buf, len);
     //memcpy(pwFrame->data, info.addr, 2 * 1024 * 1024);
     pRB->CommitWrite();
@@ -362,7 +362,10 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
             }
 
 
-#if defined ENABLE_DMS
+
+//两个摄像头都是15帧，取三分之二。
+#if 1
+//#if defined ENABLE_DMS
             if(pFrame->frameNo % 3 == 0){
                 framecnt_old = pFrame->frameNo;
                 usleep(20000);
@@ -471,7 +474,7 @@ void *pthread_encode_jpeg(void *p)
     //GetConfigResolution(&Vwidth, &Vheight);
 
     int cnt = 0;
-    struct timeval t;
+    struct timespec t;
     printf("%s enter!\n", __FUNCTION__);
     prctl(PR_SET_NAME, "encode");
 #if defined ENABLE_ADAS 
@@ -501,7 +504,7 @@ void *pthread_encode_jpeg(void *p)
         printf("new CRingBuf fail!\n");
         return NULL;
     }
-    gettimeofday(&t, NULL);
+	clock_gettime(CLOCK_MONOTONIC, &t);
     while(!force_exit)
     {
         ret = encode_process(pRb, pwjpg, quality, Vwidth, Vheight);
@@ -510,10 +513,10 @@ void *pthread_encode_jpeg(void *p)
         else{
             usleep(25000);
         }
-        if(timeout_trigger(&t, 2*1000))
+        if(timeout_trigger(&t, 2))
         {
             //GetConfigResolution(&Vwidth, &Vheight);
-            gettimeofday(&t, NULL);
+	        clock_gettime(CLOCK_MONOTONIC, &t);
             printf("encdoe speed %d per 2 sec\n", cnt);
             cnt = 0; 
         }
@@ -637,42 +640,6 @@ void store_one_jpeg(InfoForStore *mm, RBFrame* pFrame, int index)
     insert_mm_resouce(node);
 }
 
-#if 0
-void store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
-{
-    RBFrame* pFrame = nullptr;
-    int jpeg_index = 0;
-    uint64_t jpeg_timestart = 0;
-    struct timeval record_time;
-    int force_exit_time;
-
-    printf("%s enter!\n", __FUNCTION__);
-    force_exit_time = mm->photo_time_period*100*(mm->photo_num+1);
-    gettimeofday(&record_time, NULL);
-    while(jpeg_index < mm->photo_num)
-    {
-        if(timeout_trigger(&record_time, force_exit_time))//timeout
-        {
-            printf("store jpeg force exit!\n");
-            break;
-        }
-
-        pRB->SeekIndexByTime(0);
-        pFrame = request_jpeg_frame(pRB, 10);
-        if(pFrame == nullptr)
-            continue;
-
-        print_frame("video-read", pFrame);
-        if(jpeg_index == 0 || (uint64_t)pFrame->time > mm->photo_time_period*100 + jpeg_timestart)//record first jpeg
-        {
-            print_frame("jpeg", pFrame);
-            jpeg_timestart = pFrame->time;
-            store_one_jpeg(mm, pFrame, jpeg_index++);
-        }
-        pRB->CommitRead();
-    }
-}
-#else
 void store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
 {
     RBFrame* pFrame = nullptr;
@@ -695,11 +662,9 @@ void store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
         pRB->CommitRead();
     }
 }
-#endif
 
 #define RECORD_JPEG_NEED 1
 #define RECORD_JPEG_NO_NEED 0
-#if 1
 void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
 {
 #define VIDEO_FRAMES_PER_SECOND   12
@@ -857,93 +822,6 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
         //display_mm_resource();
     }while(0);
 }
-
-#else
-void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
-{
-#define VIDEO_FRAMES_PER_SECOND   12
-    RBFrame* pFrame = nullptr;
-    char mp4filepath[100];
-    char testfilepath[100];
-    char writefile_link[100];
-    mm_node node;
-    struct timeval record_time, jpg_time;  
-    int jpeg_index = 0;
-    int force_exit_time;
-    uint32_t interval= 0; //ms
-    uint32_t framecnt = 0;
-
-    printf("%s enter!\n", __FUNCTION__);
-
-    interval = mm->photo_time_period*100;
-
-    pRB->SeekIndexByTime(0);
-    pFrame = request_jpeg_frame(pRB, 10);
-    if(pFrame == nullptr)
-        return;
-
-    if(jpeg_flag)
-    {
-        print_frame("video jpeg", pFrame);
-        store_one_jpeg(mm, pFrame, jpeg_index++);
-    }
-    gettimeofday(&jpg_time, NULL);
-
-    sprintf(mp4filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
-
-    printf("seek time:%d\n", 0-mm->video_time);
-    pRB->SeekIndexByTime((0-mm->video_time));
-
-    std::ofstream ofs(mp4filepath, std::ofstream::out | std::ofstream::binary);
-    MP4Writer mp4(ofs, VIDEO_FRAMES_PER_SECOND, pFrame->video.VWidth, pFrame->video.VHeight);
-    fprintf(stdout, "Saving image file...%s\n", mp4filepath);
-
-    force_exit_time = mm->video_time*1000;
-    gettimeofday(&record_time, NULL);
-    while(1)
-    {
-        if(timeout_trigger(&record_time, force_exit_time))
-        {
-            printf("mp4 trigger timeout break\n");
-            break;
-        }
-
-        pFrame = request_jpeg_frame(pRB, 10);
-        if(pFrame == nullptr)
-            continue;
-
-
-        print_frame("video-read", pFrame);
-        //sprintf(testfilepath,"/mnt/obb/adas/%d.jpg", pFrame->frameNo);
-        //write_file(testfilepath, pFrame->data, pFrame->dataLen);
-        mp4.Write(pFrame->data, pFrame->dataLen);
-        if(jpeg_flag)
-        {
-            if((jpeg_index < mm->photo_num)  && timeout_trigger(&jpg_time, interval))
-            {
-                printf("write jpg frame!\n");
-                store_one_jpeg(mm, pFrame, jpeg_index++);
-                gettimeofday(&jpg_time, NULL);
-            }
-        }
-        pRB->CommitRead();
-    }
-    mp4.End();
-    ofs.close();
-
-    sprintf(writefile_link,"ln -s %s %s%s-%08d.mp4", mp4filepath, SNAP_SHOT_JPEG_PATH,\
-            warning_type_to_str(mm->warn_type), mm->video_id[0]);
-    //system(writefile_link);
-    printf("%s mp4 done!\n", warning_type_to_str(mm->warn_type));
-
-    node.warn_type = mm->warn_type;
-    node.mm_type = MM_VIDEO;
-    node.mm_id = mm->video_id[0];
-    //uint8_t time[6];
-    insert_mm_resouce(node);
-    //display_mm_resource();
-}
-#endif
 
 //修改为同时获取jpg 和mp4 
 void record_mm_infor(CRingBuf* pRB, InfoForStore info)
@@ -1159,11 +1037,11 @@ int read_pthread_num(uint32_t i)
 
     //struct Stats pstat;
     //pool.Stats pstat;
-    struct timeval rec_time;
+    struct timespec rec_time;
     ThreadPool::Stats pstat;
     pool.GetStats(&pstat);
-    gettimeofday(&rec_time, NULL);
-    printf(" i =%d, Num = %ld, busy = %ld, pending = %ld, time = %ld.%ld\n", i, pstat.NumThreads, pstat.NumBusyThreads, pstat.NumPendingTasks, rec_time.tv_sec, rec_time.tv_usec);
+    clock_gettime(CLOCK_MONOTONIC, &rec_time);
+    printf(" i =%d, Num = %ld, busy = %ld, pending = %ld, time = %ld.%ld\n", i, pstat.NumThreads, pstat.NumBusyThreads, pstat.NumPendingTasks, rec_time.tv_sec, rec_time.tv_nsec);
 
     return pstat.NumThreads;
 }

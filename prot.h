@@ -766,7 +766,7 @@ void display_mm_resource();
 int32_t find_mm_resource(uint32_t id, mm_node *m);
 int32_t delete_mm_resource(uint32_t id);
 char *warning_type_to_str(uint8_t type);
-int timeout_trigger(struct timeval *tv, int ms);
+int timeout_trigger(struct timespec *tv, int sec);
 void repeat_send_pkg_status_init();
 void printbuf(void *buf, int len);
 int can_message_send(can_data_type *sourcecan);
