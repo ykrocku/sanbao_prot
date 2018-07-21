@@ -500,10 +500,10 @@ int unpack_wsi_msg(char *data, size_t size)
     //msgpack_object_print(stdout, deserialized);
 #if defined ENABLE_ADAS 
     if(!memcmp(can.topic, MESSAGE_CAN700, strlen(MESSAGE_CAN700))){
-        printf("700 come********************************\n");
+        //printf("700 come********************************\n");
         deal_wsi_adas_can700(&can);
     }else if(!memcmp(can.topic, MESSAGE_CAN760, strlen(MESSAGE_CAN760))){
-        printf("760 come********************************\n");
+        //printf("760 come********************************\n");
         deal_wsi_adas_can760(&can);
     }else{
         ;
@@ -686,7 +686,7 @@ static int callback_lws_communicate(struct lws *wsi, enum lws_callback_reasons r
             break;
 
         case LWS_CALLBACK_CLIENT_RECEIVE:
-            printf("receive websocket: %ld\n", len);
+            //printf("receive websocket: %ld\n", len);
             //printbuf((uint8_t *)in, (int)len);
             unpack_wsi_msg((char *)in, len);
 
@@ -735,7 +735,7 @@ static int callback_lws_communicate(struct lws *wsi, enum lws_callback_reasons r
         case LWS_CALLBACK_CLIENT_WRITEABLE:
             printf("LWS_CALLBACK_CLIENT_WRITEABLE\n");
 #if defined ENABLE_ADAS
-            printf("send %d\n", msg_send_index);
+           // printf("send %d\n", msg_send_index);
             if(msg_send_index == MESSAGE_CAN700_INDEX){
                 printf("send 700\n");
                 msgpacklen = pack_wsi_msg(datacmd, sizeof(datacmd), MESSAGE_CAN700);
@@ -762,7 +762,7 @@ static int callback_lws_communicate(struct lws *wsi, enum lws_callback_reasons r
                 break;
             }
 #endif
-            printf("client send request, ret = %d!\n", msgpacklen);
+            //printf("client send request, ret = %d!\n", msgpacklen);
             if(msgpacklen < LWS_WRITE_BUF_LEN && msgpacklen >0){
                 memcpy(buf + LWS_PRE, datacmd, msgpacklen);
                 n = lws_write(wsi, (unsigned char *)&buf[LWS_PRE], msgpacklen, LWS_WRITE_BINARY);

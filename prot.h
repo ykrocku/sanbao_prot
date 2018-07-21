@@ -24,7 +24,7 @@
 
 #if defined ENABLE_ADAS
 #define DO_DELETE_SNAP_SHOT_FILES "rm -r /data/snap/adas/*"
-#define SNAP_SHOT_JPEG_PATH "/data/snap/adas"
+#define SNAP_SHOT_JPEG_PATH "/data/snap/adas/"
 //#define SNAP_SHOT_JPEG_PATH "/mnt/obb/adas/"
 
 #elif defined ENABLE_DMS

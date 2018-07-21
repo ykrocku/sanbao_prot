@@ -176,7 +176,7 @@ void global_var_init()
     //read_local_file_to_list();
 }
 
-int recv_ack = 0;
+int recv_ack = WAIT_MSG;
 pthread_mutex_t  recv_ack_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t   recv_ack_cond = PTHREAD_COND_INITIALIZER;
 
@@ -185,6 +185,20 @@ pthread_mutex_t  save_mp4_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t   save_mp4_cond = PTHREAD_COND_INITIALIZER;
 
 int GetFileSize(char *filename);
+
+
+
+int setcondattr(pthread_cond_t *i_cv)
+{
+    pthread_condattr_t cattr;
+	int ret = pthread_condattr_init(&cattr);
+	if (ret != 0){
+		return (1);
+	}
+	ret = pthread_condattr_setclock(&cattr, CLOCK_MONOTONIC);
+	ret = pthread_cond_init(i_cv, &cattr);
+	return 0;
+}
 
 void notice_ack_msg()
 {
@@ -1045,6 +1059,7 @@ out:
 
 #endif
 
+#if 0
 static int send_package(int sock, uint8_t *buf)
 {
     int ret = 0;
@@ -1094,7 +1109,7 @@ static int send_package(int sock, uint8_t *buf)
                 printf("recv send ack..\n");
                 break;
             }else{
-                printf("recv ack timeout0!\n");
+                printf("recv ack timeout! cnt = %d\n", pkg.send_repeat);
                 if(pkg.send_repeat >= 3){//第一次发送
                     printf("send three times..\n");
                     g_pkg_status_p->mm_data_trans_waiting = 0;
@@ -1108,10 +1123,88 @@ static int send_package(int sock, uint8_t *buf)
 out:
     return 0;
 }
+#else
+static int send_package(int sock, uint8_t *buf)
+{
+    int rc = 0;
+    int len = 0;
+    int i = 0;
+    SendStatus pkg;
+    struct timespec ts;
+    if(sock < 0)
+    {
+        printf("sock error\n");
+        return -1;
+    }
+
+    ptr_queue_node header;
+    header.buf = buf;
+    header.len = PTR_QUEUE_BUF_SIZE;
+
+    //fail
+    if(ptr_queue_pop(g_send_q_p, &header, &ptr_queue_lock)){
+        
+        printf("queue no mesg\n");
+        goto out;
+    }
+    memcpy(&pkg, &header.pkg, sizeof(header.pkg));
+
+    WSI_DEBUG("header len = %d\n", header.len);
+    //printbuf(header.buf, header.len);
+    if(pkg.ack_status == MSG_ACK_READY){// no need ack
+        printf("no need ack!\n");
+        package_write(sock, header.buf, header.len);
+        goto out;
+    }
+    if(pkg.ack_status == MSG_ACK_WAITING){
+        for(i = 0; i < 3; i++){
+            printf("ack waiting!\n");
+            package_write(sock, header.buf, header.len);
+            pkg.send_repeat++;
+
+            printf("get lock\n");
+            pthread_mutex_lock(&recv_ack_mutex);
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            ts.tv_sec += 2;
+            rc = 0;
+            while ((recv_ack != NOTICE_MSG) && rc == 0){
+                printf("cond_wait\n");
+                rc = pthread_cond_timedwait(&recv_ack_cond, &recv_ack_mutex, &ts);
+                printf("rc == %d\n", rc);
+            }
+            if (rc == 0){
+                recv_ack= WAIT_MSG;//clear
+                printf("recv send ack..\n");
+            }else if(rc == ETIMEDOUT){//timeout
+                printf("recv ack timeout! cnt = %d\n", pkg.send_repeat);
+            }else{
+                printf("recv error! cnt = %d\n", pkg.send_repeat);
+            }
+            pthread_mutex_unlock(&recv_ack_mutex);
+            if (rc == 0){
+                break;
+            }
+            if(pkg.send_repeat >= 3){//第一次发送
+                printf("send three times..\n");
+                g_pkg_status_p->mm_data_trans_waiting = 0;
+                break;
+            }
+        }
+    }
+
+out:
+    return 0;
+}
+#endif
 
 void *pthread_tcp_send(void *para)
 {
     uint8_t *writebuf = NULL;
+
+    if(!setcondattr(&recv_ack_cond)){
+        printf("setcondattr sucess!\n");
+    }
+
     writebuf = (uint8_t *)malloc(PTR_QUEUE_BUF_SIZE);
     if(!writebuf){
         perror("send pkg malloc");
@@ -2102,6 +2195,7 @@ static int try_connect()
     while(1)
     {
 
+        printf("try connect!\n");
         if( 0 == connect(sock, (struct sockaddr *)&host_serv_addr, sizeof(host_serv_addr)))
         {
             printf("connect ok!\n");
@@ -2110,7 +2204,7 @@ static int try_connect()
         else
         {
             sleep(1);
-            printf("try connect!\n");
+            //printf("try connect!\n");
         }
     }
 }
