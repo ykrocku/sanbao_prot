@@ -291,6 +291,18 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
     framecnt_old = pFrame->frameNo;
     //print_frame("origin even", pFrame);
 
+
+/******************************************************
+*在图像上添加时间戳的代码，在220行左右：
+*std::string time = GetTimestamp();  // 时间戳字符串 YYYY-mm-dd HH:MM:SS
+*cv::putText(new_image, time, cv::Point(20, 60),    // 文字在图像上的坐标(x, y)
+*        CV_FONT_HERSHEY_DUPLEX, 1.5, COLOR_BLUE, 2, CV_AA);
+*
+*关于cv::putText参数的补充说明
+*如果觉得文字太大，可以把 1.5改成 1.2或者1.1
+*倒数第2个参数是thinkness，这里2表示粗体，不想要粗体的话可以改成1
+*******************************************************/
+
 #if 1
     //add color
     cv::Mat new_image;
