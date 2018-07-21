@@ -37,17 +37,11 @@ extern volatile int force_exit;
 
 int hostsock = -1;
 
-
 #define GET_NEXT_SEND_NUM        1
 #define RECORD_RECV_NUM          2
 #define GET_RECV_NUM             3
 
-
-void parse_cmd(uint8_t *buf, uint8_t *msgbuf);
 static uint32_t unescaple_msg(uint8_t *buf, uint8_t *msg, int msglen);
-
-sem_t send_data;
-
 
 pthread_mutex_t photo_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 queue<ptr_queue_node *> g_image_queue;
@@ -63,7 +57,6 @@ queue<ptr_queue_node *> *g_send_q_p = &g_ptr_queue;
 
 pthread_mutex_t uchar_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 queue<uint8_t> g_uchar_queue;
-
 
 //insert mm info 
 void push_mm_queue(InfoForStore *mm)
@@ -128,8 +121,6 @@ int pull_mm_req_cmd_queue(SBMmHeader2 *mm_info)
 
     return -1;
 }
-
-
 void get_local_time(uint8_t get_time[6])
 {
     struct tm a;
@@ -150,12 +141,11 @@ void get_local_time(uint8_t get_time[6])
     printf("local time %d-%d-%d %d:%d:%d\n", (1900 + p->tm_year), ( 1 + p->tm_mon), p->tm_mday,(p->tm_hour), p->tm_min, p->tm_sec); 
 }
 
-
+sem_t send_data;
 void sem_send_init()
 {
     sem_init(&send_data, 0, 0);
 }
-
 
 void global_var_init()
 {
@@ -169,7 +159,6 @@ void global_var_init()
     #define ENABLE_ADAS
     printf("using default, ENABLE_ADAS!\n");
 #endif
-
 
     sem_send_init();
     read_local_adas_para_file(LOCAL_ADAS_PRAR_FILE);
@@ -186,8 +175,6 @@ void global_var_init()
 
     //read_local_file_to_list();
 }
-
-
 
 int recv_ack = 0;
 pthread_mutex_t  recv_ack_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -479,19 +466,6 @@ static int32_t message_queue_send(SBProtHeader *pHeader, uint8_t devid, uint8_t 
 
     return msg_len;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 //填写报警信息的一些实时数据
 void get_real_time_msg(AdasWarnFrame *uploadmsg)
@@ -2044,10 +2018,8 @@ static int32_t sample_on_cmd(SBProtHeader *pHeader, int32_t len)
     return 0;
 }
 
-
 #include <arpa/inet.h>
 #include <linux/if_arp.h>
-
 void bond_net_device(int sock)
 {
 	int ret;
@@ -2142,11 +2114,31 @@ static int try_connect()
         }
     }
 }
+#define TCP_READ_BUF_SIZE (64*1024)
+#define RECV_HOST_DATA_BUF_SIZE (128*1024)
+void parse_cmd(uint8_t *buf, uint8_t *msgbuf)
+{
+    uint32_t ret = 0;
+    uint8_t sum = 0;
+    uint32_t framelen = 0;
+    SBProtHeader *pHeader = NULL;
+    pHeader = (SBProtHeader *) msgbuf;
+    ret = unescaple_msg(buf, msgbuf, RECV_HOST_DATA_BUF_SIZE);
+    if(ret>0){
+        framelen = ret;
+        //printf("recv framelen = %d\n", framelen);
+        sum = sample_calc_sum(pHeader, framelen);
+        if (sum != pHeader->checksum) {
+            printf("Checksum missmatch calcated: 0x%02hhx != 0x%2hhx\n",
+                    sum, pHeader->checksum);
+        }else{
+            sample_on_cmd(pHeader, framelen);
+        }
+    }
+}
 
 void *pthread_tcp_recv(void *para)
 {
-#define TCP_READ_BUF_SIZE (64*1024)
-#define RECV_HOST_DATA_BUF_SIZE (128*1024)
     int32_t ret = 0;
     int i=0;
     static int tcprecvcnt = 0;
@@ -2210,7 +2202,6 @@ out:
 static char get_head = 0;
 static char got_esc_char = 0;
 static int cnt = 0;
-
 void clear_frame_flag()
 {
         //clear
@@ -2218,7 +2209,6 @@ void clear_frame_flag()
         got_esc_char = 0;
         cnt = 0;
 }
-
 static uint32_t unescaple_msg(uint8_t *buf, uint8_t *msg, int msglen)
 {
     uint8_t ch = 0;
@@ -2278,27 +2268,6 @@ static uint32_t unescaple_msg(uint8_t *buf, uint8_t *msg, int msglen)
         }
     }
     return 0;
-}
-
-void parse_cmd(uint8_t *buf, uint8_t *msgbuf)
-{
-    uint32_t ret = 0;
-    uint8_t sum = 0;
-    uint32_t framelen = 0;
-    SBProtHeader *pHeader = NULL;
-    pHeader = (SBProtHeader *) msgbuf;
-    ret = unescaple_msg(buf, msgbuf, RECV_HOST_DATA_BUF_SIZE);
-    if(ret>0){
-        framelen = ret;
-        //printf("recv framelen = %d\n", framelen);
-        sum = sample_calc_sum(pHeader, framelen);
-        if (sum != pHeader->checksum) {
-            printf("Checksum missmatch calcated: 0x%02hhx != 0x%2hhx\n",
-                    sum, pHeader->checksum);
-        }else{
-            sample_on_cmd(pHeader, framelen);
-        }
-    }
 }
 
 #define SNAP_SHOT_CLOSE            0
@@ -2414,7 +2383,6 @@ void *pthread_req_media_process(void *para)
         }
     }
 }
-
 
 #define FCW_NAME            "FCW"
 #define LDW_NAME            "LDW"

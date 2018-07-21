@@ -51,7 +51,6 @@ extern volatile int force_exit;
 
 #define  ADAS_JPEG_SIZE (16* 1024 * 1024)
 
-
 void print_frame(const char * name, RBFrame* pFrame)
 {
     std::cerr << "TAG="   << pFrame->frameTag
@@ -98,7 +97,6 @@ std::vector<uint8_t> jpeg_encode(uint8_t* data,\
     jpg_vec.resize(bytes);
 #else
     fprintf(stderr, "Using software JPEG encoder.\n");
-
     // resize
     cv::Mat img;
     cv::Mat big_img = cv::Mat(cv::Size(cols, rows), CV_8UC3, data);
@@ -110,7 +108,6 @@ std::vector<uint8_t> jpeg_encode(uint8_t* data,\
     compression_params.push_back(quality);
     cv::imencode(".jpg", img, jpg_vec, compression_params);
 #endif
-
     return jpg_vec;
 }
 
@@ -150,7 +147,6 @@ std::string GetTimestamp() {
     return buffer;
 }
 
-
 //填写报警信息的一些实时数据
 std::string get_latitude_msg()
 {
@@ -160,9 +156,6 @@ std::string get_latitude_msg()
     //printf("latitude: %s\n", buffer);
     return buffer;
 }
-
-
-
 
 #if 1
 // color
@@ -207,20 +200,13 @@ int EncodeRingBufWrite(CRingBuf* pRB, void *buf, int len, int width, int height)
 
     return 0;
 }
-
-
-
-int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int height) {
+int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int height)
+{
     uint32_t jpg_size=0;
     RBFrame* pFrame = nullptr;
     uint32_t frameLen = 0;
     static uint64_t framecnt_old = 0;
-#if 0
-    pRB->SeekIndexByTime(0);  // seek to the latest frame
-    pFrame = request_jpeg_frame(pRB, 10);
-    if(pFrame == nullptr)
-        return -1;
-#endif
+
     do{
         //usleep(25000);
         pRB->SeekIndexByTime(0);  // seek to the latest frame
@@ -247,8 +233,6 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
                 continue;
             }
 
-
-
 //两个摄像头都是15帧，取三分之二。
 #if 1
 //#if defined ENABLE_DMS
@@ -272,7 +256,6 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
     framecnt_old = pFrame->frameNo;
     //print_frame("origin even", pFrame);
 
-
 /******************************************************
 *在图像上添加时间戳的代码，在220行左右：
 *std::string time = GetTimestamp();  // 时间戳字符串 YYYY-mm-dd HH:MM:SS
@@ -283,7 +266,6 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
 *如果觉得文字太大，可以把 1.5改成 1.2或者1.1
 *倒数第2个参数是thinkness，这里2表示粗体，不想要粗体的话可以改成1
 *******************************************************/
-
 #if 1
     //add color
     cv::Mat new_image;
@@ -312,7 +294,6 @@ int encode_process(CRingBuf* pRB, CRingBuf* pwRB, int quality, int width, int he
 
     EncodeRingBufWrite(pwRB, jpg_vec.data(), jpg_size, width, height);
     EncodeRingBufWrite(pwRB, jpg_vec.data(), jpg_size, width, height);
-
     return 0;
 }
 
@@ -346,7 +327,6 @@ void GetConfigResolution(int *w, int *h)
 #endif
 
     printf("GET Resolution %d x %d\n", *w, *h);
-
 }
 
 /*
@@ -428,7 +408,7 @@ void *pthread_encode_jpeg(void *p)
     pthread_exit(NULL);
 }
 
-void store_one_jpeg(InfoForStore *mm, RBFrame* pFrame, int index)
+void write_one_jpeg(InfoForStore *mm, RBFrame* pFrame, int index)
 {
     char filepath[100];
     char writefile_link[100];
@@ -473,7 +453,7 @@ void store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
 
         usleep(interval);
         print_frame("jpeg", pFrame);
-        store_one_jpeg(mm, pFrame, jpeg_index++);
+        write_one_jpeg(mm, pFrame, jpeg_index++);
         pRB->CommitRead();
     }
 }
@@ -514,7 +494,7 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
             if(pFrame == nullptr)
                 return;
             print_frame("video jpeg", pFrame);
-            store_one_jpeg(mm, pFrame, jpeg_index++);
+            write_one_jpeg(mm, pFrame, jpeg_index++);
             //usleep(interval);
             sleep(interval);
             //usleep(interval*1200000);
@@ -535,13 +515,12 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
             if(pFrame->time - frame_oldtime > interval*1100){
                 frame_oldtime = pFrame->time;
                 print_frame("get jpeg", pFrame);
-                store_one_jpeg(mm, pFrame, jpeg_index++);
+                write_one_jpeg(mm, pFrame, jpeg_index++);
                 i++;
             }
         }
     }
 #endif
-
     //sleep(mm->video_time - interval/1000000);
     sleep(mm->video_time - (mm->photo_num -1)*interval);
     pRB->SeekIndexByTime(0);//get last frame
@@ -590,8 +569,6 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
         ofs.close();
         printf("%s mp4 done!\n", warning_type_to_str(mm->warn_type));
 #else
-
-
         sprintf(mp4filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
         std::ofstream ofs(mp4filepath, std::ofstream::out | std::ofstream::binary);
         MjpegWriter mp4(ofs, fps, pFrame->video.VWidth, pFrame->video.VHeight);
@@ -609,25 +586,6 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
         mp4.End();
         ofs.close();
         printf("%s mp4 done!\n", warning_type_to_str(mm->warn_type));
-
-#if 0
-        sprintf(mp4filepath,"%s%08d.avi", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
-        MjpegWriter mjpeg;
-        mjpeg.Open(mp4filepath, fps, pFrame->video.VWidth, pFrame->video.VHeight);
-        fprintf(stdout, "Saving image file...%s, fps = %d\n", mp4filepath, fps);
-        while(framecnt--)
-        {
-            pFrame = request_jpeg_frame(pRB, 10);
-            if(pFrame == nullptr)
-                break;
-            mjpeg.Write(pFrame->data, pFrame->dataLen);
-            print_frame("video jpeg", pFrame);
-            pRB->CommitRead();
-        }
-        mjpeg.Close();
-        printf("%s avi done!\n", warning_type_to_str(mm->warn_type));
-#endif
-
 #endif
         node.warn_type = mm->warn_type;
         node.mm_type = MM_VIDEO;
@@ -639,7 +597,7 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
 }
 
 //修改为同时获取jpg 和mp4 
-void record_mm_infor(CRingBuf* pRB, InfoForStore info)
+void record_mm_info(CRingBuf* pRB, InfoForStore info)
 {
     int i=0;
     RBFrame* pFrame = nullptr;
@@ -808,7 +766,6 @@ int read_local_file_to_list()
     return 0;
 }
 
-
 ThreadPool pool; // 0 - cpu member
 int read_pthread_num(uint32_t i)
 {
@@ -948,7 +905,7 @@ void *pthread_save_media(void *p)
 #endif
         i = i % 8;
         if(!mm.flag){
-            cls[i] = NewClosure(record_mm_infor, pr[i], mm);
+            cls[i] = NewClosure(record_mm_info, pr[i], mm);
             pool.AddTask(cls[i]);
             i++;
         }else{
