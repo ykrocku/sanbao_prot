@@ -11,6 +11,8 @@
 #include <sys/time.h>
 
 #include "prot.h"
+#include "common.h"
+
 
 static AdasParaSetting adas_para;
 static DmsParaSetting dms_para;

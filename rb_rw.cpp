@@ -36,6 +36,7 @@
 
 
 #include "prot.h"
+#include "common.h"
 
 #define USE_HW_JPEG
 #ifdef USE_HW_JPEG
@@ -134,7 +135,6 @@ RBFrame* request_jpeg_frame(CRingBuf* pRB, uint32_t repeat_times)
 
     return pFrame;
 }
-#if 1
 std::string GetTimestamp() {
     time_t rawtime;
     struct tm* timeinfo;
@@ -149,25 +149,6 @@ std::string GetTimestamp() {
     strftime(buffer, sizeof buffer, "%Y-%m-%d %H:%M:%S", timeinfo);
     return buffer;
 }
-#else
-std::string GetTimestamp() {
-  time_t rawtime;
-  struct tm* timeinfo;
-  char buffer[200];
-  memset(buffer, 0, sizeof buffer);
-  time(&rawtime);
-  timeinfo = localtime(&rawtime);
-  strftime(buffer, sizeof buffer, "%Y-%m-%d %H:%M:%S", timeinfo);
-
-    real_time_data tmp;
-    RealTimeDdata_process(&tmp, READ_REAL_TIME_MSG);
-    snprintf(&buffer[strlen(buffer)], sizeof(buffer), " BD:%.6fN,%.6fE",\
-            (MY_HTONL(tmp.latitude)*1.0)/1000000, (MY_HTONL(tmp.longitude)*1.0)/1000000);
-    printf("latitude: %s\n", buffer);
-
-  return buffer;
-}
-#endif
 
 
 //填写报警信息的一些实时数据
@@ -827,35 +808,6 @@ int read_local_file_to_list()
     return 0;
 }
 
-void global_var_init()
-{
-    char cmd[100];
-
-#if defined ENABLE_ADAS
-    printf("adas device enter!\n");
-#elif defined ENABLE_DMS
-    printf("dms device enter!\n");
-#else
-    #define ENABLE_ADAS
-    printf("using default, ENABLE_ADAS!\n");
-#endif
-
-
-    sem_send_init();
-    read_local_adas_para_file(LOCAL_ADAS_PRAR_FILE);
-    read_local_dms_para_file(LOCAL_DMS_PRAR_FILE);
-
-    sprintf(cmd, "busybox mkdir -p %s", SNAP_SHOT_JPEG_PATH);
-    system(cmd);
-
-    //    system(DO_DELETE_SNAP_SHOT_FILES);
-    //    printf("do %s\n", DO_DELETE_SNAP_SHOT_FILES);
-
-    system("rm /mnt/obb/dms/* -f");
-    system("rm /mnt/obb/adas/* -f");
-
-    //read_local_file_to_list();
-}
 
 ThreadPool pool; // 0 - cpu member
 int read_pthread_num(uint32_t i)

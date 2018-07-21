@@ -37,6 +37,12 @@ extern volatile int force_exit;
 
 int hostsock = -1;
 
+
+#define GET_NEXT_SEND_NUM        1
+#define RECORD_RECV_NUM          2
+#define GET_RECV_NUM             3
+
+
 void parse_cmd(uint8_t *buf, uint8_t *msgbuf);
 static uint32_t unescaple_msg(uint8_t *buf, uint8_t *msg, int msglen);
 
@@ -124,10 +130,64 @@ int pull_mm_req_cmd_queue(SBMmHeader2 *mm_info)
 }
 
 
+void get_local_time(uint8_t get_time[6])
+{
+    struct tm a;
+    struct tm *p = &a;
+    time_t rawtime = 0;   
+
+    rawtime += 8*3600;
+    rawtime = time(NULL);
+
+    p = localtime(&rawtime);
+    get_time[0] = p->tm_year;
+    get_time[1] = p->tm_mon+1;
+    get_time[2] = p->tm_mday;
+    get_time[3] = p->tm_hour;
+    get_time[4] = p->tm_min;
+    get_time[5] = p->tm_sec;
+
+    printf("local time %d-%d-%d %d:%d:%d\n", (1900 + p->tm_year), ( 1 + p->tm_mon), p->tm_mday,(p->tm_hour), p->tm_min, p->tm_sec); 
+}
+
+
 void sem_send_init()
 {
     sem_init(&send_data, 0, 0);
 }
+
+
+void global_var_init()
+{
+    char cmd[100];
+
+#if defined ENABLE_ADAS
+    printf("adas device enter!\n");
+#elif defined ENABLE_DMS
+    printf("dms device enter!\n");
+#else
+    #define ENABLE_ADAS
+    printf("using default, ENABLE_ADAS!\n");
+#endif
+
+
+    sem_send_init();
+    read_local_adas_para_file(LOCAL_ADAS_PRAR_FILE);
+    read_local_dms_para_file(LOCAL_DMS_PRAR_FILE);
+
+    sprintf(cmd, "busybox mkdir -p %s", SNAP_SHOT_JPEG_PATH);
+    system(cmd);
+
+    //    system(DO_DELETE_SNAP_SHOT_FILES);
+    //    printf("do %s\n", DO_DELETE_SNAP_SHOT_FILES);
+
+    system("rm /mnt/obb/dms/* -f");
+    system("rm /mnt/obb/adas/* -f");
+
+    //read_local_file_to_list();
+}
+
+
 
 int recv_ack = 0;
 pthread_mutex_t  recv_ack_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -148,6 +208,8 @@ void notice_ack_msg()
 }
 
 //实时数据处理
+#define WRITE_REAL_TIME_MSG 0
+#define READ_REAL_TIME_MSG  1
 void RealTimeDdata_process(RealTimeData *data, int mode)
 {
     static RealTimeData msg={0};
@@ -178,6 +240,8 @@ void get_latitude_info(char *buffer, int len)
     //printf("latitude: %s\n", buffer);
 
 }
+
+
 
 
 #define WARNING_ID_MODE 0
@@ -290,6 +354,144 @@ static void package_write(int sock, uint8_t *buf, int len)
     //return offset;
     return ;
 }
+static uint8_t sample_calc_sum(SBProtHeader *pHeader, int32_t msg_len)
+{
+    int32_t i = 0;
+    uint32_t chksum = 0;
+    uint8_t * start = (uint8_t *) &pHeader->vendor_id;
+
+#define NON_CRC_LEN (2 * sizeof(pHeader->magic) /*head and tail*/ + \
+        sizeof(pHeader->serial_num) + \
+        sizeof(pHeader->checksum))
+
+    for (i = 0; i < int32_t(msg_len - NON_CRC_LEN); i++)
+    {
+        chksum += start[i];
+
+        //   MY_DEBUG("#%04d 0x%02hhx = 0x%08x\n", i, start[i], chksum);
+    }
+    return (uint8_t) (chksum & 0xFF);
+}
+static int32_t sample_escaple_msg(SBProtHeader *pHeader, int32_t msg_len)
+{
+    int32_t i = 0;
+    int32_t escaped_len = msg_len;
+    uint8_t *barray = (uint8_t*) pHeader;
+
+    //ignore head/tail magic
+    for (i = 1; i < escaped_len - 1; i++)
+    {
+        if (SAMPLE_PROT_MAGIC == barray[i]) 
+        {
+            memmove(&barray[i+1], &barray[i], escaped_len - i);
+            barray[i] = SAMPLE_PROT_ESC_CHAR;
+            barray[i+1] = 0x2;
+            i++;
+            escaped_len ++;
+        }
+        else if (SAMPLE_PROT_ESC_CHAR == barray[i]) 
+        {
+            memmove(&barray[i+1], &barray[i], escaped_len - i);
+            barray[i]   = SAMPLE_PROT_ESC_CHAR;
+            barray[i+1] = 0x1;
+            i++;
+            escaped_len ++;
+        }
+    }
+    return escaped_len;
+}
+//push到发送队列
+static int32_t message_queue_send(SBProtHeader *pHeader, uint8_t devid, uint8_t cmd,uint8_t *payload, int32_t payload_len)
+{
+    uint16_t serial_num = 0;
+    char MasterIsMe = 0;
+    ptr_queue_node msg;
+    int32_t msg_len = sizeof(*pHeader) + 1 + payload_len;
+    uint8_t *data = ((uint8_t*) pHeader + sizeof(*pHeader));
+    uint8_t *tail = data + payload_len;
+
+    switch(cmd)
+    {
+        case SAMPLE_CMD_QUERY:
+        case SAMPLE_CMD_FACTORY_RESET:
+        case SAMPLE_CMD_SPEED_INFO:        
+        case SAMPLE_CMD_DEVICE_INFO:
+        case SAMPLE_CMD_UPGRADE:
+        case SAMPLE_CMD_GET_PARAM:
+        case SAMPLE_CMD_SET_PARAM:
+        case SAMPLE_CMD_REQ_STATUS:
+        case SAMPLE_CMD_REQ_MM_DATA:
+            msg.pkg.ack_status = MSG_ACK_READY;
+            MasterIsMe = 0;
+            break;
+
+            //send as master
+        case SAMPLE_CMD_WARNING_REPORT:
+        case SAMPLE_CMD_UPLOAD_MM_DATA:
+        case SAMPLE_CMD_UPLOAD_STATUS:
+            MasterIsMe = 1;
+            msg.pkg.ack_status = MSG_ACK_WAITING;
+            break;
+
+        default:
+            msg.pkg.ack_status = MSG_ACK_READY;
+            break;
+    }
+
+    memset(pHeader, 0, sizeof(*pHeader));
+    pHeader->magic = SAMPLE_PROT_MAGIC;
+
+    //如果当前发送的数据是主动发送，即需要ACK的，序列号就直接累加
+    if(MasterIsMe)
+        do_serial_num(&serial_num, GET_NEXT_SEND_NUM);
+    else
+        do_serial_num(&serial_num, GET_RECV_NUM);
+
+    pHeader->serial_num= MY_HTONS(serial_num); //used as message cnt
+    pHeader->vendor_id= MY_HTONS(VENDOR_ID);
+    //pHeader->device_id= SAMPLE_DEVICE_ID_ADAS;
+
+#if defined ENABLE_ADAS
+    pHeader->device_id= SAMPLE_DEVICE_ID_ADAS;
+#elif defined ENABLE_DMS
+    pHeader->device_id= SAMPLE_DEVICE_ID_DMS;
+#endif
+    pHeader->cmd = cmd;
+
+    if (payload_len > 0) 
+    {
+        memcpy(data, payload, payload_len);
+    }
+    tail[0] = SAMPLE_PROT_MAGIC;
+
+    pHeader->checksum = sample_calc_sum(pHeader, msg_len);
+    msg_len = sample_escaple_msg(pHeader, msg_len);
+
+    msg.pkg.send_repeat = 0;
+    msg.len = msg_len;
+    msg.buf = (uint8_t *)pHeader;
+    //    printf("sendpackage cmd = 0x%x,msg.need_ack = %d, len=%d, push!\n",msg.cmd, msg.need_ack, msg.len);
+    ptr_queue_push(g_send_q_p, &msg, &ptr_queue_lock);
+
+    printf("posting...\n");
+    sem_post(&send_data);
+    //printf("push queue, len = %d\n", msg.len);
+
+    return msg_len;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 //填写报警信息的一些实时数据
 void get_real_time_msg(AdasWarnFrame *uploadmsg)
@@ -314,28 +516,28 @@ void get_adas_Info_for_store(uint8_t type, InfoForStore *mm_store)
     mm_store->warn_type = type;
     switch(type)
     {
-        case SW_TYPE_FCW:
-        case SW_TYPE_LDW:
-        case SW_TYPE_HW:
-        case SW_TYPE_PCW:
-        case SW_TYPE_FLC:
-            if(type == SW_TYPE_FCW){
+        case SB_WARN_TYPE_FCW:
+        case SB_WARN_TYPE_LDW:
+        case SB_WARN_TYPE_HW:
+        case SB_WARN_TYPE_PCW:
+        case SB_WARN_TYPE_FLC:
+            if(type == SB_WARN_TYPE_FCW){
                 mm_store->photo_num = para.FCW_photo_num;
                 mm_store->photo_time_period = para.FCW_photo_time_period;
                 mm_store->video_time = para.FCW_video_time;
-            }else if(type == SW_TYPE_LDW){
+            }else if(type == SB_WARN_TYPE_LDW){
                 mm_store->photo_num = para.LDW_photo_num;
                 mm_store->photo_time_period = para.LDW_photo_time_period;
                 mm_store->video_time = para.LDW_video_time;
-            }else if(type == SW_TYPE_HW){
+            }else if(type == SB_WARN_TYPE_HW){
                 mm_store->photo_num = para.HW_photo_num;
                 mm_store->photo_time_period = para.HW_photo_time_period;
                 mm_store->video_time = para.HW_video_time;
-            }else if(type == SW_TYPE_PCW){
+            }else if(type == SB_WARN_TYPE_PCW){
                 mm_store->photo_num = para.PCW_photo_num;
                 mm_store->photo_time_period = para.PCW_photo_time_period;
                 mm_store->video_time = para.PCW_video_time;
-            }else if(type == SW_TYPE_FLC){
+            }else if(type == SB_WARN_TYPE_FLC){
                 mm_store->photo_num = para.FLC_photo_num;
                 mm_store->photo_time_period = para.FLC_photo_time_period;
                 mm_store->video_time = para.FLC_video_time;
@@ -351,11 +553,11 @@ void get_adas_Info_for_store(uint8_t type, InfoForStore *mm_store)
                 mm_store->photo_enable = 1; 
             else
                 mm_store->photo_enable = 0; 
-        case SW_TYPE_TSRW:
-        case SW_TYPE_TSR:
+        case SB_WARN_TYPE_TSRW:
+        case SB_WARN_TYPE_TSR:
             break;
 
-        case SW_TYPE_SNAP:
+        case SB_WARN_TYPE_SNAP:
             mm_store->photo_num = para.photo_num;
             mm_store->photo_time_period = para.photo_time_period;
             mm_store->photo_enable = 1; 
@@ -489,11 +691,11 @@ int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
 
     switch(type)
     {
-        case SW_TYPE_FCW:
-        case SW_TYPE_LDW:
-        case SW_TYPE_HW:
-        case SW_TYPE_PCW:
-        case SW_TYPE_FLC:
+        case SB_WARN_TYPE_FCW:
+        case SB_WARN_TYPE_LDW:
+        case SB_WARN_TYPE_HW:
+        case SB_WARN_TYPE_PCW:
+        case SB_WARN_TYPE_FLC:
             if(mm.photo_enable)
             {
                 get_next_id(MM_ID_MODE, mm.photo_id, mm.photo_num);
@@ -536,11 +738,11 @@ int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
 
             break;
 
-        case SW_TYPE_TSRW:
-        case SW_TYPE_TSR:
+        case SB_WARN_TYPE_TSRW:
+        case SB_WARN_TYPE_TSR:
             break;
 
-        case SW_TYPE_SNAP:
+        case SB_WARN_TYPE_SNAP:
             //printf("snap: enable\n");
             if(mm.photo_enable)
             {
@@ -956,133 +1158,7 @@ out:
     pthread_exit(NULL);
 }
 
-static uint8_t sample_calc_sum(SBProtHeader *pHeader, int32_t msg_len)
-{
-    int32_t i = 0;
-    uint32_t chksum = 0;
-    uint8_t * start = (uint8_t *) &pHeader->vendor_id;
 
-#define NON_CRC_LEN (2 * sizeof(pHeader->magic) /*head and tail*/ + \
-        sizeof(pHeader->serial_num) + \
-        sizeof(pHeader->checksum))
-
-    for (i = 0; i < int32_t(msg_len - NON_CRC_LEN); i++)
-    {
-        chksum += start[i];
-
-        //   MY_DEBUG("#%04d 0x%02hhx = 0x%08x\n", i, start[i], chksum);
-    }
-    return (uint8_t) (chksum & 0xFF);
-}
-
-static int32_t sample_escaple_msg(SBProtHeader *pHeader, int32_t msg_len)
-{
-    int32_t i = 0;
-    int32_t escaped_len = msg_len;
-    uint8_t *barray = (uint8_t*) pHeader;
-
-    //ignore head/tail magic
-    for (i = 1; i < escaped_len - 1; i++)
-    {
-        if (SAMPLE_PROT_MAGIC == barray[i]) 
-        {
-            memmove(&barray[i+1], &barray[i], escaped_len - i);
-            barray[i] = SAMPLE_PROT_ESC_CHAR;
-            barray[i+1] = 0x2;
-            i++;
-            escaped_len ++;
-        }
-        else if (SAMPLE_PROT_ESC_CHAR == barray[i]) 
-        {
-            memmove(&barray[i+1], &barray[i], escaped_len - i);
-            barray[i]   = SAMPLE_PROT_ESC_CHAR;
-            barray[i+1] = 0x1;
-            i++;
-            escaped_len ++;
-        }
-    }
-    return escaped_len;
-}
-
-//push到发送队列
-int32_t message_queue_send(SBProtHeader *pHeader, uint8_t devid, uint8_t cmd,uint8_t *payload, int32_t payload_len)
-{
-    uint16_t serial_num = 0;
-    char MasterIsMe = 0;
-    ptr_queue_node msg;
-    int32_t msg_len = sizeof(*pHeader) + 1 + payload_len;
-    uint8_t *data = ((uint8_t*) pHeader + sizeof(*pHeader));
-    uint8_t *tail = data + payload_len;
-
-    switch(cmd)
-    {
-        case SAMPLE_CMD_QUERY:
-        case SAMPLE_CMD_FACTORY_RESET:
-        case SAMPLE_CMD_SPEED_INFO:        
-        case SAMPLE_CMD_DEVICE_INFO:
-        case SAMPLE_CMD_UPGRADE:
-        case SAMPLE_CMD_GET_PARAM:
-        case SAMPLE_CMD_SET_PARAM:
-        case SAMPLE_CMD_REQ_STATUS:
-        case SAMPLE_CMD_REQ_MM_DATA:
-            msg.pkg.ack_status = MSG_ACK_READY;
-            MasterIsMe = 0;
-            break;
-
-            //send as master
-        case SAMPLE_CMD_WARNING_REPORT:
-        case SAMPLE_CMD_UPLOAD_MM_DATA:
-        case SAMPLE_CMD_UPLOAD_STATUS:
-            MasterIsMe = 1;
-            msg.pkg.ack_status = MSG_ACK_WAITING;
-            break;
-
-        default:
-            msg.pkg.ack_status = MSG_ACK_READY;
-            break;
-    }
-
-    memset(pHeader, 0, sizeof(*pHeader));
-    pHeader->magic = SAMPLE_PROT_MAGIC;
-
-    //如果当前发送的数据是主动发送，即需要ACK的，序列号就直接累加
-    if(MasterIsMe)
-        do_serial_num(&serial_num, GET_NEXT_SEND_NUM);
-    else
-        do_serial_num(&serial_num, GET_RECV_NUM);
-
-    pHeader->serial_num= MY_HTONS(serial_num); //used as message cnt
-    pHeader->vendor_id= MY_HTONS(VENDOR_ID);
-    //pHeader->device_id= SAMPLE_DEVICE_ID_ADAS;
-
-#if defined ENABLE_ADAS
-    pHeader->device_id= SAMPLE_DEVICE_ID_ADAS;
-#elif defined ENABLE_DMS
-    pHeader->device_id= SAMPLE_DEVICE_ID_DMS;
-#endif
-    pHeader->cmd = cmd;
-
-    if (payload_len > 0) 
-    {
-        memcpy(data, payload, payload_len);
-    }
-    tail[0] = SAMPLE_PROT_MAGIC;
-
-    pHeader->checksum = sample_calc_sum(pHeader, msg_len);
-    msg_len = sample_escaple_msg(pHeader, msg_len);
-
-    msg.pkg.send_repeat = 0;
-    msg.len = msg_len;
-    msg.buf = (uint8_t *)pHeader;
-    //    printf("sendpackage cmd = 0x%x,msg.need_ack = %d, len=%d, push!\n",msg.cmd, msg.need_ack, msg.len);
-    ptr_queue_push(g_send_q_p, &msg, &ptr_queue_lock);
-
-    printf("posting...\n");
-    sem_post(&send_data);
-    //printf("push queue, len = %d\n", msg.len);
-
-    return msg_len;
-}
 
 void send_snap_shot_ack(SBProtHeader *pHeader, int32_t len)
 {
@@ -1118,7 +1194,7 @@ int do_snap_shot()
 
 #elif defined ENABLE_ADAS
     AdasWarnFrame *uploadmsg = (AdasWarnFrame *)&msgbuf[0];
-    playloadlen = build_adas_warn_frame(SW_TYPE_SNAP, uploadmsg);
+    playloadlen = build_adas_warn_frame(SB_WARN_TYPE_SNAP, uploadmsg);
     printf("sanp len = %d\n", playloadlen);
     message_queue_send(pSend, \
             SAMPLE_DEVICE_ID_ADAS,\
@@ -1153,14 +1229,13 @@ void set_BCD_time(AdasWarnFrame *uploadmsg, uint64_t usec)
 static MECANWarningMessage g_last_warning_data;
 static MECANWarningMessage g_last_can_msg;
 static uint8_t g_last_trigger_warning[sizeof(MECANWarningMessage)];
-int deal_wsi_adas_info(WsiFrame *sourcecan)
+int deal_wsi_adas_can700(WsiFrame *sourcecan)
 {
     uint32_t warning_id = 0;
     uint8_t msgbuf[512];
     uint32_t playloadlen = 0;
     AdasWarnFrame *uploadmsg = (AdasWarnFrame *)&msgbuf[0];
     MECANWarningMessage can;
-    CAN760Info carinfo;
     uint8_t txbuf[512];
     SBProtHeader *pSend = (SBProtHeader *) txbuf;
     static unsigned int hw_alert = 0;
@@ -1177,15 +1252,8 @@ int deal_wsi_adas_info(WsiFrame *sourcecan)
     uint8_t all_warning_data[sizeof(MECANWarningMessage)] = {0};
     uint8_t trigger_data[sizeof(MECANWarningMessage)] = {0};
 
-    if(!memcmp(sourcecan->topic, MESSAGE_CAN700, strlen(MESSAGE_CAN700)))
-    {
-        //printf("700 come********************************\n");
         //printbuf(sourcecan->warning, 8);
         memcpy(&can, sourcecan->warning, sizeof(sourcecan->warning));
-        //printf("ldw_off = %d\n",can.ldw_off);
-        //printf("left_ldw= %d\n",can.left_ldw);
-        //printf("right_ldw= %d\n",can.right_ldw);
-        //printf("fcw_on= %d\n",can.fcw_on);
 
         for (i = 0; i < sizeof(all_warning_masks); i++) {
             all_warning_data[i] = sourcecan->warning[i] & all_warning_masks[i];
@@ -1220,8 +1288,8 @@ int deal_wsi_adas_info(WsiFrame *sourcecan)
                 }
 
                 memset(uploadmsg, 0, sizeof(*uploadmsg));
-                playloadlen = build_adas_warn_frame(SW_TYPE_LDW, uploadmsg);
-                uploadmsg->start_flag = SW_STATUS_EVENT;
+                playloadlen = build_adas_warn_frame(SB_WARN_TYPE_LDW, uploadmsg);
+                uploadmsg->start_flag = SB_WARN_STATUS_EVENT;
 
                 if(can.left_ldw)
                     uploadmsg->ldw_type = SOUND_TYPE_LLDW;
@@ -1234,16 +1302,15 @@ int deal_wsi_adas_info(WsiFrame *sourcecan)
                         playloadlen);
             }
             if (can.fcw_on) {
-
                 if(!filter_alert_by_time(&fcw_alert, FILTER_ADAS_ALERT_SET_TIME))
                 {
                     printf("ldw filter alert by time!");
                     goto out;
                 }
 
-                playloadlen = build_adas_warn_frame(SW_TYPE_FCW, uploadmsg);
-                uploadmsg->start_flag = SW_STATUS_EVENT;
-                uploadmsg->sound_type = SW_TYPE_FCW;
+                playloadlen = build_adas_warn_frame(SB_WARN_TYPE_FCW, uploadmsg);
+                uploadmsg->start_flag = SB_WARN_STATUS_EVENT;
+                uploadmsg->sound_type = SB_WARN_TYPE_FCW;
 
                 WSI_DEBUG("send FCW alert message!\n");
                 message_queue_send(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
@@ -1264,10 +1331,10 @@ int deal_wsi_adas_info(WsiFrame *sourcecan)
             }
 
             if (HW_LEVEL_RED_CAR == can.headway_warning_level) {
-                playloadlen = build_adas_warn_frame(SW_TYPE_HW, uploadmsg);
-                //uploadmsg->start_flag = SW_STATUS_BEGIN;
-                uploadmsg->start_flag = SW_STATUS_EVENT;
-                uploadmsg->sound_type = SW_TYPE_HW;
+                playloadlen = build_adas_warn_frame(SB_WARN_TYPE_HW, uploadmsg);
+                //uploadmsg->start_flag = SB_WARN_STATUS_BEGIN;
+                uploadmsg->start_flag = SB_WARN_STATUS_EVENT;
+                uploadmsg->sound_type = SB_WARN_TYPE_HW;
 
                 WSI_DEBUG("send HW alert message!\n");
                 message_queue_send(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
@@ -1276,10 +1343,10 @@ int deal_wsi_adas_info(WsiFrame *sourcecan)
 
             } else if (HW_LEVEL_RED_CAR == \
                     g_last_warning_data.headway_warning_level) {
-                playloadlen = build_adas_warn_frame(SW_TYPE_HW, uploadmsg);
-                //uploadmsg->start_flag = SW_STATUS_END;
-                uploadmsg->start_flag = SW_STATUS_EVENT;
-                uploadmsg->sound_type = SW_TYPE_HW;
+                playloadlen = build_adas_warn_frame(SB_WARN_TYPE_HW, uploadmsg);
+                //uploadmsg->start_flag = SB_WARN_STATUS_END;
+                uploadmsg->start_flag = SB_WARN_STATUS_EVENT;
+                uploadmsg->sound_type = SB_WARN_TYPE_HW;
 
                 WSI_DEBUG("send HW alert2 message!\n");
                 message_queue_send(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
@@ -1292,49 +1359,33 @@ out:
         memcpy(&g_last_warning_data, all_warning_data, sizeof(g_last_warning_data));
         memcpy(&g_last_trigger_warning, trigger_data,\
                 sizeof(g_last_trigger_warning));
-    }
-    if(!strncmp(sourcecan->topic, MESSAGE_CAN760, strlen(MESSAGE_CAN760)))
-    {
-        //printf("760 come.........................\n");
-        //printbuf(sourcecan->warning, 8);
-        memcpy(&carinfo, sourcecan->warning, sizeof(carinfo));
-#if 0
-        //			uploadmsg.high = carinfo.
-        //			uploadmsg.altitude = carinfo. //MY_HTONS(altitude)
-        //			uploadmsg.longitude= carinfo. //MY_HTONS(longitude)
-        //			uploadmsg.car_status.acc = 
-        uploadmsg->car_status.left_signal = carinfo.left_signal;
-        uploadmsg->car_status.right_signal = carinfo.right_signal;
-
-        if(carinfo.wipers_aval)
-            uploadmsg->car_status.wipers = carinfo.wipers;
-        uploadmsg->car_status.brakes = carinfo.brakes;
-        //			uploadmsg.car_status.insert = 
-#endif
-    }
-    //printf("can exit2!\n");
     return 0;
 }
 
-void get_local_time(uint8_t get_time[6])
+int deal_wsi_adas_can760(WsiFrame *sourcecan)
 {
-    struct tm a;
-    struct tm *p = &a;
-    time_t rawtime = 0;   
 
-    rawtime += 8*3600;
-    rawtime = time(NULL);
+    CAN760Info carinfo;
+    //printf("760 come.........................\n");
+    //printbuf(sourcecan->warning, 8);
+    memcpy(&carinfo, sourcecan->warning, sizeof(carinfo));
+#if 0
+    //			uploadmsg.high = carinfo.
+    //			uploadmsg.altitude = carinfo. //MY_HTONS(altitude)
+    //			uploadmsg.longitude= carinfo. //MY_HTONS(longitude)
+    //			uploadmsg.car_status.acc = 
+    uploadmsg->car_status.left_signal = carinfo.left_signal;
+    uploadmsg->car_status.right_signal = carinfo.right_signal;
 
-    p = localtime(&rawtime);
-    get_time[0] = p->tm_year;
-    get_time[1] = p->tm_mon+1;
-    get_time[2] = p->tm_mday;
-    get_time[3] = p->tm_hour;
-    get_time[4] = p->tm_min;
-    get_time[5] = p->tm_sec;
-
-    printf("local time %d-%d-%d %d:%d:%d\n", (1900 + p->tm_year), ( 1 + p->tm_mon), p->tm_mday,(p->tm_hour), p->tm_min, p->tm_sec); 
+    if(carinfo.wipers_aval)
+        uploadmsg->car_status.wipers = carinfo.wipers;
+    uploadmsg->car_status.brakes = carinfo.brakes;
+    //			uploadmsg.car_status.insert = 
+#endif
+    return 0;
 }
+
+
 
 void mmid_to_filename(uint32_t id, uint8_t type, char *filepath)
 {
@@ -2380,24 +2431,24 @@ char *warning_type_to_str(uint8_t type)
     strcpy(name, "default");
     switch(type)
     {
-        case SW_TYPE_FCW:
+        case SB_WARN_TYPE_FCW:
             return strcpy(name, FCW_NAME);
-        case SW_TYPE_LDW:
+        case SB_WARN_TYPE_LDW:
             return strcpy(name, LDW_NAME);
-        case SW_TYPE_HW:
+        case SB_WARN_TYPE_HW:
             return strcpy(name, HW_NAME);
-        case SW_TYPE_PCW:
+        case SB_WARN_TYPE_PCW:
             return strcpy(name, PCW_NAME);
-        case SW_TYPE_FLC:
+        case SB_WARN_TYPE_FLC:
             return strcpy(name, FLC_NAME);
-        case SW_TYPE_TSRW:
+        case SB_WARN_TYPE_TSRW:
             return strcpy(name, TSRW_NAME);
-        case SW_TYPE_TSR:
+        case SB_WARN_TYPE_TSR:
             return strcpy(name, TSR_NAME);
-        case SW_TYPE_SNAP:
+        case SB_WARN_TYPE_SNAP:
             return strcpy(name, SNAP_NAME);
 
-            // case SW_TYPE_TIMER_SNAP:
+            // case SB_WARN_TYPE_TIMER_SNAP:
             //   return strcpy(name, "TIMER_SNAP");
         default:
             return name;
@@ -2409,35 +2460,35 @@ int str_to_warning_type(char *type, uint8_t *val)
 
     if(!strncmp(FCW_NAME, type, sizeof(FCW_NAME)))
     {
-        *val = SW_TYPE_FCW;
+        *val = SB_WARN_TYPE_FCW;
     }
     else if(!strncmp(LDW_NAME, type, sizeof(LDW_NAME)))
     {
-        *val = SW_TYPE_LDW;
+        *val = SB_WARN_TYPE_LDW;
     }
     else if(!strncmp(HW_NAME, type, sizeof(HW_NAME)))
     {
-        *val = SW_TYPE_HW;
+        *val = SB_WARN_TYPE_HW;
     }
     else if(!strncmp(PCW_NAME, type, sizeof(PCW_NAME)))
     {
-        *val = SW_TYPE_PCW;
+        *val = SB_WARN_TYPE_PCW;
     }
     else if(!strncmp(FLC_NAME, type, sizeof(FLC_NAME)))
     {
-        *val = SW_TYPE_FLC;
+        *val = SB_WARN_TYPE_FLC;
     }
     else if(!strncmp(TSRW_NAME, type, sizeof(TSRW_NAME)))
     {
-        *val = SW_TYPE_TSRW;
+        *val = SB_WARN_TYPE_TSRW;
     }
     else if(!strncmp(TSR_NAME, type, sizeof(TSR_NAME)))
     {
-        *val = SW_TYPE_TSR;
+        *val = SB_WARN_TYPE_TSR;
     }
     else if(!strncmp(SNAP_NAME, type, sizeof(SNAP_NAME)))
     {
-        *val = SW_TYPE_SNAP;
+        *val = SB_WARN_TYPE_SNAP;
     }
     else
     {

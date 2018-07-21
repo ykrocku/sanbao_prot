@@ -4,23 +4,14 @@
 #include <stdint.h>
 #include <arpa/inet.h>
 
-
-//for websocket
-#define DMS_INFO_TOPIC  ("output.info.v1")
-#define DMS_ALERT_0X100 "dms.alert.0x100"
-#define MESSAGE_CAN700	"output.can.0x700"
-#define MESSAGE_CAN760	"output.can.0x760"
-
-#define WRITE_REAL_TIME_MSG 0
-#define READ_REAL_TIME_MSG  1
-
 //#define ENABLE_ADAS
 //#define ENABLE_DMS
 
+/***********enable filter***********/
 #define FILTER_ALERT_BY_SPEED
 #define FILTER_ALERT_BY_TIME
 
-//30 sec
+/******set filter time 30 sec******/
 #define FILTER_ADAS_ALERT_SET_TIME 30u
 #define FILTER_DMS_ALERT_SET_TIME 30u
 
@@ -28,19 +19,6 @@
 #define NOTICE_MSG    1
 #define WAIT_MSG      0
 #define IS_EXIT_MSG(flag)   (flag == EXIT_MSG)
-
-#define IS_BRDCST(id)   (SAMPLE_DEVICE_ID_BRDCST == (id))
-
-#define SANBAO_VERSION 0x01
-#define VENDOR_ID 0x1234
-
-#define GET_NEXT_SEND_NUM        1
-#define RECORD_RECV_NUM          2
-#define GET_RECV_NUM             3
-
-#define MM_PHOTO 0
-#define MM_AUDIO 1
-#define MM_VIDEO 2
 
 #define IMAGE_NUM_CACHED    40
 
@@ -54,7 +32,6 @@
 #define SNAP_SHOT_JPEG_PATH "/data/snap/dms/"
 //#define SNAP_SHOT_JPEG_PATH "/mnt/obb/dms/"
 #endif
-
 
 #define LOCAL_ADAS_PRAR_FILE     "/data/adas_para"
 #define LOCAL_DMS_PRAR_FILE     "/data/dms_para"
@@ -75,7 +52,6 @@
 
 #endif
 
-
 //protocol
 #define PROTOCOL_USING_BIG_ENDIAN
 
@@ -88,6 +64,7 @@
 #endif
 
 
+/*****************苏标 SB ********************/
 #define SAMPLE_DEVICE_ID_BRDCST         (0x0)
 #define SAMPLE_DEVICE_ID_ADAS           (0x64)
 #define SAMPLE_DEVICE_ID_DMS            (0x65)
@@ -110,9 +87,31 @@
 
 #define SAMPLE_PROT_MAGIC               (0x7E)
 #define SAMPLE_PROT_ESC_CHAR            (0x7D)
+#define MM_PHOTO 0
+#define MM_AUDIO 1
+#define MM_VIDEO 2
 
+#define SANBAO_VERSION 0x01
+#define VENDOR_ID 0x1234
 
-//*****************苏标 SB ********************/
+#define SB_WARN_STATUS_BEGIN (0x1)
+#define SB_WARN_STATUS_END   (0x2)
+#define SB_WARN_STATUS_EVENT (0x0)
+
+#define WARN_TYPE_NUM       (8)
+#define SB_WARN_TYPE_FCW     (0x1)
+#define SB_WARN_TYPE_LDW     (0x2)
+#define SB_WARN_TYPE_HW      (0x3)
+#define SB_WARN_TYPE_PCW     (0x4)
+#define SB_WARN_TYPE_FLC     (0x5)
+#define SB_WARN_TYPE_TSRW    (0x6)
+
+#define SB_WARN_TYPE_TSR     (0x10)
+#define SB_WARN_TYPE_SNAP    (0x11)
+
+#define SB_WARN_TSR_TYPE_SPEED   (0x1)
+#define SB_WARN_TSR_TYPE_HIGHT   (0x2)
+#define SB_WARN_TSR_TYPE_WEIGHT  (0x3)
 typedef struct __SBProtHeader
 {
     uint8_t     magic;
@@ -154,26 +153,6 @@ typedef struct __M4DevInfo
     uint8_t     custom_code[15];
 } __attribute__((packed)) M4DevInfo;
 
-#define SW_STATUS_BEGIN (0x1)
-#define SW_STATUS_END   (0x2)
-#define SW_STATUS_EVENT (0x0)
-
-#define WARN_TYPE_NUM       (8)
-#define SW_TYPE_FCW     (0x1)
-#define SW_TYPE_LDW     (0x2)
-#define SW_TYPE_HW      (0x3)
-#define SW_TYPE_PCW     (0x4)
-#define SW_TYPE_FLC     (0x5)
-#define SW_TYPE_TSRW    (0x6)
-#define SW_TYPE_TSR     (0x10)
-#define SW_TYPE_SNAP    (0x11)
-
-//#define SW_TYPE_TIMER_SNAP    (0x7)
-
-#define SW_TSR_TYPE_SPEED   (0x1)
-#define SW_TSR_TYPE_HIGHT   (0x2)
-#define SW_TSR_TYPE_WEIGHT  (0x3)
-
 typedef struct __MmPacketIndex
 {
     uint8_t     type;
@@ -191,73 +170,6 @@ typedef struct __MmAckInfo
     uint8_t     ack;
 } __attribute__((packed)) MmAckInfo;
 
-typedef struct __MECANWarningMessage {
-    //#ifdef BIG_ENDIAN
-#if 0
-    uint8_t     byte0_resv:5;
-    uint8_t     sound_type:3;
-
-    uint8_t     byte1_resv0:2;
-    uint8_t     zero_speed:1;
-    uint8_t     byte1_resv1:5;
-
-    uint8_t     headway_measurement:7;
-    uint8_t     headway_valid:1;
-
-    uint8_t     byte3_resv:7;
-    uint8_t     no_error:1;
-
-    uint8_t     byte4_resv:4;
-    uint8_t     fcw_on:1;
-    uint8_t     right_ldw:1;
-    uint8_t     left_ldw:1;
-    uint8_t     ldw_off:1;
-
-    uint8_t     byte5_resv;
-    uint8_t     byte6_resv;
-
-    uint8_t     byte7_resv:6;
-    uint8_t     headway_warning_level:2;
-#else /*Little Endian*/
-    uint8_t     sound_type:3;
-    uint8_t     time_indicator:2;
-    uint8_t     byte0_resv:3;
-
-    uint8_t     byte1_resv1:5;
-    uint8_t     zero_speed:1;
-    uint8_t     byte1_resv0:2;
-
-    uint8_t     headway_valid:1;
-    uint8_t     headway_measurement:7;
-
-    uint8_t     no_error:1;
-    uint8_t     error_code:7;
-
-    uint8_t     ldw_off:1;
-    uint8_t     left_ldw:1;
-    uint8_t     right_ldw:1;
-    uint8_t     fcw_on:1;
-    uint8_t     byte4_resv:2;
-    uint8_t     maintenanc:1;
-    uint8_t     failsafe:1;
-
-    uint8_t     byte5_resv0:1;
-    uint8_t     peds_fcw:1;
-    uint8_t     peds_in_dz:1;
-    uint8_t     byte5_resv1:2;
-    uint8_t     tamper_alert:1;
-    uint8_t     byte5_resv2:1;
-    uint8_t     tsr_enable:1;
-
-    uint8_t     tsr_warning_level:3;
-    uint8_t     byte6_resv:5;
-
-    uint8_t     headway_warning_level:2;
-    uint8_t     hw_repeatable_enable:1;
-    uint8_t     byte7_resv:5;
-#endif
-} __attribute__((packed)) MECANWarningMessage;
-
 typedef struct __CarStatus{
     uint16_t    acc:1;
     uint16_t    left_signal:1;
@@ -267,7 +179,6 @@ typedef struct __CarStatus{
     uint16_t    card:1;
     uint16_t    byte_resv:10;
 } __attribute__((packed)) CarStatus;
-
 typedef struct __RealTimeData{
 
     uint8_t     car_speed;
@@ -326,6 +237,7 @@ typedef struct __AdasWarnFrame {
     SBMmHeader mm[0];
 } __attribute__((packed)) AdasWarnFrame;
 
+
 // DMS warn Frame
 #define DMS_FATIGUE_WARN            0x01
 #define DMS_CALLING_WARN            0x02
@@ -355,153 +267,8 @@ typedef struct __DsmWarnFrame {
 
 } __attribute__((packed)) DsmWarnFrame;
 
-
-
-
-
-typedef struct __CAN760Info {
-//#ifdef BIG_ENDIAN
-#if 0
-    uint8_t     byte0_resv1:1;
-    uint8_t     byte0_resv0:1;
-    uint8_t     high_beam:1;
-    uint8_t     low_beam:1;
-    uint8_t     wipers:1;
-    uint8_t     right_signal:1;
-    uint8_t     left_signal:1;
-    uint8_t     brakes:1;
-
-    uint8_t     speed_aval:1;
-    uint8_t     byte1_resv1:1;
-    uint8_t     high_beam_aval:1;
-    uint8_t     low_beam_aval:1;
-    uint8_t     wipers_aval:1;
-    uint8_t     byte1_resv0:3;
-
-    uint8_t     speed;
-
-#else /*Little Endian*/
-    uint8_t     brakes:1;
-    uint8_t     left_signal:1;
-    uint8_t     right_signal:1;
-    uint8_t     wipers:1;
-    uint8_t     low_beam:1;
-    uint8_t     high_beam:1;
-    uint8_t     byte0_resv0:1;
-    uint8_t     byte0_resv1:1;
-
-    uint8_t     byte1_resv0:3;
-    uint8_t     wipers_aval:1;
-    uint8_t     low_beam_aval:1;
-    uint8_t     high_beam_aval:1;
-    uint8_t     byte1_resv1:1;
-    uint8_t     speed_aval:1;
-
-    uint8_t     speed;
-
-#endif
-} __attribute__((packed)) CAN760Info;
-
-
-typedef struct __DmsAlertInfo {
-    //#ifdef BIG_ENDIAN
-#if 0
-#else /*Little Endian*/
-
-    /* 短时间闭眼报警 */
-    uint8_t alert_eye_close1:2;
-    /* 长时间闭眼报警 */
-    uint8_t alert_eye_close2:2;
-    /* 左顾右盼 */
-    uint8_t alert_look_around:2;
-    /* 打哈欠 */
-    uint8_t alert_yawn:2;
-    /* 打电话 */
-    uint8_t alert_phone:2;
-    /* 吸烟 */
-    uint8_t alert_smoking:2;
-    /* 离岗 */
-    uint8_t alert_absence:2;
-    /* 低头 */
-    uint8_t alert_bow:2;
-
-    uint8_t byte2_recv;
-    uint8_t byte3_recv;
-    uint8_t byte4_recv;
-    uint8_t byte5_recv;
-    uint8_t byte6_recv;
-    uint8_t byte7_recv;
-
-#endif
-} __attribute__((packed)) DmsAlertInfo;
-
-typedef struct __DmsCan778 {
-    uint8_t Left_Eyelid_fraction;
-    uint8_t Right_Eyelid_fraction;
-    uint8_t Head_Yaw;
-    uint8_t Head_Pitch;
-    uint8_t Head_Roll;
-    uint8_t Frame_Tag;
-    uint8_t reserved[2];
-} __attribute__((packed)) DmsCan778;
-
-typedef struct __DmsCan779 {
-    uint8_t Eye_Closure_Warning:2;
-    uint8_t Yawn_warning:2;
-    uint8_t Look_around_warning:2;
-    uint8_t Look_up_warning:2;
-
-    uint8_t Look_down_warning:2;
-    uint8_t Phone_call_warning:2;
-    uint8_t Smoking_warning:2;
-    uint8_t Absence_warning:2;
-
-    uint8_t Frame_Tag;
-    uint8_t reserved[5];
-
-} __attribute__((packed)) DmsCan779;
-
-
-typedef struct __DmsCanFrame {
-    char can_779_valid;
-    char can_778_valid;
-
-    DmsCan779 can_779;
-    DmsCan778 can_778;
-} __attribute__((packed)) DmsCanFrame;
-
-
-
-/**********************can message*****************************/
-typedef struct __WsiFrame{
-    uint8_t warning[8];
-    char source[20];
-    uint64_t time;
-    char topic[20];
-}WsiFrame;
-
-#define HW_LEVEL_NO_CAR     (0)
-#define HW_LEVEL_WHITE_CAR  (1)
-#define HW_LEVEL_RED_CAR    (2)
-
-
-#if 1
-#define SOUND_WARN_NONE     (0x0)
-#define SOUND_TYPE_SILENCE  (0)
-#define SOUND_TYPE_LLDW     (1)
-#define SOUND_TYPE_RLDW     (2)
-#define SOUND_TYPE_HW       (3)
-#define SOUND_TYPE_TSR      (4)
-#define SOUND_TYPE_VB       (5)
-#define SOUND_TYPE_FCW_PCW  (6)
-#endif
-
-
-#define MINIEYE_WARNING_CAN_ID  (0x700)
-#define MINIEYE_CAN760Info_CAN_ID (0x760)
-
+//para
 typedef struct __AdasParaSetting{
-
     uint8_t warning_speed_val;
     uint8_t warning_volume;
     uint8_t auto_photo_mode;
@@ -596,6 +363,229 @@ typedef struct _DmsParaSetting{
     uint8_t reserve2[2];
 } __attribute__((packed)) DmsParaSetting;
 
+// with tangdajun
+typedef struct __DmsAlertInfo {
+    //#ifdef BIG_ENDIAN
+#if 0
+#else /*Little Endian*/
+
+    /* 短时间闭眼报警 */
+    uint8_t alert_eye_close1:2;
+    /* 长时间闭眼报警 */
+    uint8_t alert_eye_close2:2;
+    /* 左顾右盼 */
+    uint8_t alert_look_around:2;
+    /* 打哈欠 */
+    uint8_t alert_yawn:2;
+    /* 打电话 */
+    uint8_t alert_phone:2;
+    /* 吸烟 */
+    uint8_t alert_smoking:2;
+    /* 离岗 */
+    uint8_t alert_absence:2;
+    /* 低头 */
+    uint8_t alert_bow:2;
+
+    uint8_t byte2_recv;
+    uint8_t byte3_recv;
+    uint8_t byte4_recv;
+    uint8_t byte5_recv;
+    uint8_t byte6_recv;
+    uint8_t byte7_recv;
+
+#endif
+} __attribute__((packed)) DmsAlertInfo;
+/*****************苏标 SB END**********************/
+
+
+/****************Minieye CAN Frame*****************/
+typedef struct __MECANWarningMessage {
+    //#ifdef BIG_ENDIAN
+#if 0
+    uint8_t     byte0_resv:5;
+    uint8_t     sound_type:3;
+
+    uint8_t     byte1_resv0:2;
+    uint8_t     zero_speed:1;
+    uint8_t     byte1_resv1:5;
+
+    uint8_t     headway_measurement:7;
+    uint8_t     headway_valid:1;
+
+    uint8_t     byte3_resv:7;
+    uint8_t     no_error:1;
+
+    uint8_t     byte4_resv:4;
+    uint8_t     fcw_on:1;
+    uint8_t     right_ldw:1;
+    uint8_t     left_ldw:1;
+    uint8_t     ldw_off:1;
+
+    uint8_t     byte5_resv;
+    uint8_t     byte6_resv;
+
+    uint8_t     byte7_resv:6;
+    uint8_t     headway_warning_level:2;
+#else /*Little Endian*/
+    uint8_t     sound_type:3;
+    uint8_t     time_indicator:2;
+    uint8_t     byte0_resv:3;
+
+    uint8_t     byte1_resv1:5;
+    uint8_t     zero_speed:1;
+    uint8_t     byte1_resv0:2;
+
+    uint8_t     headway_valid:1;
+    uint8_t     headway_measurement:7;
+
+    uint8_t     no_error:1;
+    uint8_t     error_code:7;
+
+    uint8_t     ldw_off:1;
+    uint8_t     left_ldw:1;
+    uint8_t     right_ldw:1;
+    uint8_t     fcw_on:1;
+    uint8_t     byte4_resv:2;
+    uint8_t     maintenanc:1;
+    uint8_t     failsafe:1;
+
+    uint8_t     byte5_resv0:1;
+    uint8_t     peds_fcw:1;
+    uint8_t     peds_in_dz:1;
+    uint8_t     byte5_resv1:2;
+    uint8_t     tamper_alert:1;
+    uint8_t     byte5_resv2:1;
+    uint8_t     tsr_enable:1;
+
+    uint8_t     tsr_warning_level:3;
+    uint8_t     byte6_resv:5;
+
+    uint8_t     headway_warning_level:2;
+    uint8_t     hw_repeatable_enable:1;
+    uint8_t     byte7_resv:5;
+#endif
+} __attribute__((packed)) MECANWarningMessage;
+
+#if 1
+#define HW_LEVEL_NO_CAR     (0)
+#define HW_LEVEL_WHITE_CAR  (1)
+#define HW_LEVEL_RED_CAR    (2)
+
+#define SOUND_WARN_NONE     (0x0)
+#define SOUND_TYPE_SILENCE  (0)
+#define SOUND_TYPE_LLDW     (1)
+#define SOUND_TYPE_RLDW     (2)
+#define SOUND_TYPE_HW       (3)
+#define SOUND_TYPE_TSR      (4)
+#define SOUND_TYPE_VB       (5)
+#define SOUND_TYPE_FCW_PCW  (6)
+#endif
+
+
+
+
+
+/****************Minieye CAN Frame END*****************/
+
+
+
+
+
+
+
+
+typedef struct __CAN760Info {
+//#ifdef BIG_ENDIAN
+#if 0
+    uint8_t     byte0_resv1:1;
+    uint8_t     byte0_resv0:1;
+    uint8_t     high_beam:1;
+    uint8_t     low_beam:1;
+    uint8_t     wipers:1;
+    uint8_t     right_signal:1;
+    uint8_t     left_signal:1;
+    uint8_t     brakes:1;
+
+    uint8_t     speed_aval:1;
+    uint8_t     byte1_resv1:1;
+    uint8_t     high_beam_aval:1;
+    uint8_t     low_beam_aval:1;
+    uint8_t     wipers_aval:1;
+    uint8_t     byte1_resv0:3;
+
+    uint8_t     speed;
+
+#else /*Little Endian*/
+    uint8_t     brakes:1;
+    uint8_t     left_signal:1;
+    uint8_t     right_signal:1;
+    uint8_t     wipers:1;
+    uint8_t     low_beam:1;
+    uint8_t     high_beam:1;
+    uint8_t     byte0_resv0:1;
+    uint8_t     byte0_resv1:1;
+
+    uint8_t     byte1_resv0:3;
+    uint8_t     wipers_aval:1;
+    uint8_t     low_beam_aval:1;
+    uint8_t     high_beam_aval:1;
+    uint8_t     byte1_resv1:1;
+    uint8_t     speed_aval:1;
+
+    uint8_t     speed;
+
+#endif
+} __attribute__((packed)) CAN760Info;
+
+
+/*******************DMS Websocket to CAN Frame****************************/
+typedef struct __DmsCan778 {
+    uint8_t Left_Eyelid_fraction;
+    uint8_t Right_Eyelid_fraction;
+    uint8_t Head_Yaw;
+    uint8_t Head_Pitch;
+    uint8_t Head_Roll;
+    uint8_t Frame_Tag;
+    uint8_t reserved[2];
+} __attribute__((packed)) DmsCan778;
+
+typedef struct __DmsCan779 {
+    uint8_t Eye_Closure_Warning:2;
+    uint8_t Yawn_warning:2;
+    uint8_t Look_around_warning:2;
+    uint8_t Look_up_warning:2;
+
+    uint8_t Look_down_warning:2;
+    uint8_t Phone_call_warning:2;
+    uint8_t Smoking_warning:2;
+    uint8_t Absence_warning:2;
+
+    uint8_t Frame_Tag;
+    uint8_t reserved[5];
+
+} __attribute__((packed)) DmsCan779;
+
+
+typedef struct __DmsCanFrame {
+    char can_779_valid;
+    char can_778_valid;
+
+    DmsCan779 can_779;
+    DmsCan778 can_778;
+} __attribute__((packed)) DmsCanFrame;
+
+/*******************DMS Websocket to CAN Frame END****************************/
+
+
+/*********************Websocket socket message****************************/
+typedef struct __WsiFrame{
+    uint8_t warning[8];
+    char source[20];
+    uint64_t time;
+    char topic[20];
+}WsiFrame;
+
+/*********************Websocket socket message END****************************/
 
 typedef struct __MmInfo_node{
 #define SLOT_STABLE     0
@@ -626,9 +616,6 @@ typedef struct __InfoForStore{
     uint32_t video_id[2];
 } __attribute__((packed)) InfoForStore;
 
-
-
-
 //pthread
 void *pthread_websocket_client(void *para);
 void *pthread_tcp_recv(void *para);
@@ -645,49 +632,23 @@ void write_dev_para(void *para, uint8_t para_type);
 int write_local_adas_para_file(const char* filename);
 int write_local_dms_para_file(const char* filename);
 void set_AdasParaSetting_default();
-
-int write_file(const char* filename, const void* data, size_t size);
-
-//queue
-int pull_mm_queue(InfoForStore *mm);
-void push_mm_queue(InfoForStore *mm);
-void display_mm_resource();
-int32_t find_mm_resource(uint32_t id, MmInfo_node *m);
-int32_t delete_mm_resource(uint32_t id);
-void insert_mm_resouce(MmInfo_node m);
-
-//common
-#define DEBUG_G
-#ifdef DEBUG_G 
-//#define MY_DEBUG(format,...) printf("File: "__FILE__", Line: %05d:\n", __LINE__, ##__VA_ARGS__)
-#define WSI_DEBUG(format,...) printf(format, ##__VA_ARGS__)
-#else
-#define WSI_DEBUG(format,...)
-#endif
-void printbuf(void *buf, int len);
-int timeout_trigger(struct timespec *tv, int sec);
-int ratelimit_connects(unsigned int *last, unsigned int secs);
-
-//prot
-int do_snap_shot();
-char *warning_type_to_str(uint8_t type);
-int deal_wsi_adas_info(WsiFrame *sourcecan);
-void adas_para_check(AdasParaSetting *para);
-
+void set_DmsParaSetting_default();
 void print_dms_para(DmsParaSetting *para);
 void print_adas_para(AdasParaSetting *para);
 int read_local_adas_para_file(const char* filename);
 int read_local_dms_para_file(const char* filename);
-void set_DmsParaSetting_default();
+
+int write_file(const char* filename, const void* data, size_t size);
+
+//prot
+int do_snap_shot();
+char *warning_type_to_str(uint8_t type);
+int deal_wsi_adas_can700(WsiFrame *sourcecan);
+int deal_wsi_adas_can760(WsiFrame *sourcecan);
+void adas_para_check(AdasParaSetting *para);
+
+void get_latitude_info(char *buffer, int len);
 void deal_wsi_dms_info( WsiFrame *can);
 void deal_wsi_dms_info2( DmsCan779 *can);
-
-int32_t message_queue_send(SBProtHeader *pHeader, uint8_t devid, uint8_t cmd,uint8_t *payload, int32_t payload_len);
-void get_local_time(uint8_t get_time[6]);
-void sem_send_init();
-
-void RealTimeDdata_process(RealTimeData *data, int mode);
-void get_latitude_info(char *buffer, int len);
-
 
 #endif

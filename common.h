@@ -57,18 +57,37 @@ typedef struct _package_repeat_status{
 } __attribute__((packed)) pkg_repeat_status;
 
 
-int timeout_trigger(struct timespec *tv, int sec);
+//queue
 int ptr_queue_push(queue<ptr_queue_node *> *p, ptr_queue_node *in,  pthread_mutex_t *lock);
 int ptr_queue_pop(queue<ptr_queue_node*> *p, ptr_queue_node *out,  pthread_mutex_t *lock);
-
 void push_mm_queue(InfoForStore *mm);
 int pull_mm_queue(InfoForStore *mm);
 void push_mm_req_cmd_queue(SBMmHeader2 *mm_info);
 int pull_mm_req_cmd_queue(SBMmHeader2 *mm_info);
 
+//list
 void display_mm_resource();
 int32_t find_mm_resource(uint32_t id, MmInfo_node *m);
 int32_t delete_mm_resource(uint32_t id);
 void insert_mm_resouce(MmInfo_node m);
+
+
+int pull_mm_queue(InfoForStore *mm);
+void push_mm_queue(InfoForStore *mm);
+void display_mm_resource();
+int32_t find_mm_resource(uint32_t id, MmInfo_node *m);
+int32_t delete_mm_resource(uint32_t id);
+void insert_mm_resouce(MmInfo_node m);
+
+//common
+#define DEBUG_G
+#ifdef DEBUG_G 
+//#define MY_DEBUG(format,...) printf("File: "__FILE__", Line: %05d:\n", __LINE__, ##__VA_ARGS__)
+#define WSI_DEBUG(format,...) printf(format, ##__VA_ARGS__)
+#else
+#define WSI_DEBUG(format,...)
+#endif
+void printbuf(void *buf, int len);
+int timeout_trigger(struct timespec *tv, int sec);
 
 #endif

@@ -32,9 +32,7 @@
 
 
 #include "prot.h"
-//#include "dms_interface.h"
-//#include "dms_info_simple_buffer.h"
-
+#include "common.h"
 
 using namespace rapidjson;
 using namespace std;
@@ -44,15 +42,20 @@ HalIO &halio = HalIO::Instance();
 #define MOBILEYE_WARNING_ID     (0x700)
 #define MOBILEYE_CARSIGNAL_ID   (0x760)
 
+/*******xuhan interface*************************/
+#define DMS_INFO_TOPIC  ("output.info.v1")
+/*******tangdajun interface*************************/
+#define DMS_ALERT_0X100 "dms.alert.0x100"
 
-
+#define MESSAGE_CAN700	"output.can.0x700"
+#define MESSAGE_CAN760	"output.can.0x760"
 
 /**************
  *  topic: subscribe
  *  source: client-name
  *  data: dms.alert.0x100
  * ****************/
-int pack_req_can_cmd(uint8_t *data, uint32_t len, const char *name)
+static int pack_wsi_msg(uint8_t *data, uint32_t len, const char *name)
 {
     unsigned int map_size = 3;
     uint32_t minlen = 0;
@@ -86,6 +89,7 @@ int pack_req_can_cmd(uint8_t *data, uint32_t len, const char *name)
 }
 
 #if 0
+/*********for debug**********/
 const char* type_to_str(uint8_t type)
 {
     switch(type){
@@ -118,7 +122,7 @@ const char* type_to_str(uint8_t type)
 }
 #endif
 
-void msgpack_object_get(FILE* out, msgpack_object o, WsiFrame *can)
+static void msgpack_object_get(FILE* out, msgpack_object o, WsiFrame *can)
 {
     enum MSG_DATA_TYPE{
         CAN_DATA=1,
@@ -223,8 +227,8 @@ void msgpack_object_get(FILE* out, msgpack_object o, WsiFrame *can)
     }
     return;
 }
-
-int msgpack_object_dms_get(FILE* out, msgpack_object o, WsiFrame *can, uint8_t *buf, uint32_t *buflen)
+// use to get "output.info.v1" message
+static int msgpack_object_dms_get(FILE* out, msgpack_object o, WsiFrame *can, uint8_t *buf, uint32_t *buflen)
 {
     enum MSG_DATA_TYPE{
         CAN_DATA=1,
@@ -335,87 +339,6 @@ int msgpack_object_dms_get(FILE* out, msgpack_object o, WsiFrame *can, uint8_t *
     return 0;
 }
 
-int adas_parse_data_json(char *buffer);
-int dms_parse_data_json(char *buffer, DmsCanFrame *can_frame);
-#define DMS_JSON_MSG_LEN (1024*1024)
-int unpack_recv_can_msg(char *data, size_t size)
-{
-    DmsCanFrame can_frame;
-    uint32_t len = 0;
-    msgpack_zone mempool;
-    msgpack_object deserialized;
-    WsiFrame can;
-    uint8_t data_msg[8192];
-
- //   if(!data || size < 0)
- //       return -1;
-
-#if defined ENABLE_ADAS 
-    msgpack_zone_init(&mempool, DMS_JSON_MSG_LEN);//1M
-    msgpack_unpack((const char *)data, size, NULL, &mempool, &deserialized);
-    memset(&can, 0, sizeof(can));
-
-    //char json_buf[1024];
-    //msgpack_object_print_buffer(json_buf, sizeof(json_buf), deserialized);
-    //WSI_DEBUG("get json:\n %s\n", json_buf);
-
-    //adas_parse_data_json(json_buf);
-
-    msgpack_object_get(stdout, deserialized, &can);
-
-
-    msgpack_zone_destroy(&mempool);
-    deal_wsi_adas_info(&can);
-
-#elif defined ENABLE_DMS
-
-    msgpack_zone_init(&mempool, DMS_JSON_MSG_LEN);//1M
-    msgpack_unpack((const char *)data, size, NULL, &mempool, &deserialized);
-
-    //uppack to json
-    //msgpack_object_print(stdout, deserialized);
-    msgpack_object_get(stdout, deserialized, &can);
-    msgpack_zone_destroy(&mempool);
-
-    deal_wsi_dms_info(&can);
-
-#if 0
-    msgpack_zone_init(&mempool, DMS_JSON_MSG_LEN);//1M
-    //printbuf(data, size);
-    msgpack_unpack((const char *)data, size, NULL, &mempool, &deserialized);
-    //get bin data
-    len = sizeof(data_msg);
-    msgpack_object_dms_get(stdout, deserialized, &can, data_msg, &len);
-    WSI_DEBUG("get bin data len = %d\n", len);
-    //printbuf(data_msg, len);
-
-    //second unpack
-    char *buffer = (char *)malloc(DMS_JSON_MSG_LEN);
-    msgpack_unpack((const char *)data_msg, len, NULL, &mempool, &deserialized);
-    msgpack_object_print_buffer(buffer, DMS_JSON_MSG_LEN, deserialized);
-    msgpack_zone_destroy(&mempool);
-    WSI_DEBUG("unpack:\n %s\n", buffer);
-
-    memset(&can_frame, 0, sizeof(DmsCanFrame));
-    dms_parse_data_json(buffer, &can_frame);
-    if(can_frame.can_779_valid){
-        WSI_DEBUG("can779:\n");
-        //printbuf(&can_frame.can_779, sizeof(DmsCan779));
-        //halio.send_can_frame(0x779, (char *)&can_frame.can_779);
-        deal_wsi_dms_info2(&can_frame.can_779);
-    }
-    if(can_frame.can_778_valid){
-        WSI_DEBUG("can778:\n");
-        //printbuf(&can_frame.can_778, sizeof(DmsCan778));
-        //halio.send_can_frame(0x778, (char *)&can_frame.can_778);
-    }
-    if(buffer)
-        free(buffer);
-#endif
-#endif
-    return 0;
-}
-
 static int get_dms_alert(const rapidjson::Value& val)
 {
     assert(val["score"].IsNumber());
@@ -462,7 +385,8 @@ static bool get_dms_pose(const rapidjson::Value& val, uint8_t *yaw, uint8_t *pit
     return true;
 }
 
-int adas_parse_data_json(char *buffer)
+#if 0
+static int adas_parse_data_json(char *buffer)
 {
     Document document;  // Default template parameter uses UTF8 and MemoryPoolAllocator.
 
@@ -495,8 +419,9 @@ int adas_parse_data_json(char *buffer)
 
     return 0;
 }
+#endif
 
-int dms_parse_data_json(char *buffer, DmsCanFrame *can_frame)
+static int dms_parse_data_json(char *buffer, DmsCanFrame *can_frame)
 {
     Document document;  // Default template parameter uses UTF8 and MemoryPoolAllocator.
     static uint32_t s_frame_tag_778 = 0, s_frame_tag_779 = 0;
@@ -560,6 +485,97 @@ int dms_parse_data_json(char *buffer, DmsCanFrame *can_frame)
     return 0;
 }
 
+int unpack_wsi_msg(char *data, size_t size)
+{
+#define MSGPACK_LEN (128*1024)
+    msgpack_zone mempool;
+    msgpack_object deserialized;
+    WsiFrame can;
+
+    msgpack_zone_init(&mempool, MSGPACK_LEN);
+    msgpack_unpack((const char *)data, size, NULL, &mempool, &deserialized);
+    memset(&can, 0, sizeof(can));
+    msgpack_object_get(stdout, deserialized, &can);
+
+    //msgpack_object_print(stdout, deserialized);
+#if defined ENABLE_ADAS 
+    if(!memcmp(can.topic, MESSAGE_CAN700, strlen(MESSAGE_CAN700))){
+        printf("700 come********************************\n");
+        deal_wsi_adas_can700(&can);
+    }else if(!memcmp(can.topic, MESSAGE_CAN760, strlen(MESSAGE_CAN760))){
+        printf("760 come********************************\n");
+        deal_wsi_adas_can760(&can);
+    }else{
+        ;
+    }
+#elif defined ENABLE_DMS
+    deal_wsi_dms_info(&can);
+#endif
+    msgpack_zone_destroy(&mempool);
+    return 0;
+}
+
+//for dms new interface
+int unpack_wsi_msg2(char *data, size_t size)
+{
+#define DMS_JSON_MSG_LEN (1024*1024)
+    DmsCanFrame can_frame;
+    uint32_t len = 0;
+    msgpack_zone mempool;
+    msgpack_object deserialized;
+    WsiFrame can;
+    uint8_t data_msg[8192];
+
+#if defined ENABLE_ADAS 
+    msgpack_zone_init(&mempool, DMS_JSON_MSG_LEN);//1M
+    msgpack_unpack((const char *)data, size, NULL, &mempool, &deserialized);
+    memset(&can, 0, sizeof(can));
+
+    msgpack_object_get(stdout, deserialized, &can);
+    msgpack_zone_destroy(&mempool);
+
+    if(!memcmp(can.topic, MESSAGE_CAN700, strlen(MESSAGE_CAN700))){
+        //printf("700 come********************************\n");
+        deal_wsi_adas_can700(&can);
+    }else if(!memcmp(can.topic, MESSAGE_CAN760, strlen(MESSAGE_CAN760))){
+        //printf("760 come********************************\n");
+        deal_wsi_adas_can760(&can);
+    }else{
+        ;
+    }
+#elif defined ENABLE_DMS
+    msgpack_zone_init(&mempool, DMS_JSON_MSG_LEN);//1M
+    msgpack_unpack((const char *)data, size, NULL, &mempool, &deserialized);
+    len = sizeof(data_msg);
+    msgpack_object_dms_get(stdout, deserialized, &can, data_msg, &len);
+    WSI_DEBUG("get bin data len = %d\n", len);
+
+    //second unpack
+    char *buffer = (char *)malloc(DMS_JSON_MSG_LEN);
+    msgpack_unpack((const char *)data_msg, len, NULL, &mempool, &deserialized);
+    msgpack_object_print_buffer(buffer, DMS_JSON_MSG_LEN, deserialized);
+    msgpack_zone_destroy(&mempool);
+    WSI_DEBUG("unpack:\n %s\n", buffer);
+
+    memset(&can_frame, 0, sizeof(DmsCanFrame));
+    dms_parse_data_json(buffer, &can_frame);
+    if(can_frame.can_779_valid){
+        WSI_DEBUG("can779:\n");
+        //printbuf(&can_frame.can_779, sizeof(DmsCan779));
+        //halio.send_can_frame(0x779, (char *)&can_frame.can_779);
+        deal_wsi_dms_info2(&can_frame.can_779);
+    }
+    if(can_frame.can_778_valid){
+        WSI_DEBUG("can778:\n");
+        //printbuf(&can_frame.can_778, sizeof(DmsCan778));
+        //halio.send_can_frame(0x778, (char *)&can_frame.can_778);
+    }
+    if(buffer)
+        free(buffer);
+#endif
+    return 0;
+}
+
 volatile int force_exit = 0;
 static struct lws *wsi_dumb;
 enum demo_protocols {
@@ -569,23 +585,20 @@ enum demo_protocols {
     DEMO_PROTOCOL_COUNT
 };
 
-void printbuf(void *buffer, int len)
-{
-    int i;
-    uint8_t *buf = (uint8_t *)buffer;
+enum Subscribe_Msg {
+    MESSAGE_INDEX_MIN,
+    MESSAGE_CAN700_INDEX,
+    MESSAGE_CAN760_INDEX,
 
-    for(i=0; i<len; i++)
-    {
-        if(i && (i%16==0))
-            WSI_DEBUG("\n");
+    MESSAGE_CANDMS_INDEX,
 
-        WSI_DEBUG("0x%02x ", buf[i]);
-    }
-    WSI_DEBUG("\n");
-}
+    /* always last */
+    MESSAGE_INDEX_MAX
+};
 
-//void write_wsi_log(char *buf, int len)
-void write_wsi_log(int reasons)
+/*********for debug**********/
+#if 0 
+static void write_wsi_log(int reasons)
 {
     FILE *fp;
     char buf[50];
@@ -645,6 +658,7 @@ void write_wsi_log(int reasons)
     fwrite(buf, 1, len, fp);
     fclose(fp);
 }
+#endif
 
 static int callback_lws_communicate(struct lws *wsi, enum lws_callback_reasons reason,
         void *user, void *in, size_t len)
@@ -654,7 +668,7 @@ static int callback_lws_communicate(struct lws *wsi, enum lws_callback_reasons r
     char buf[LWS_WRITE_BUF_LEN + LWS_PRE];
     int n=0, msgpacklen=0;
     uint8_t datacmd[512];
-    static int sendflag=1;
+    static int msg_send_index = MESSAGE_INDEX_MIN;
 
     //	printf("reason: %d\n", reason);
     //write_wsi_log(reason);
@@ -667,14 +681,17 @@ static int callback_lws_communicate(struct lws *wsi, enum lws_callback_reasons r
 
         case LWS_CALLBACK_CLOSED:
             printf("dumb:: LWS_CALLBACK_CLOSED\n");
-            sendflag=1;
+            msg_send_index = MESSAGE_INDEX_MIN;
             wsi_dumb = NULL;
             break;
 
         case LWS_CALLBACK_CLIENT_RECEIVE:
-            //printf("receive websocket: %ld\n", len);
+            printf("receive websocket: %ld\n", len);
             //printbuf((uint8_t *)in, (int)len);
-            unpack_recv_can_msg((char *)in, len);
+            unpack_wsi_msg((char *)in, len);
+
+            //dms new interface
+            //unpack_wsi_msg2((char *)in, len);
             break;
 
         case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
@@ -717,38 +734,43 @@ static int callback_lws_communicate(struct lws *wsi, enum lws_callback_reasons r
 
         case LWS_CALLBACK_CLIENT_WRITEABLE:
             printf("LWS_CALLBACK_CLIENT_WRITEABLE\n");
-            if(sendflag == 1 || sendflag == 2)
-            {
 #if defined ENABLE_ADAS
-                if(sendflag == 2)
-                {
-                    printf("request 760!\n");
-                    msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), MESSAGE_CAN760);
-                    sendflag = 0;
-                }
-                if(sendflag == 1)
-                {
-                    printf("request 700!\n");
-                    msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), MESSAGE_CAN700);
-                    sendflag = 2;
-                }
-#elif defined ENABLE_DMS
-                printf("request %s\n", DMS_ALERT_0X100);
-                msgpacklen = pack_req_can_cmd(datacmd, sizeof(datacmd), DMS_ALERT_0X100);
-                sendflag = 0;
-#endif
-                printf("client send request, ret = %d!\n", msgpacklen);
-                if(msgpacklen < LWS_WRITE_BUF_LEN && msgpacklen >0)
-                {
-                    memcpy(buf + LWS_PRE, datacmd, msgpacklen);
-                    n = lws_write(wsi, (unsigned char *)&buf[LWS_PRE], msgpacklen, LWS_WRITE_BINARY);
-                    if(n<=0)
-                    {
-                        printf("lws write ret = %d\n", n);
-                    }
-                }
-                lws_callback_on_writable(wsi);
+            printf("send %d\n", msg_send_index);
+            if(msg_send_index == MESSAGE_CAN700_INDEX){
+                printf("send 700\n");
+                msgpacklen = pack_wsi_msg(datacmd, sizeof(datacmd), MESSAGE_CAN700);
+                msg_send_index++;
+            }else if(msg_send_index == MESSAGE_CAN760_INDEX){
+                printf("send 700\n");
+                msgpacklen = pack_wsi_msg(datacmd, sizeof(datacmd), MESSAGE_CAN760);
+                msg_send_index++;
+            }else if(msg_send_index < MESSAGE_INDEX_MAX){
+                msg_send_index++;
+                break;
+            }else{
+                break;
             }
+#elif defined ENABLE_DMS
+            if(msg_send_index == MESSAGE_CANDMS_INDEX){
+                printf("request %s\n", DMS_ALERT_0X100);
+                msgpacklen = pack_wsi_msg(datacmd, sizeof(datacmd), DMS_ALERT_0X100);
+                msg_send_index++;
+            }else if(msg_send_index < MESSAGE_INDEX_MAX){
+                    msg_send_index++;
+                    break;
+            }else{
+                break;
+            }
+#endif
+            printf("client send request, ret = %d!\n", msgpacklen);
+            if(msgpacklen < LWS_WRITE_BUF_LEN && msgpacklen >0){
+                memcpy(buf + LWS_PRE, datacmd, msgpacklen);
+                n = lws_write(wsi, (unsigned char *)&buf[LWS_PRE], msgpacklen, LWS_WRITE_BINARY);
+                if(n<=0){
+                    printf("lws write ret = %d\n", n);
+                }
+            }
+            lws_callback_on_writable(wsi);
             break;
 
         case LWS_CALLBACK_CLIENT_APPEND_HANDSHAKE_HEADER:
@@ -768,7 +790,7 @@ static int callback_lws_communicate(struct lws *wsi, enum lws_callback_reasons r
 
         case LWS_CALLBACK_WSI_DESTROY:
             printf("wsi destroy!!!\n");
-            sendflag=1;
+            msg_send_index = MESSAGE_INDEX_MIN;
             wsi_dumb = NULL;
             break;
 
@@ -874,22 +896,6 @@ void *pthread_websocket_client(void *para)
     lws_context_destroy(context);
 
     pthread_exit(NULL);
-}
-
-size_t ReadFile(char *buf, int len, const char *filename)
-{
-    FILE *fp;
-    size_t size = 0;
-
-    fp = fopen(filename, "rb");
-    if(!fp){
-        printf("read file fail:%s\n", strerror(errno));
-        return 0;
-    }   
-    size = fread(buf, 1, len, fp);
-    fclose(fp);
-
-    return size;
 }
 
 void can_send_init(void)

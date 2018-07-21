@@ -260,4 +260,33 @@ void insert_mm_resouce(MmInfo_node m)
 }
 
 
+void printbuf(void *buffer, int len)
+{
+    int i;
+    uint8_t *buf = (uint8_t *)buffer;
 
+    for(i=0; i<len; i++)
+    {
+        if(i && (i%16==0))
+            WSI_DEBUG("\n");
+
+        WSI_DEBUG("0x%02x ", buf[i]);
+    }
+    WSI_DEBUG("\n");
+}
+
+size_t ReadFile(char *buf, int len, const char *filename)
+{
+    FILE *fp;
+    size_t size = 0;
+
+    fp = fopen(filename, "rb");
+    if(!fp){
+        printf("read file fail:%s\n", strerror(errno));
+        return 0;
+    }   
+    size = fread(buf, 1, len, fp);
+    fclose(fp);
+
+    return size;
+}
