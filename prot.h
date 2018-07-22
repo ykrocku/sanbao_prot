@@ -20,7 +20,7 @@
 #define WAIT_MSG      0
 #define IS_EXIT_MSG(flag)   (flag == EXIT_MSG)
 
-#define IMAGE_NUM_CACHED    40
+#define IMAGE_FILE_NUM_CACHED    10
 
 #if defined ENABLE_ADAS
 #define DO_DELETE_SNAP_SHOT_FILES "rm -r /data/snap/adas/*"
@@ -621,7 +621,7 @@ typedef struct __MmInfo_node{
 #define WARN_SNAP_NUM_MAX   10
 typedef struct __InfoForStore{
 
-    uint8_t flag;
+    uint8_t get_another_camera_video;
     uint8_t warn_type;
     //uint8_t mm_type;
     uint8_t photo_enable;
@@ -645,7 +645,7 @@ void *pthread_snap_shot(void *p);
 void *pthread_tcp_send(void *para);
 
 //para file
-void global_var_init();
+int global_var_init();
 void read_dev_para(void *para, uint8_t para_type);
 void write_dev_para(void *para, uint8_t para_type);
 int write_local_adas_para_file(const char* filename);

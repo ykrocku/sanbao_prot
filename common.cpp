@@ -218,11 +218,7 @@ int32_t delete_mm_resource(uint32_t id)
         {
             if(it->mm_type == MM_PHOTO)
             {
-#if 0
-                sprintf(filepath, "%s%s-%08d.jpg",SNAP_SHOT_JPEG_PATH,\
-                        warning_type_to_str(it->warn_type), id);
-#endif
-                sprintf(filepath, "%s%08d.jpg",SNAP_SHOT_JPEG_PATH,id);
+                sprintf(filepath, "%s%08d",SNAP_SHOT_JPEG_PATH,id);
                 printf("rm jpeg %s\n", filepath);
                 remove(filepath);
                 it = mmlist.erase(it);  
@@ -231,13 +227,7 @@ int32_t delete_mm_resource(uint32_t id)
             }
             if(it->mm_type == MM_VIDEO)
             {
-#if 0
-                sprintf(filepath,"%s%s-%08d.mp4",SNAP_SHOT_JPEG_PATH,\
-                        warning_type_to_str(it->warn_type), id);
-#endif
-
-                sprintf(filepath,"%s%08d.mp4",SNAP_SHOT_JPEG_PATH,id);
-
+                sprintf(filepath,"%s%08d",SNAP_SHOT_JPEG_PATH,id);
                 printf("rm mp4 %s\n", filepath);
                 remove(filepath);
                 it = mmlist.erase(it);  

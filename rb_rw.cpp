@@ -411,10 +411,11 @@ void *pthread_encode_jpeg(void *p)
 void write_one_jpeg(InfoForStore *mm, RBFrame* pFrame, int index)
 {
     char filepath[100];
-    char writefile_link[100];
     MmInfo_node node;
 
-    sprintf(filepath,"%s%08d.jpg", SNAP_SHOT_JPEG_PATH,mm->photo_id[index]);
+    //sprintf(filepath,"%s%08d.jpg", SNAP_SHOT_JPEG_PATH,mm->photo_id[index]);
+    sprintf(filepath,"%s%08d", SNAP_SHOT_JPEG_PATH,mm->photo_id[index]);
+
 
     fprintf(stdout, "Saving image file...%s\n", filepath);
     int rc = write_file(filepath, pFrame->data, pFrame->dataLen);
@@ -424,9 +425,6 @@ void write_one_jpeg(InfoForStore *mm, RBFrame* pFrame, int index)
         fprintf(stderr, "Cannot save image to %s\n", filepath);
     }
 
-    sprintf(writefile_link,"ln -s %s %s%s-%08d.jpg",filepath, SNAP_SHOT_JPEG_PATH,\
-            warning_type_to_str(mm->warn_type), mm->photo_id[index]);
-    //system(writefile_link);
 
     node.warn_type = mm->warn_type;
     node.mm_type = MM_PHOTO;
@@ -551,7 +549,8 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
 
 #define VIDEO_MP4
 #ifdef VIDEO_MP4
-        sprintf(mp4filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
+        //sprintf(mp4filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
+        sprintf(mp4filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
         std::ofstream ofs(mp4filepath, std::ofstream::out | std::ofstream::binary);
         MP4Writer mp4(ofs, fps, pFrame->video.VWidth, pFrame->video.VHeight);
         fprintf(stdout, "Saving image file...%s, fps = %d\n", mp4filepath, fps);
@@ -569,7 +568,8 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
         ofs.close();
         printf("%s mp4 done!\n", warning_type_to_str(mm->warn_type));
 #else
-        sprintf(mp4filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
+        //sprintf(mp4filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
+        sprintf(mp4filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
         std::ofstream ofs(mp4filepath, std::ofstream::out | std::ofstream::binary);
         MjpegWriter mp4(ofs, fps, pFrame->video.VWidth, pFrame->video.VHeight);
         fprintf(stdout, "Saving image file...%s, fps = %d\n", mp4filepath, fps);
@@ -904,7 +904,7 @@ void *pthread_save_media(void *p)
         }
 #endif
         i = i % 8;
-        if(!mm.flag){
+        if(!mm.get_another_camera_video){
             cls[i] = NewClosure(record_mm_info, pr[i], mm);
             pool.AddTask(cls[i]);
             i++;

@@ -27,6 +27,7 @@ using namespace std;
 
 typedef struct queue_node_status{
     uint8_t cmd;
+    uint8_t index;
     uint8_t ack_status;
     uint8_t send_repeat;
     struct timeval send_time;

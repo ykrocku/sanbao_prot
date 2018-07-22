@@ -147,9 +147,23 @@ void sem_send_init()
     sem_init(&send_data, 0, 0);
 }
 
-void global_var_init()
+int clear_media()
 {
-    char cmd[100];
+    int ret = 0;
+    char create_path_cmd[100];
+    char clear_media_cmd[100];
+    sprintf(clear_media_cmd, "rm %s -rf", SNAP_SHOT_JPEG_PATH);
+    ret = system(clear_media_cmd);
+
+    sprintf(create_path_cmd, "busybox mkdir -p %s", SNAP_SHOT_JPEG_PATH);
+    ret = system(create_path_cmd);
+
+    return ret;
+}
+
+
+int global_var_init()
+{
 
 #if defined ENABLE_ADAS
     printf("adas device enter!\n");
@@ -164,16 +178,11 @@ void global_var_init()
     read_local_adas_para_file(LOCAL_ADAS_PRAR_FILE);
     read_local_dms_para_file(LOCAL_DMS_PRAR_FILE);
 
-    sprintf(cmd, "busybox mkdir -p %s", SNAP_SHOT_JPEG_PATH);
-    system(cmd);
-
-    //    system(DO_DELETE_SNAP_SHOT_FILES);
-    //    printf("do %s\n", DO_DELETE_SNAP_SHOT_FILES);
-
-    system("rm /mnt/obb/dms/* -f");
-    system("rm /mnt/obb/adas/* -f");
-
+    if(clear_media()){
+        return -1;
+    }
     //read_local_file_to_list();
+    return 0;
 }
 
 int recv_ack = WAIT_MSG;
@@ -404,6 +413,7 @@ static int32_t sample_escaple_msg(SBProtHeader *pHeader, int32_t msg_len)
 //push到发送队列
 static int32_t message_queue_send(SBProtHeader *pHeader, uint8_t devid, uint8_t cmd,uint8_t *payload, int32_t payload_len)
 {
+    static uint8_t s_index = 0;
     uint16_t serial_num = 0;
     char MasterIsMe = 0;
     ptr_queue_node msg;
@@ -469,13 +479,14 @@ static int32_t message_queue_send(SBProtHeader *pHeader, uint8_t devid, uint8_t 
     msg_len = sample_escaple_msg(pHeader, msg_len);
 
     msg.pkg.cmd = cmd;
+    msg.pkg.index = (s_index++)%0xFF;
     msg.pkg.send_repeat = 0;
     msg.len = msg_len;
     msg.buf = (uint8_t *)pHeader;
     //    printf("sendpackage cmd = 0x%x,msg.need_ack = %d, len=%d, push!\n",msg.cmd, msg.need_ack, msg.len);
     ptr_queue_push(g_send_q_p, &msg, &ptr_queue_lock);
 
-    printf("push cmd = 0x%x\n", msg.pkg.cmd);
+    printf("push cmd = 0x%x, index = %d\n", msg.pkg.cmd, msg.pkg.index);
     sem_post(&send_data);
     //printf("push queue, len = %d\n", msg.len);
 
@@ -656,6 +667,17 @@ int filter_alert_by_speed()
     return 1;
 }
 
+void filter_media_num(InfoForStore *mm)
+{
+    int i;
+    for(i=0; i<WARN_SNAP_NUM_MAX; i++){
+        mm->photo_id[i] %= IMAGE_FILE_NUM_CACHED;
+    }
+    mm->video_id[0] %= IMAGE_FILE_NUM_CACHED;
+}
+
+
+
 /*********************************
 * func: build adas warning package
 * return: framelen
@@ -704,7 +726,8 @@ int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
                 uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
                 i++;
             }
-            mm.flag = 0;
+            mm.get_another_camera_video= 0;
+            filter_media_num(&mm);
             push_mm_queue(&mm);
 
 #if 1
@@ -720,7 +743,8 @@ int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
                     uploadmsg->mm[i].type = MM_VIDEO;
                     uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
                 }
-                mm.flag = 1;
+                mm.get_another_camera_video= 1;
+                filter_media_num(&mm);
                 push_mm_queue(&mm);
             }
 #endif
@@ -743,7 +767,8 @@ int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
                     uploadmsg->mm[i].type = MM_PHOTO;
                     uploadmsg->mm[i].id = MY_HTONL(mm.photo_id[i]);
                 }
-                mm.flag = 0;
+                mm.get_another_camera_video= 0;
+                filter_media_num(&mm);
                 push_mm_queue(&mm);
             }
             break;
@@ -813,7 +838,8 @@ int build_dms_warn_frame(int type, DsmWarnFrame *uploadmsg)
                 uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
                 i++;
             }
-            mm.flag = 0;
+            mm.get_another_camera_video= 0;
+            filter_media_num(&mm);
             push_mm_queue(&mm);
             
             WSI_DEBUG("num2 = %d\n", uploadmsg->mm_num);
@@ -830,7 +856,8 @@ int build_dms_warn_frame(int type, DsmWarnFrame *uploadmsg)
                     uploadmsg->mm[i].type = MM_VIDEO;
                     uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
                 }
-                mm.flag = 1;
+                mm.get_another_camera_video= 1;
+                filter_media_num(&mm);
                 push_mm_queue(&mm);
                 WSI_DEBUG("num3 = %d\n", uploadmsg->mm_num);
             }
@@ -851,7 +878,8 @@ int build_dms_warn_frame(int type, DsmWarnFrame *uploadmsg)
                     uploadmsg->mm[i].type = MM_PHOTO;
                     uploadmsg->mm[i].id = MY_HTONL(mm.photo_id[i]);
                 }
-                mm.flag = 0;
+                mm.get_another_camera_video= 0;
+                filter_media_num(&mm);
                 push_mm_queue(&mm);
             }
             break;
@@ -1148,7 +1176,7 @@ static int send_package(int sock, uint8_t *buf)
         goto out;
     }
 
-    WSI_DEBUG("[send] pop: cmd = 0x%x, header len = %d\n", header.pkg.cmd, header.len);
+    WSI_DEBUG("[send] pop: cmd = 0x%x, index = %d, header len = %d\n", header.pkg.cmd,header.pkg.index, header.len);
     //printbuf(header.buf, header.len);
     if(header.pkg.ack_status == MSG_ACK_READY){// no need ack
         printf("no need ack!\n");
@@ -1455,6 +1483,7 @@ int deal_wsi_adas_can760(WsiFrame *sourcecan)
 
 void mmid_to_filename(uint32_t id, uint8_t type, char *filepath)
 {
+#if 0
     if(type == MM_PHOTO)
         sprintf(filepath,"%s%08d.jpg", SNAP_SHOT_JPEG_PATH, id);
     else if(type == MM_AUDIO)
@@ -1463,6 +1492,9 @@ void mmid_to_filename(uint32_t id, uint8_t type, char *filepath)
         sprintf(filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, id);
     else
         ;
+#endif
+    id %= IMAGE_FILE_NUM_CACHED;
+    sprintf(filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, id);
 }
 
 int find_local_image_name(uint8_t type, uint32_t id, char *filepath, uint32_t *filesize)
@@ -1475,12 +1507,13 @@ int find_local_image_name(uint8_t type, uint32_t id, char *filepath, uint32_t *f
         printf("find id[0x%x] fail!\n", id);
         return -1;
     }
+#if 0
     if(node.mm_type != type)
     {
         printf("find id[0x%x] fail, type error!\n", id);
         return -1;
     }
-
+#endif
 
 #if 0
     if(type == MM_PHOTO)
@@ -1579,6 +1612,7 @@ static int recv_ack_and_send_image(SBProtHeader *pHeader, int32_t len)
 {
     SendStatus pkg;
     MmAckInfo mmack;
+    uint32_t id;
 
     WSI_DEBUG("recv ack...........!\n");
     memcpy(&mmack, pHeader+1, sizeof(mmack));
@@ -1598,7 +1632,9 @@ static int recv_ack_and_send_image(SBProtHeader *pHeader, int32_t len)
                     MY_HTONS(g_pkg_status_p->mm.packet_index)){
                 g_pkg_status_p->mm_data_trans_waiting = 0;
                 printf("transmit one file over!\n");
-                delete_mm_resource(MY_HTONL(g_pkg_status_p->mm.id));
+
+                id = MY_HTONL(g_pkg_status_p->mm.id) % IMAGE_FILE_NUM_CACHED;
+                delete_mm_resource(id);
                 //display_mm_resource();
             }else{
                 sample_send_image(pHeader->device_id);
@@ -2440,7 +2476,8 @@ void *pthread_req_media_process(void *para)
 	        clock_gettime(CLOCK_MONOTONIC, &req_time);
             while(1){
 
-                mm_id = MY_HTONL(send_mm_ptr->id);
+                //mm_id = MY_HTONL(send_mm_ptr->id);
+                mm_id = MY_HTONL(send_mm_ptr->id) % IMAGE_FILE_NUM_CACHED;
                 mm_type = send_mm_ptr->type;
                 ret = find_local_image_name(mm_type, mm_id,  g_pkg_status_p->filepath, &filesize);
                 if(ret != 0)

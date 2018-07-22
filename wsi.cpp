@@ -1046,7 +1046,11 @@ int main(int argc, char **argv)
 #endif
 
     signal(SIGINT, sighandler);
-    global_var_init();
+    if(global_var_init()){
+        printf("init fail\n");
+        exit(0);
+    }
+
     //can_send_init();
 
     if(pthread_create(&pth[0], NULL, pthread_websocket_client, NULL))
