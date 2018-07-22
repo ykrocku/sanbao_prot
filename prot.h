@@ -483,17 +483,6 @@ typedef struct __MECANWarningMessage {
 
 
 
-
-
-/****************Minieye CAN Frame END*****************/
-
-
-
-
-
-
-
-
 typedef struct __CAN760Info {
 //#ifdef BIG_ENDIAN
 #if 0
@@ -536,6 +525,10 @@ typedef struct __CAN760Info {
 
 #endif
 } __attribute__((packed)) CAN760Info;
+/****************Minieye CAN Frame END*****************/
+
+
+
 
 
 /*******************DMS Websocket to CAN Frame****************************/
@@ -577,6 +570,10 @@ typedef struct __DmsCanFrame {
 /*******************DMS Websocket to CAN Frame END****************************/
 
 
+
+
+
+
 /*********************Websocket socket message****************************/
 typedef struct __WsiFrame{
     uint8_t warning[8];
@@ -586,6 +583,30 @@ typedef struct __WsiFrame{
 }WsiFrame;
 
 /*********************Websocket socket message END****************************/
+
+
+
+
+
+/*********************local config file****************************/
+typedef struct __LocalConfig {
+
+    int8_t serverip[32];
+    uint16_t serverport;
+
+    int8_t clientip[32];
+    uint16_t clientport;
+    int8_t netdev_name[32];
+
+
+
+
+} __attribute__((packed)) LocalConfig;
+/*********************local config file END****************************/
+
+
+
+
 
 typedef struct __MmInfo_node{
 #define SLOT_STABLE     0

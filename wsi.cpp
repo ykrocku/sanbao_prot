@@ -934,17 +934,62 @@ void pthread_exit_notice(void)
         pthread_mutex_unlock(&tcp_recv_mutex);
 }
 
+
+
+#define GETOPT_OPT_STR  "hvV::C:"
+static void usage(const char *exe_name)
+{
+    printf("Usage:%s <switches> [option]\n", exe_name);
+    printf("\n");
+
+    printf("#Existing collector switches:\n");
+    printf("%-10s %s\n", "-h", "Show this help message");
+    printf("%-10s %s\n", "-v", "Show program version");
+    printf("%-10s %s\n", "-V <level>", "Set program verbose level");
+
+    printf("\n");
+}
+
+
+
+
+#define VERSION "version 1.0.0"
 int main(int argc, char **argv)
 {
     pthread_t pth[10];
     int i =0;
+    int opt;
 
     printf("compile time %s %s\n", __DATE__, __TIME__);
 
+    while ((opt = getopt(argc, (char * const *)argv, GETOPT_OPT_STR)) != -1) {
+        switch(opt) {
+            default:
+            case 'h':
+                usage(argv[0]);
+                exit(0);
+                break;
+            case 'V':
+                if (!optarg) {
+                    //param.verbose = 5;
+                } else {
+                    //verbose = atoi(optarg);
+                    printf("verbose = %d\n", atoi(optarg));
+                }
+                break;
+            case 'v':
+                printf(VERSION "\n");
+                break;
+        }
+    }
+
+    printf("using local config!\n");
+    //exit(0);
+    
     signal(SIGINT, sighandler);
     global_var_init();
     //can_send_init();
-    
+
     if(pthread_create(&pth[0], NULL, pthread_websocket_client, NULL))
     {
         printf("pthread_create fail!\n");
