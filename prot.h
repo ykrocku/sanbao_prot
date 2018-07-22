@@ -599,8 +599,6 @@ typedef struct __LocalConfig {
     int8_t netdev_name[32];
 
 
-
-
 } __attribute__((packed)) LocalConfig;
 /*********************local config file END****************************/
 

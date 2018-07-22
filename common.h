@@ -26,6 +26,7 @@ using namespace std;
 #define NO_MESSAGE_TO_SEND      1
 
 typedef struct queue_node_status{
+    uint8_t cmd;
     uint8_t ack_status;
     uint8_t send_repeat;
     struct timeval send_time;

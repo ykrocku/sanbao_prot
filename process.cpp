@@ -468,13 +468,14 @@ static int32_t message_queue_send(SBProtHeader *pHeader, uint8_t devid, uint8_t 
     pHeader->checksum = sample_calc_sum(pHeader, msg_len);
     msg_len = sample_escaple_msg(pHeader, msg_len);
 
+    msg.pkg.cmd = cmd;
     msg.pkg.send_repeat = 0;
     msg.len = msg_len;
     msg.buf = (uint8_t *)pHeader;
     //    printf("sendpackage cmd = 0x%x,msg.need_ack = %d, len=%d, push!\n",msg.cmd, msg.need_ack, msg.len);
     ptr_queue_push(g_send_q_p, &msg, &ptr_queue_lock);
 
-    printf("posting...\n");
+    printf("push cmd = 0x%x\n", msg.pkg.cmd);
     sem_post(&send_data);
     //printf("push queue, len = %d\n", msg.len);
 
@@ -1129,7 +1130,6 @@ static int send_package(int sock, uint8_t *buf)
     int rc = 0;
     int len = 0;
     int i = 0;
-    SendStatus pkg;
     struct timespec ts;
     if(sock < 0)
     {
@@ -1147,20 +1147,19 @@ static int send_package(int sock, uint8_t *buf)
         printf("queue no mesg\n");
         goto out;
     }
-    memcpy(&pkg, &header.pkg, sizeof(header.pkg));
 
-    WSI_DEBUG("header len = %d\n", header.len);
+    WSI_DEBUG("[send] pop: cmd = 0x%x, header len = %d\n", header.pkg.cmd, header.len);
     //printbuf(header.buf, header.len);
-    if(pkg.ack_status == MSG_ACK_READY){// no need ack
+    if(header.pkg.ack_status == MSG_ACK_READY){// no need ack
         printf("no need ack!\n");
         package_write(sock, header.buf, header.len);
         goto out;
     }
-    if(pkg.ack_status == MSG_ACK_WAITING){
+    if(header.pkg.ack_status == MSG_ACK_WAITING){
         for(i = 0; i < 3; i++){
             printf("ack waiting!\n");
             package_write(sock, header.buf, header.len);
-            pkg.send_repeat++;
+            header.pkg.send_repeat++;
 
             printf("get lock\n");
             pthread_mutex_lock(&recv_ack_mutex);
@@ -1176,15 +1175,15 @@ static int send_package(int sock, uint8_t *buf)
                 recv_ack= WAIT_MSG;//clear
                 printf("recv send ack..\n");
             }else if(rc == ETIMEDOUT){//timeout
-                printf("recv ack timeout! cnt = %d\n", pkg.send_repeat);
+                printf("recv ack timeout! cnt = %d\n", header.pkg.send_repeat);
             }else{
-                printf("recv error! cnt = %d\n", pkg.send_repeat);
+                printf("recv error! cnt = %d\n", header.pkg.send_repeat);
             }
             pthread_mutex_unlock(&recv_ack_mutex);
             if (rc == 0){
                 break;
             }
-            if(pkg.send_repeat >= 3){//第一次发送
+            if(header.pkg.send_repeat >= 3){//第一次发送
                 printf("send three times..\n");
                 g_pkg_status_p->mm_data_trans_waiting = 0;
                 break;

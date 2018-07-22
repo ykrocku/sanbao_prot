@@ -33,6 +33,7 @@
 
 #include "prot.h"
 #include "common.h"
+#include "ini.h"
 
 using namespace rapidjson;
 using namespace std;
@@ -950,7 +951,63 @@ static void usage(const char *exe_name)
     printf("\n");
 }
 
+#if 0
+LocalConfig g_configini;
+void set_local_config_default(LocalConfig *config)
+{
+#define SERVER_IP "192.168.100.100"
+#define SERVER_PORT 8888
 
+#define CLIENT_IP "192.168.100.211"
+#define NETDEV_NAME "eth0"
+    config->serverport = SERVER_PORT;
+    snprintf(&config->serverip[0], sizeof(config->serverip), "%s", SERVER_IP);
+    snprintf(&config->clientip[0], sizeof(config->clientip), "%s", CLIENT_IP);
+    snprintf(&config->netdev_name[0], sizeof(config->netdev_name), "%s", NETDEV_NAME);
+}
+
+int load_local_config_file(LocalConfig *conf)
+{
+    ini_t *config = ini_load("config.ini");
+
+    const char *name = ini_get(config, "owner", "name");
+    if (name) {
+        printf("name: %s\n", name);
+    }
+
+    ini_sget(config, "tcp", "serverip", NULL, &conf->serverip);
+    ini_sget(config, "tcp", "serverport", "%d", &conf->serverport);
+
+    printf("server: %s:%d\n", conf->serverip, conf->serverport);
+
+    ini_free(config);
+    return 0;
+}
+
+void local_config_dump(LocalConfig *config)
+{
+    printf("serverip: %s\n", config->serverip);
+    printf("serverport: %d\n", config->serverport);
+    printf("clientip: %s\n", config->clientip);
+    printf("client netdev_name: %s\n", config->netdev_name);
+}
+
+void local_config_init()
+{
+#define CONFIG_INI_NAME "config.ini"
+
+    FILE *fp;
+    fp = fopen(CONFIG_INI_NAME, "r")
+    if(!fp){
+        fprintf(stdout, "open %s fail, error:%s. using configini default!\n",\
+                CONFIG_INI_NAME, strerror(errno));
+        set_local_config_default(&g_configini);
+    }else{
+        load_local_config_file();
+    }
+    local_config_dump(&g_configini);
+}
+#endif
 
 
 #define VERSION "version 1.0.0"
@@ -961,7 +1018,7 @@ int main(int argc, char **argv)
     int opt;
 
     printf("compile time %s %s\n", __DATE__, __TIME__);
-
+#if 0
     while ((opt = getopt(argc, (char * const *)argv, GETOPT_OPT_STR)) != -1) {
         switch(opt) {
             default:
@@ -983,9 +1040,11 @@ int main(int argc, char **argv)
         }
     }
 
-    printf("using local config!\n");
-    //exit(0);
-    
+    printf("local config init\n");
+    local_config_init()
+    exit(0);
+#endif
+
     signal(SIGINT, sighandler);
     global_var_init();
     //can_send_init();
