@@ -591,12 +591,12 @@ typedef struct __WsiFrame{
 /*********************local config file****************************/
 typedef struct __LocalConfig {
 
-    int8_t serverip[32];
+    char serverip[32];
     uint16_t serverport;
 
-    int8_t clientip[32];
+    char clientip[32];
     uint16_t clientport;
-    int8_t netdev_name[32];
+    char netdev_name[32];
 
 
 } __attribute__((packed)) LocalConfig;

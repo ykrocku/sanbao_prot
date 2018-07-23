@@ -34,6 +34,7 @@ using namespace std;
 static int32_t sample_send_image(uint8_t devid);
 
 extern volatile int force_exit;
+extern LocalConfig g_configini;
 
 int hostsock = -1;
 
@@ -2141,7 +2142,8 @@ void bond_net_device(int sock)
 {
 	int ret;
 	struct ifreq interface;
-	const char *inf = "eth0";
+	//const char *inf = "eth0";
+	const char *inf = g_configini.netdev_name;
 	
 	memset(&interface, 0x00, sizeof(interface));
 	strncpy(interface.ifr_name, inf, IFNAMSIZ);
@@ -2159,8 +2161,8 @@ static int try_connect()
     int sock;
     int32_t ret = 0;
     int enable = 1;
-    const char *server_ip = "192.168.100.100";
-    //const char *server_ip = "192.168.100.105";
+    //const char *server_ip = "192.168.100.100";
+    const char *server_ip = g_configini.serverip;
     struct sockaddr_in host_serv_addr;
     socklen_t optlen;
     int bufsize = 0;
@@ -2207,7 +2209,8 @@ static int try_connect()
 
     memset(&host_serv_addr, 0, sizeof(host_serv_addr));
     host_serv_addr.sin_family = AF_INET;
-    host_serv_addr.sin_port   = MY_HTONS(HOST_SERVER_PORT);
+    //host_serv_addr.sin_port   = MY_HTONS(HOST_SERVER_PORT);
+    host_serv_addr.sin_port   = MY_HTONS(g_configini.serverport);
 
     ret = inet_aton(server_ip, &host_serv_addr.sin_addr);
     if (0 == ret) {
@@ -2355,7 +2358,7 @@ connect_again:
 
     while (!force_exit) {
         ret = read(hostsock, readbuf, TCP_READ_BUF_SIZE);
-        if (ret <= 0) {
+        if (ret < 0) {
             printf("read failed %d %s\n", ret, strerror(errno));
             if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK){
                 usleep(10000);

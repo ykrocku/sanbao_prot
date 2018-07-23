@@ -33,7 +33,6 @@
 
 #include "prot.h"
 #include "common.h"
-#include "ini.h"
 
 using namespace rapidjson;
 using namespace std;
@@ -936,7 +935,6 @@ void pthread_exit_notice(void)
 }
 
 
-
 #define GETOPT_OPT_STR  "hvV::C:"
 static void usage(const char *exe_name)
 {
@@ -951,7 +949,7 @@ static void usage(const char *exe_name)
     printf("\n");
 }
 
-#if 0
+
 LocalConfig g_configini;
 void set_local_config_default(LocalConfig *config)
 {
@@ -966,6 +964,33 @@ void set_local_config_default(LocalConfig *config)
     snprintf(&config->netdev_name[0], sizeof(config->netdev_name), "%s", NETDEV_NAME);
 }
 
+void local_config_dump(LocalConfig *config)
+{
+    printf("***********Local config dump****************\n");
+    printf("serverip: %s\n", config->serverip);
+    printf("serverport: %d\n", config->serverport);
+    printf("clientip: %s\n", config->clientip);
+    printf("client netdev_name: %s\n", config->netdev_name);
+    printf("***********Local config dump****************\n");
+}
+
+#if 0
+void local_config_init()
+{
+#define CONFIG_INI_NAME "config.ini"
+
+    FILE *fp;
+    fp = fopen(CONFIG_INI_NAME, "r")
+    if(!fp){
+        fprintf(stdout, "open %s fail, error:%s. using configini default!\n",\
+                CONFIG_INI_NAME, strerror(errno));
+        set_local_config_default(&g_configini);
+    }else{
+        fclose(fp);
+        load_local_config_file();
+    }
+    local_config_dump(&g_configini);
+}
 int load_local_config_file(LocalConfig *conf)
 {
     ini_t *config = ini_load("config.ini");
@@ -984,30 +1009,94 @@ int load_local_config_file(LocalConfig *conf)
     return 0;
 }
 
-void local_config_dump(LocalConfig *config)
+#endif
+
+/*******************prot config using json**********************/
+static bool get_server_config(const rapidjson::Value& val, LocalConfig *config)
 {
-    printf("serverip: %s\n", config->serverip);
-    printf("serverport: %d\n", config->serverport);
-    printf("clientip: %s\n", config->clientip);
-    printf("client netdev_name: %s\n", config->netdev_name);
+    assert(val["ip"].IsString());
+    val["ip"].GetString();
+    snprintf(&config->serverip[0], sizeof(config->serverip), "%s", val["ip"].GetString());
+
+    assert(val["port"].IsNumber());
+    assert(val["port"].IsUint());
+    config->serverport = val["port"].GetUint();
+
+    return true;
 }
 
-void local_config_init()
+static bool get_client_config(const rapidjson::Value& val, LocalConfig *config)
 {
-#define CONFIG_INI_NAME "config.ini"
+    assert(val["ip"].IsString());
+    val["ip"].GetString();
+    snprintf(&config->clientip[0], sizeof(config->clientip), "%s", val["ip"].GetString());
+
+    assert(val["port"].IsNumber());
+    assert(val["port"].IsUint());
+    config->clientport = val["port"].GetUint();
+
+    assert(val["device"].IsString());
+    val["device"].GetString();
+    snprintf(&config->netdev_name[0], sizeof(config->netdev_name), "%s", val["device"].GetString());
+
+    return true;
+}
+
+static int parse_prot_json(char *buffer, LocalConfig *config)
+{
+    Document document;  // Default template parameter uses UTF8 and MemoryPoolAllocator.
+
+    // In-situ parsing, decode strings directly in the source string. Source must be string.
+    if (document.ParseInsitu(buffer).HasParseError()){
+        printf("Parsing to json error\n");
+        printf("%s\n", buffer);
+        return 1;
+    }
+
+    WSI_DEBUG("Parsing to document succeeded.\n");
+    assert(document.IsObject()); 
+    assert(document.HasMember("server"));
+    assert(document.HasMember("client"));
+
+    get_server_config(document["server"], config);
+    get_client_config(document["client"], config);
+
+    return 0;
+}
+
+int local_config_init()
+{
+#define CONFIG_INI_NAME "prot.json"
+    char buffer[1024];
+    size_t size = 0;
+    size_t ret = 0;
 
     FILE *fp;
-    fp = fopen(CONFIG_INI_NAME, "r")
+    fp = fopen(CONFIG_INI_NAME, "r");
     if(!fp){
         fprintf(stdout, "open %s fail, error:%s. using configini default!\n",\
                 CONFIG_INI_NAME, strerror(errno));
         set_local_config_default(&g_configini);
     }else{
-        load_local_config_file();
+        rewind(fp);
+        fseek(fp, 0, SEEK_END);
+        size = ftell(fp);
+        rewind(fp);
+        ret = fread(buffer, 1, size, fp);
+        printf("read %s len = %ld\n",CONFIG_INI_NAME, ret);
+        fclose(fp);
+        if(ret != size){
+            printf("read file not complete\n");
+            return -1;
+        }
+        if(parse_prot_json(buffer, &g_configini)){
+            return -1;
+        }
     }
     local_config_dump(&g_configini);
+    return 0;
 }
-#endif
+
 
 
 #define VERSION "version 1.0.0"
@@ -1018,7 +1107,7 @@ int main(int argc, char **argv)
     int opt;
 
     printf("compile time %s %s\n", __DATE__, __TIME__);
-#if 0
+#if 1
     while ((opt = getopt(argc, (char * const *)argv, GETOPT_OPT_STR)) != -1) {
         switch(opt) {
             default:
@@ -1041,8 +1130,9 @@ int main(int argc, char **argv)
     }
 
     printf("local config init\n");
-    local_config_init()
-    exit(0);
+    if(local_config_init()){
+        exit(0);
+    }
 #endif
 
     signal(SIGINT, sighandler);
