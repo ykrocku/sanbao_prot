@@ -43,12 +43,7 @@
 #else
 #define UPGRADE_FILE_PATH     "/mnt/obb/package.bin"
 #define CLEAN_MPK             "rm /mnt/obb/package.bin"
-
-#if defined ENABLE_ADAS
-    #define UPGRADE_FILE_CMD      "/data/adas_upgrade.sh"
-#elif defined ENABLE_DMS
-    #define UPGRADE_FILE_CMD      "/data/dms_upgrade.sh"
-#endif
+#define UPGRADE_FILE_CMD      "/data/prot_upgrade.sh"
 
 #endif
 
