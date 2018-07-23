@@ -934,7 +934,6 @@ void pthread_exit_notice(void)
         pthread_mutex_unlock(&tcp_recv_mutex);
 }
 
-
 #define GETOPT_OPT_STR  "hvV::C:"
 static void usage(const char *exe_name)
 {

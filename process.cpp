@@ -668,16 +668,46 @@ int filter_alert_by_speed()
     return 1;
 }
 
-void filter_media_num(InfoForStore *mm)
+
+void mmid_to_filename(uint32_t id, uint8_t type, char *filepath)
 {
-    int i;
-    for(i=0; i<WARN_SNAP_NUM_MAX; i++){
-        mm->photo_id[i] %= IMAGE_FILE_NUM_CACHED;
-    }
-    mm->video_id[0] %= IMAGE_FILE_NUM_CACHED;
+#if 0
+    if(type == MM_PHOTO)
+        sprintf(filepath,"%s%08d.jpg", SNAP_SHOT_JPEG_PATH, id);
+    else if(type == MM_AUDIO)
+        sprintf(filepath,"%s%08d.wav", SNAP_SHOT_JPEG_PATH, id);
+    else if(type == MM_VIDEO)
+        sprintf(filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, id);
+    else
+        ;
+#endif
+    //id %= IMAGE_FILE_NUM_CACHED;
+    sprintf(filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, id);
 }
 
 
+/*********************************
+ *产生新的报警之前，先尝试把之前的同名文件删除。
+ *
+ *******************************/
+void filter_media_num(InfoForStore *mm)
+{
+    char filepath[100];
+    int i;
+
+    if(mm->photo_enable){
+        for(i=0; i<mm->photo_num; i++){
+            mm->photo_id[i] %= IMAGE_FILE_NUM_CACHED;
+            mmid_to_filename(mm->photo_id[i], MM_PHOTO, filepath);
+            remove(filepath);
+        }
+    }
+    if(mm->video_enable){
+        mm->video_id[0] %= IMAGE_FILE_NUM_CACHED;
+        mmid_to_filename(mm->video_id[0], MM_VIDEO, filepath);
+        remove(filepath);
+    }
+}
 
 /*********************************
 * func: build adas warning package
@@ -725,7 +755,7 @@ int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
                 i++;
             }
             mm.get_another_camera_video= 0;
-            filter_media_num(&mm);
+            //filter_media_num(&mm);
             push_mm_queue(&mm);
 
 #if 1
@@ -740,7 +770,7 @@ int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
                     uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
                 }
                 mm.get_another_camera_video= 1;
-                filter_media_num(&mm);
+                //filter_media_num(&mm);
                 push_mm_queue(&mm);
             }
 #endif
@@ -761,7 +791,7 @@ int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
                     uploadmsg->mm[i].id = MY_HTONL(mm.photo_id[i]);
                 }
                 mm.get_another_camera_video= 0;
-                filter_media_num(&mm);
+                //filter_media_num(&mm);
                 push_mm_queue(&mm);
             }
             break;
@@ -827,7 +857,7 @@ int build_dms_warn_frame(int type, DsmWarnFrame *uploadmsg)
                 i++;
             }
             mm.get_another_camera_video= 0;
-            filter_media_num(&mm);
+            //filter_media_num(&mm);
             push_mm_queue(&mm);
             
             WSI_DEBUG("num2 = %d\n", uploadmsg->mm_num);
@@ -843,7 +873,7 @@ int build_dms_warn_frame(int type, DsmWarnFrame *uploadmsg)
                     uploadmsg->mm[i].id = MY_HTONL(mm.video_id[0]);
                 }
                 mm.get_another_camera_video= 1;
-                filter_media_num(&mm);
+                //filter_media_num(&mm);
                 push_mm_queue(&mm);
                 WSI_DEBUG("num3 = %d\n", uploadmsg->mm_num);
             }
@@ -862,7 +892,7 @@ int build_dms_warn_frame(int type, DsmWarnFrame *uploadmsg)
                     uploadmsg->mm[i].id = MY_HTONL(mm.photo_id[i]);
                 }
                 mm.get_another_camera_video= 0;
-                filter_media_num(&mm);
+                //filter_media_num(&mm);
                 push_mm_queue(&mm);
             }
             break;
@@ -1464,21 +1494,6 @@ int deal_wsi_adas_can760(WsiFrame *sourcecan)
 
 
 
-void mmid_to_filename(uint32_t id, uint8_t type, char *filepath)
-{
-#if 0
-    if(type == MM_PHOTO)
-        sprintf(filepath,"%s%08d.jpg", SNAP_SHOT_JPEG_PATH, id);
-    else if(type == MM_AUDIO)
-        sprintf(filepath,"%s%08d.wav", SNAP_SHOT_JPEG_PATH, id);
-    else if(type == MM_VIDEO)
-        sprintf(filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, id);
-    else
-        ;
-#endif
-    id %= IMAGE_FILE_NUM_CACHED;
-    sprintf(filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, id);
-}
 
 int find_local_image_name(uint8_t type, uint32_t id, char *filepath, uint32_t *filesize)
 {
@@ -1571,7 +1586,8 @@ static int32_t send_mm_req_ack(SBProtHeader *pHeader, int len)
         printf("req mm_id = 0x%08x\n", MY_HTONL(mm_ptr->id));
         //先应答请求，视频录制完成后在主动发送
 
-        mm_id = MY_HTONL(mm_ptr->id) % IMAGE_FILE_NUM_CACHED;
+        mm_id = MY_HTONL(mm_ptr->id);
+        //mm_id = MY_HTONL(mm_ptr->id) % IMAGE_FILE_NUM_CACHED;
         mm_type = mm_ptr->type;
         ret = find_local_image_name(mm_type, mm_id,  g_pkg_status_p->filepath, &filesize);
         if(!ret){//media found
@@ -1596,6 +1612,19 @@ static int32_t send_mm_req_ack(SBProtHeader *pHeader, int len)
     return 0;
 }
 
+void clear_old_media(uint32_t id)
+{
+    char filepath[100];
+    static uint32_t s_last_id = 0;
+    uint32_t i = 0;
+
+    for(i=s_last_id; i<id; i++){
+        sprintf(filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, i);
+        printf("delete old media:%s\n", filepath);
+        remove(filepath);
+    }
+    s_last_id = id;
+}
 
 static int recv_ack_and_send_image(SBProtHeader *pHeader, int32_t len)
 {
@@ -1623,8 +1652,10 @@ static int recv_ack_and_send_image(SBProtHeader *pHeader, int32_t len)
                 g_pkg_status_p->mm_data_trans_waiting = 0;
                 printf("transmit one file over!\n");
 
-                id = MY_HTONL(g_pkg_status_p->mm.id) % IMAGE_FILE_NUM_CACHED;
+                id = MY_HTONL(g_pkg_status_p->mm.id);
+                //id = MY_HTONL(g_pkg_status_p->mm.id) % IMAGE_FILE_NUM_CACHED;
                 delete_mm_resource(id);
+                clear_old_media(id);
                 //display_mm_resource();
             }else{
                 sample_send_image(pHeader->device_id);
