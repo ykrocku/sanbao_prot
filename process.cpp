@@ -707,19 +707,16 @@ int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
         case SB_WARN_TYPE_HW:
         case SB_WARN_TYPE_PCW:
         case SB_WARN_TYPE_FLC:
-            if(mm.photo_enable)
-            {
+            if(mm.photo_enable){
                 get_next_id(MM_ID_MODE, mm.photo_id, mm.photo_num);
-                for(i=0; i<mm.photo_num; i++)
-                {
+                for(i=0; i<mm.photo_num; i++){
                     //printf("mm.photo_id[%d] = %d\n", i, mm.photo_id[i]);
                     uploadmsg->mm_num++;
                     uploadmsg->mm[i].type = MM_PHOTO;
                     uploadmsg->mm[i].id = MY_HTONL(mm.photo_id[i]);
                 }
             }
-            if(mm.video_enable)
-            {
+            if(mm.video_enable){
                 get_next_id(MM_ID_MODE, mm.video_id, 1);
                 uploadmsg->mm_num++;
                 uploadmsg->mm[i].type = MM_VIDEO;
@@ -732,12 +729,10 @@ int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
 
 #if 1
             //add dms video
-
             if(mm.video_enable){
                 mm.video_enable = 1; 
                 mm.photo_enable = 0; 
-                if(mm.video_enable)
-                {
+                if(mm.video_enable){
                     get_next_id(MM_ID_MODE, mm.video_id, 1);
                     uploadmsg->mm_num++;
                     uploadmsg->mm[i].type = MM_VIDEO;
@@ -748,7 +743,6 @@ int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
                 push_mm_queue(&mm);
             }
 #endif
-
             break;
 
         case SB_WARN_TYPE_TSRW:
@@ -757,12 +751,10 @@ int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
 
         case SB_WARN_TYPE_SNAP:
             //printf("snap: enable\n");
-            if(mm.photo_enable)
-            {
+            if(mm.photo_enable){
                 mm.warn_type = type;
                 get_next_id(MM_ID_MODE, mm.photo_id, mm.photo_num);
-                for(i=0; i<mm.photo_num; i++)
-                {
+                for(i=0; i<mm.photo_num; i++){
                     uploadmsg->mm_num++;
                     uploadmsg->mm[i].type = MM_PHOTO;
                     uploadmsg->mm[i].id = MY_HTONL(mm.photo_id[i]);
@@ -772,7 +764,6 @@ int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
                 push_mm_queue(&mm);
             }
             break;
-
         default:
             break;
     }
@@ -798,7 +789,6 @@ int build_dms_warn_frame(int type, DsmWarnFrame *uploadmsg)
     uploadmsg->sound_type = type;
     uploadmsg->mm_num = 0;
 
-
     get_local_time(uploadmsg->time);
 
     RealTimeDdata_process(&tmp, READ_REAL_TIME_MSG);
@@ -817,20 +807,17 @@ int build_dms_warn_frame(int type, DsmWarnFrame *uploadmsg)
         case DMS_DISTRACT_WARN:
         case DMS_ABNORMAL_WARN:
             
-            if(mm.photo_enable)
-            {
+            if(mm.photo_enable){
                 WSI_DEBUG("dms photo_enbale! num = %d\n", mm.photo_num);
                 get_next_id(MM_ID_MODE, mm.photo_id, mm.photo_num);
-                for(i=0; i<mm.photo_num; i++)
-                {
+                for(i=0; i<mm.photo_num; i++){
                     //printf("mm.photo_id[%d] = %d\n", i, mm.photo_id[i]);
                     uploadmsg->mm_num++;
                     uploadmsg->mm[i].type = MM_PHOTO;
                     uploadmsg->mm[i].id = MY_HTONL(mm.photo_id[i]);
                 }
             }
-            if(mm.video_enable)
-            {
+            if(mm.video_enable){
                 WSI_DEBUG("dms video_enbale!\n");
                 get_next_id(MM_ID_MODE, mm.video_id, 1);
                 uploadmsg->mm_num++;
@@ -844,13 +831,11 @@ int build_dms_warn_frame(int type, DsmWarnFrame *uploadmsg)
             
             WSI_DEBUG("num2 = %d\n", uploadmsg->mm_num);
 
-            if(mm.video_enable)
-            {
+            if(mm.video_enable){
                 //add  video
                 mm.video_enable = 1; 
                 mm.photo_enable = 0; 
-                if(mm.video_enable)
-                {
+                if(mm.video_enable){
                     get_next_id(MM_ID_MODE, mm.video_id, 1);
                     uploadmsg->mm_num++;
                     uploadmsg->mm[i].type = MM_VIDEO;
@@ -861,19 +846,16 @@ int build_dms_warn_frame(int type, DsmWarnFrame *uploadmsg)
                 push_mm_queue(&mm);
                 WSI_DEBUG("num3 = %d\n", uploadmsg->mm_num);
             }
-
             break;
 
         case DMS_DRIVER_CHANGE:
             break;
 
         case DMS_SANPSHOT_EVENT:
-            if(mm.photo_enable)
-            {
+            if(mm.photo_enable){
                 mm.warn_type = type;
                 get_next_id(MM_ID_MODE, mm.photo_id, mm.photo_num);
-                for(i=0; i<mm.photo_num; i++)
-                {
+                for(i=0; i<mm.photo_num; i++){
                     uploadmsg->mm_num++;
                     uploadmsg->mm[i].type = MM_PHOTO;
                     uploadmsg->mm[i].id = MY_HTONL(mm.photo_id[i]);
@@ -1189,19 +1171,19 @@ static int send_package(int sock, uint8_t *buf)
             package_write(sock, header.buf, header.len);
             header.pkg.send_repeat++;
 
-            printf("get lock\n");
+            //printf("get lock\n");
             pthread_mutex_lock(&recv_ack_mutex);
             clock_gettime(CLOCK_MONOTONIC, &ts);
             ts.tv_sec += 2;
             rc = 0;
             while ((recv_ack != NOTICE_MSG) && rc == 0){
-                printf("cond_wait\n");
+                //printf("cond_wait\n");
                 rc = pthread_cond_timedwait(&recv_ack_cond, &recv_ack_mutex, &ts);
-                printf("rc == %d\n", rc);
+                //printf("rc == %d\n", rc);
             }
             if (rc == 0){
                 recv_ack= WAIT_MSG;//clear
-                printf("recv send ack..\n");
+                printf("cond_wait get ack..\n");
             }else if(rc == ETIMEDOUT){//timeout
                 printf("recv ack timeout! cnt = %d\n", header.pkg.send_repeat);
             }else{
@@ -1566,47 +1548,53 @@ int GetFileSize(char *filename)
 static int32_t send_mm_req_ack(SBProtHeader *pHeader, int len)
 {
     uint32_t mm_id = 0;
-    uint8_t warn_type = 0;
-    size_t filesize = 0;
+    uint8_t mm_type = 0;
+    uint32_t filesize = 0;
     SBMmHeader *mm_ptr = NULL;
     SBMmHeader2 send_mm;
+    int ret = 0;
 
     if(pHeader->cmd == SAMPLE_CMD_REQ_MM_DATA && !g_pkg_status_p->mm_data_trans_waiting) //recv req
     {
-        g_pkg_status_p->mm_data_trans_waiting = 1;
         printf("------------req mm-------------\n");
         printbuf((uint8_t *)pHeader, len);
-
         //检查接收幀的完整性
-        if(len == sizeof(SBMmHeader) + sizeof(SBProtHeader) + 1)
-        {
-            mm_ptr = (SBMmHeader *)(pHeader + 1);
-            printf("req mm_type = 0x%x\n", mm_ptr->type);
-            printf("req mm_id = 0x%08x\n", MY_HTONL(mm_ptr->id));
-        }
-        else
-        {
+        if(len != sizeof(SBMmHeader) + sizeof(SBProtHeader) + 1){
             printf("recv cmd:0x%x, data len maybe error[%d]/[%ld]!\n", \
                     pHeader->cmd, len,\
                     sizeof(SBMmHeader) + sizeof(SBProtHeader) + 1);
             return -1;
         }
+        mm_ptr = (SBMmHeader *)(pHeader + 1);
+        printf("req mm_type = 0x%x\n", mm_ptr->type);
+        printf("req mm_id = 0x%08x\n", MY_HTONL(mm_ptr->id));
         //先应答请求，视频录制完成后在主动发送
-        printf("send mm req ack!\n");
-        send_mm.devid = pHeader->device_id;
-        send_mm.id = mm_ptr->id;
-        send_mm.type = mm_ptr->type;
-        push_mm_req_cmd_queue(&send_mm);
 
-        message_queue_send(pHeader,pHeader->device_id, SAMPLE_CMD_REQ_MM_DATA, NULL, 0);
-    }
-    else
-    {
+        mm_id = MY_HTONL(mm_ptr->id) % IMAGE_FILE_NUM_CACHED;
+        mm_type = mm_ptr->type;
+        ret = find_local_image_name(mm_type, mm_id,  g_pkg_status_p->filepath, &filesize);
+        if(!ret){//media found
+            //send ack
+            message_queue_send(pHeader,pHeader->device_id, SAMPLE_CMD_REQ_MM_DATA, NULL, 0);
+            g_pkg_status_p->mm_data_trans_waiting = 1;
+
+            //记录当前包的信息, 发送应答
+            g_pkg_status_p->mm.type = mm_type;
+            g_pkg_status_p->mm.id = mm_ptr->id;
+            g_pkg_status_p->mm.packet_index = 0;
+            g_pkg_status_p->mm.packet_total_num = MY_HTONS((filesize + IMAGE_SIZE_PER_PACKET - 1)/IMAGE_SIZE_PER_PACKET);
+
+            //send first package
+            printf("send first package!\n");
+            sample_send_image(pHeader->device_id);
+        }
+    }else{
         printf("current package is not valid!\n");
         return -1;
     }
     return 0;
 }
+
 
 static int recv_ack_and_send_image(SBProtHeader *pHeader, int32_t len)
 {
@@ -1614,13 +1602,14 @@ static int recv_ack_and_send_image(SBProtHeader *pHeader, int32_t len)
     MmAckInfo mmack;
     uint32_t id;
 
-    WSI_DEBUG("recv ack...........!\n");
+    //WSI_DEBUG("recv ack...........!\n");
     memcpy(&mmack, pHeader+1, sizeof(mmack));
     if(mmack.ack){
         printf("recv ack err!\n");
         return -1;
     }else{
-        WSI_DEBUG("index = 0x%08x, index2 = 0x%08x\n", g_pkg_status_p->mm.packet_index, mmack.packet_index);
+        WSI_DEBUG("send pkg index = 0x%08x, recv ack index = 0x%08x\n",\
+                MY_HTONS(g_pkg_status_p->mm.packet_index), MY_HTONS(mmack.packet_index));
         //recv ack index is correct
         if(MY_HTONS(g_pkg_status_p->mm.packet_index) == \
                 (MY_HTONS(mmack.packet_index) + 1)){
@@ -2266,6 +2255,70 @@ void parse_cmd(uint8_t *buf, uint8_t *msgbuf)
     }
 }
 
+#if 0
+/*******************************************************************/
+/* reads 'count' bytes from a socket  */
+/********************************************************************/
+
+int
+Nread(int fd, char *buf, size_t count, int prot)
+{
+    register ssize_t r;
+    register size_t nleft = count;
+
+    while (nleft > 0) {
+        r = read(fd, buf, nleft);
+        if (r < 0) {
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+                break;
+            else
+                return NET_HARDERROR;
+        } else if (r == 0)
+            break;
+
+        nleft -= r;
+        buf += r;
+    }
+    return count - nleft;
+}
+
+
+/*
+ *                      N W R I T E
+ */
+
+int
+Nwrite(int fd, const char *buf, size_t count, int prot)
+{
+    register ssize_t r;
+    register size_t nleft = count;
+
+    while (nleft > 0) {
+	r = write(fd, buf, nleft);
+	if (r < 0) {
+	    switch (errno) {
+		case EINTR:
+		case EAGAIN:
+#if (EAGAIN != EWOULDBLOCK)
+		case EWOULDBLOCK:
+#endif
+		return count - nleft;
+
+		case ENOBUFS:
+		return NET_SOFTERROR;
+
+		default:
+		return NET_HARDERROR;
+	    }
+	} else if (r == 0)
+	    return NET_SOFTERROR;
+	nleft -= r;
+	buf += r;
+    }
+    return count;
+}
+#endif
+
 void *pthread_tcp_recv(void *para)
 {
     int32_t ret = 0;
@@ -2304,11 +2357,14 @@ connect_again:
         ret = read(hostsock, readbuf, TCP_READ_BUF_SIZE);
         if (ret <= 0) {
             printf("read failed %d %s\n", ret, strerror(errno));
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK){
+                usleep(10000);
+                continue;
+            }
+        }else if (ret == 0) {
             close(hostsock);
             hostsock = -1;
             goto connect_again;
-
-            //continue;
         }else{//write to buf
             //MY_DEBUG("recv raw cmd, tcprecvcnt = %d:\n", tcprecvcnt++);
             //printbuf(readbuf, ret);
@@ -2414,12 +2470,10 @@ void *pthread_snap_shot(void *p)
     RealTimeData rt_data;;
     uint32_t mileage_last = 0;
 
-
     prctl(PR_SET_NAME, "pthread_snap");
 
     while(!force_exit)
     {
-
         read_dev_para(&tmp, para_type);
 #if 1
         if(tmp.auto_photo_mode == SNAP_SHOT_BY_TIME){
@@ -2452,66 +2506,6 @@ void *pthread_snap_shot(void *p)
         }
     }
     pthread_exit(NULL);
-}
-
-void *pthread_req_media_process(void *para)
-{
-    uint32_t mm_id = 0;
-    uint8_t mm_type = 0;
-    uint8_t warn_type = 0;
-    uint32_t filesize = 0;
-    SBMmHeader2 send_mm;
-    SBMmHeader2 *send_mm_ptr = &send_mm;
-    struct timespec req_time;  
-    int ret = 0;
-
-    prctl(PR_SET_NAME, "cache_GetVideocmd");
-
-    while(1)
-    {
-        if(!pull_mm_req_cmd_queue(&send_mm))
-        {
-            printf("pull mm_info!\n");
-
-	        clock_gettime(CLOCK_MONOTONIC, &req_time);
-            while(1){
-
-                //mm_id = MY_HTONL(send_mm_ptr->id);
-                mm_id = MY_HTONL(send_mm_ptr->id) % IMAGE_FILE_NUM_CACHED;
-                mm_type = send_mm_ptr->type;
-                ret = find_local_image_name(mm_type, mm_id,  g_pkg_status_p->filepath, &filesize);
-                if(ret != 0)
-                {
-                    if(timeout_trigger(&req_time, 10))//timeout
-                    {
-                        
-                        printf("try find mm file timeout!\n");
-                        g_pkg_status_p->mm_data_trans_waiting = 0;
-                        break;
-                    }
-
-                    printf("try find mm file!\n");
-                    sleep(1);
-                    continue;
-                }
-
-                //记录当前包的信息, 发送应答
-                g_pkg_status_p->mm.type = mm_type;
-                g_pkg_status_p->mm.id = send_mm_ptr->id;
-                g_pkg_status_p->mm.packet_index = 0;
-                g_pkg_status_p->mm.packet_total_num = MY_HTONS((filesize + IMAGE_SIZE_PER_PACKET - 1)/IMAGE_SIZE_PER_PACKET);
-
-                //send first package
-                printf("send first package!\n");
-                sample_send_image(send_mm_ptr->devid);
-                break;
-
-            }
-        }else{
-
-            usleep(20000);
-        }
-    }
 }
 
 #define FCW_NAME            "FCW"

@@ -1073,11 +1073,6 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
-    if(pthread_create(&pth[6], NULL, pthread_req_media_process, NULL))
-    {
-        printf("pthread_create fail!\n");
-        return -1;
-    }
     if(pthread_create(&pth[5], NULL, pthread_snap_shot, NULL))
     {
         printf("pthread_create fail!\n");

@@ -123,9 +123,7 @@ RBFrame* request_jpeg_frame(CRingBuf* pRB, uint32_t repeat_times)
             fprintf(stderr, "Error: RequestReadFrame failed\n");
             usleep(10000);
             pFrame = nullptr;
-        }
-        else
-        {
+        }else{
             break;
         }
     }while(try_times++ < repeat_times);
@@ -377,22 +375,19 @@ void *pthread_encode_jpeg(void *p)
     CRingBuf* pwjpg = new CRingBuf("dms_producer", "dms_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_WRITER);
 #endif
 
-    if(!pwjpg || !pRb)
-    {
+    if(!pwjpg || !pRb){
         printf("new CRingBuf fail!\n");
         return NULL;
     }
 	clock_gettime(CLOCK_MONOTONIC, &t);
-    while(!force_exit)
-    {
+    while(!force_exit){
         ret = encode_process(pRb, pwjpg, quality, Vwidth, Vheight);
         if(!ret)//encode success
             cnt++;
         else{
             usleep(25000);
         }
-        if(timeout_trigger(&t, 2))
-        {
+        if(timeout_trigger(&t, 2)){
             //GetConfigResolution(&Vwidth, &Vheight);
 	        clock_gettime(CLOCK_MONOTONIC, &t);
             printf("encdoe speed %d per 2 sec\n", cnt);
@@ -458,12 +453,11 @@ void store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
 
 #define RECORD_JPEG_NEED 1
 #define RECORD_JPEG_NO_NEED 0
-void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
+void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int get_jpeg)
 {
 #define VIDEO_FRAMES_PER_SECOND   12
     RBFrame* pFrame = nullptr;
     char mp4filepath[100];
-    char testfilepath[100];
     MmInfo_node node;
     uint32_t FrameNumEnd = 0;
     int jpeg_index = 0;
@@ -472,25 +466,22 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
     int seektime = 0;
     int fps = 0;
     int i=0;
-    int sec = 0;
-    int usec = 0;
-    int64_t frame_oldtime=0;
+    char result = 0;
+
+#define ENCODE_FRAME_SPEED_MAX 65
 
     printf("%s enter!\n", __FUNCTION__);
     //interval = mm->photo_time_period*100*1000; //us
     interval = mm->photo_time_period; //单位改成秒
-//start
-#define SEEK_TIME_MAX   60
-#define ENCODE_FRAME_MAX 15
 
-#if 1
-    if(jpeg_flag){//recode jpg time
-
+    if(get_jpeg){//recode jpg time
         for(i=0; i<mm->photo_num; i++){
             pRB->SeekIndexByTime(0);
             pFrame = request_jpeg_frame(pRB, 10);
-            if(pFrame == nullptr)
-                return;
+            if(pFrame == nullptr){
+                result = -1;
+                goto out;
+            }
             print_frame("video jpeg", pFrame);
             write_one_jpeg(mm, pFrame, jpeg_index++);
             //usleep(interval);
@@ -498,102 +489,75 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int jpeg_flag)
             //usleep(interval*1200000);
         }
     }
-#else
-    printf("store jpg interval = %d\n", interval);
-    if(jpeg_flag){//recode jpg time
-        while(i<mm->photo_num)
-        {
-            pRB->SeekIndexByTime(0);
-            pFrame = request_jpeg_frame(pRB, 0);
-            if(pFrame == nullptr){
-                usleep(60000);
-                continue;
-            }
-            print_frame("pre jpeg", pFrame);
-            if(pFrame->time - frame_oldtime > interval*1100){
-                frame_oldtime = pFrame->time;
-                print_frame("get jpeg", pFrame);
-                write_one_jpeg(mm, pFrame, jpeg_index++);
-                i++;
-            }
-        }
-    }
-#endif
+
+    /**********************get END frame***********************/
     //sleep(mm->video_time - interval/1000000);
     sleep(mm->video_time - (mm->photo_num -1)*interval);
-    pRB->SeekIndexByTime(0);//get last frame
+    pRB->SeekIndexByTime(0);
     pFrame = request_jpeg_frame(pRB, 10);
-    if(pFrame == nullptr)
-    {
+    if(pFrame == nullptr){
         printf("Get frame saving file fail!\n");
-        return;
+        result = -1;
+        goto out;
     }
     FrameNumEnd = pFrame->frameNo;
+    print_frame("end jpeg", pFrame);
 
+    /**********************get BEGIN frame***********************/
     seektime = (2*mm->video_time);
     printf("seek time:%d\n", 0-seektime);
     pRB->SeekIndexByTime(0-seektime);
+    pFrame = request_jpeg_frame(pRB, 10);
+    if(pFrame == nullptr){
+        printf("get seek jpg error\n");
+        result = -1;
+        goto out;
+    }
+    print_frame("seek begin jpeg", pFrame);
+    framecnt = (FrameNumEnd - pFrame->frameNo);
+    fps = framecnt/seektime;
+    //帧率出错。
+    if(fps > ENCODE_FRAME_SPEED_MAX || fps < 0){
+        result = -1;
+        goto out;
+    }
+
     do{
-        pFrame = request_jpeg_frame(pRB, 10);
-        if(pFrame == nullptr)
-            break;
-
-        print_frame("seek jpeg", pFrame);
-
-        //framecnt = (FrameNumEnd > pFrame->frameNo) ? (FrameNumEnd - pFrame->frameNo) : (FrameNumEnd - pFrame->frameNo);
-        framecnt = (FrameNumEnd > pFrame->frameNo) ? (FrameNumEnd - pFrame->frameNo) : (100);
-        printf("frame sub = %d\n", framecnt);
-        framecnt = framecnt % (SEEK_TIME_MAX*ENCODE_FRAME_MAX);
-        printf("frame sub2 = %d\n", framecnt);
-        fps = framecnt/seektime;
-
+        sprintf(mp4filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
+        std::ofstream ofs(mp4filepath, std::ofstream::out | std::ofstream::binary);
 #define VIDEO_MP4
 #ifdef VIDEO_MP4
-        //sprintf(mp4filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
-        sprintf(mp4filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
-        std::ofstream ofs(mp4filepath, std::ofstream::out | std::ofstream::binary);
         MP4Writer mp4(ofs, fps, pFrame->video.VWidth, pFrame->video.VHeight);
-        fprintf(stdout, "Saving image file...%s, fps = %d\n", mp4filepath, fps);
-        while(framecnt--)
-        {
-            pFrame = request_jpeg_frame(pRB, 10);
-            if(pFrame == nullptr)
-                break;
-            mp4.Write(pFrame->data, pFrame->dataLen);
-            print_frame("video jpeg", pFrame);
-            pRB->CommitRead();
-        }
-
-        mp4.End();
-        ofs.close();
-        printf("%s mp4 done!\n", warning_type_to_str(mm->warn_type));
 #else
-        //sprintf(mp4filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
-        sprintf(mp4filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
-        std::ofstream ofs(mp4filepath, std::ofstream::out | std::ofstream::binary);
         MjpegWriter mp4(ofs, fps, pFrame->video.VWidth, pFrame->video.VHeight);
+#endif
         fprintf(stdout, "Saving image file...%s, fps = %d\n", mp4filepath, fps);
-        while(framecnt--)
-        {
+        while(framecnt--){
             pFrame = request_jpeg_frame(pRB, 10);
-            if(pFrame == nullptr)
+            if(pFrame == nullptr){
+                result = -1;
                 break;
+            }
             mp4.Write(pFrame->data, pFrame->dataLen);
             print_frame("video jpeg", pFrame);
             pRB->CommitRead();
         }
-
         mp4.End();
         ofs.close();
-        printf("%s mp4 done!\n", warning_type_to_str(mm->warn_type));
-#endif
-        node.warn_type = mm->warn_type;
-        node.mm_type = MM_VIDEO;
-        node.mm_id = mm->video_id[0];
-        //uint8_t time[6];
-        insert_mm_resouce(node);
-        //display_mm_resource();
     }while(0);
+    printf("%s mp4 done!\n", warning_type_to_str(mm->warn_type));
+    node.warn_type = mm->warn_type;
+    node.mm_type = MM_VIDEO;
+    node.mm_id = mm->video_id[0];
+    //uint8_t time[6];
+    insert_mm_resouce(node);
+    //display_mm_resource();
+out:
+    if(result){
+        //create file
+    }
+    //post ...
+    return;
 }
 
 //修改为同时获取jpg 和mp4 
