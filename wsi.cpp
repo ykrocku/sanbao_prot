@@ -1096,7 +1096,15 @@ int local_config_init()
     return 0;
 }
 
-
+#include <sys/sysinfo.h>
+int32_t get_uptime(void)
+{
+    struct sysinfo sInfo;
+    sysinfo(&sInfo);
+    
+    printf("get up time %ld\n", sInfo.uptime);
+    return sInfo.uptime;
+}
 
 #define VERSION "version 1.0.0"
 int main(int argc, char **argv)
@@ -1106,6 +1114,9 @@ int main(int argc, char **argv)
     int opt;
 
     printf("compile time %s %s\n", __DATE__, __TIME__);
+
+    get_uptime();
+
 #if 1
     while ((opt = getopt(argc, (char * const *)argv, GETOPT_OPT_STR)) != -1) {
         switch(opt) {

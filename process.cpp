@@ -708,8 +708,8 @@ void filter_media_num(InfoForStore *mm)
         }
     }
     if(mm->video_enable){
-        if(mm->photo_id[i] > MEDIA_NUM_MAX){
-            sprintf(filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, mm->photo_id[i]-MEDIA_NUM_MAX);
+        if( mm->video_id[0] > MEDIA_NUM_MAX){
+            sprintf(filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, mm->video_id[0]-MEDIA_NUM_MAX);
             printf("delete old media:%s\n", filepath);
             remove(filepath);
         }

@@ -507,6 +507,7 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int get_jpeg)
     seektime = (2*mm->video_time);
     printf("seek time:%d\n", 0-seektime);
     pRB->SeekIndexByTime(0-seektime);
+    //pRB->SeekIndexByTime(100);
     pFrame = request_jpeg_frame(pRB, 10);
     if(pFrame == nullptr){
         printf("get seek jpg error\n");
