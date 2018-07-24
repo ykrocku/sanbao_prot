@@ -420,7 +420,6 @@ void write_one_jpeg(InfoForStore *mm, RBFrame* pFrame, int index)
         fprintf(stderr, "Cannot save image to %s\n", filepath);
     }
 
-
     node.warn_type = mm->warn_type;
     node.mm_type = MM_PHOTO;
     node.mm_id = mm->photo_id[index];
@@ -428,15 +427,19 @@ void write_one_jpeg(InfoForStore *mm, RBFrame* pFrame, int index)
     insert_mm_resouce(node);
 }
 
-void store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
+uint32_t store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
 {
     RBFrame* pFrame = nullptr;
     int jpeg_index = 0;
     uint32_t interval= 0; //usleep
+    uint32_t take_time = 0;
     
     printf("%s enter!\n", __FUNCTION__);
 
-    interval = mm->photo_time_period*100*1000;
+    if(!mm->photo_enable){
+        return take_time;
+    }
+    interval = mm->photo_time_period*100*1000; //单位是100ms
     while(jpeg_index < mm->photo_num)
     {
         pRB->SeekIndexByTime(0);
@@ -449,13 +452,14 @@ void store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
         write_one_jpeg(mm, pFrame, jpeg_index++);
         pRB->CommitRead();
     }
+    take_time = interval * (mm->photo_num -1);
+
+    return take_time;
 }
 
-#define RECORD_JPEG_NEED 1
-#define RECORD_JPEG_NO_NEED 0
-void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int get_jpeg)
+void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, uint32_t jpg_time)
 {
-#define VIDEO_FRAMES_PER_SECOND   12
+#define ENCODE_FRAME_SPEED_MAX 65
     RBFrame* pFrame = nullptr;
     char mp4filepath[100];
     MmInfo_node node;
@@ -467,32 +471,17 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int get_jpeg)
     int fps = 0;
     int i=0;
     char result = 0;
-
-#define ENCODE_FRAME_SPEED_MAX 65
+    uint32_t wait_time = 0;
 
     printf("%s enter!\n", __FUNCTION__);
-    //interval = mm->photo_time_period*100*1000; //us
-    interval = mm->photo_time_period; //单位改成秒
 
-    if(get_jpeg){//recode jpg time
-        for(i=0; i<mm->photo_num; i++){
-            pRB->SeekIndexByTime(0);
-            pFrame = request_jpeg_frame(pRB, 10);
-            if(pFrame == nullptr){
-                result = -1;
-                goto out;
-            }
-            print_frame("video jpeg", pFrame);
-            write_one_jpeg(mm, pFrame, jpeg_index++);
-            //usleep(interval);
-            sleep(interval);
-            //usleep(interval*1200000);
-        }
+    if(!mm->video_enable){
+        result = -1;
+        goto out;
     }
-
     /**********************get END frame***********************/
-    //sleep(mm->video_time - interval/1000000);
-    sleep(mm->video_time - (mm->photo_num -1)*interval);
+    wait_time = mm->video_time*1000000 - jpg_time;
+    usleep(wait_time);
     pRB->SeekIndexByTime(0);
     pFrame = request_jpeg_frame(pRB, 10);
     if(pFrame == nullptr){
@@ -507,7 +496,6 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int get_jpeg)
     seektime = (2*mm->video_time);
     printf("seek time:%d\n", 0-seektime);
     pRB->SeekIndexByTime(0-seektime);
-    //pRB->SeekIndexByTime(100);
     pFrame = request_jpeg_frame(pRB, 10);
     if(pFrame == nullptr){
         printf("get seek jpg error\n");
@@ -523,6 +511,7 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int get_jpeg)
         goto out;
     }
 
+    //do{}while(0);解决goto 中间有初始化变量问题。
     do{
         sprintf(mp4filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
         std::ofstream ofs(mp4filepath, std::ofstream::out | std::ofstream::binary);
@@ -545,8 +534,9 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, int get_jpeg)
         }
         mp4.End();
         ofs.close();
+        printf("%s mp4 done!\n", warning_type_to_str(mm->warn_type));
     }while(0);
-    printf("%s mp4 done!\n", warning_type_to_str(mm->warn_type));
+
     node.warn_type = mm->warn_type;
     node.mm_type = MM_VIDEO;
     node.mm_id = mm->video_id[0];
@@ -564,33 +554,10 @@ out:
 //修改为同时获取jpg 和mp4 
 void record_mm_info(CRingBuf* pRB, InfoForStore info)
 {
-    int i=0;
-    RBFrame* pFrame = nullptr;
-    char mp4filepath[100];
-    InfoForStore mm;
-    MmInfo_node node;
-    uint64_t timestart = 0;
-    struct timeval record_time;  
-    int cnt = 1;
+    uint32_t jpeg_time = 0;
 
-    memcpy(&mm, &info, sizeof(mm));
-
-    if(mm.photo_enable && !mm.video_enable)
-    {
-        store_warn_jpeg(pRB, &mm);
-    }
-    else if(!mm.photo_enable && mm.video_enable)
-    {
-        store_one_mp4(pRB, &mm, RECORD_JPEG_NO_NEED);
-    }
-    else if(mm.photo_enable && mm.video_enable)
-    {
-        store_one_mp4(pRB, &mm, RECORD_JPEG_NEED);
-    }
-    else //do nothing
-    {
-        ;
-    }
+    jpeg_time = store_warn_jpeg(pRB, &info);
+    store_one_mp4(pRB, &info, jpeg_time);
 }
 
 int get_mm_type(char *file_type, uint8_t *val)
@@ -874,8 +841,8 @@ void *pthread_save_media(void *p)
             pool.AddTask(cls[i]);
             i++;
         }else{
-            printf("store mp4 alone!\n");
-            cls[i] = NewClosure(store_one_mp4, ptest, &mm, RECORD_JPEG_NO_NEED);
+            printf("store another video!\n");
+            cls[i] = NewClosure(record_mm_info, ptest, mm);
             pool.AddTask(cls[i]);
             i++;
         }

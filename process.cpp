@@ -684,7 +684,6 @@ void mmid_to_filename(uint32_t id, uint8_t type, char *filepath)
     else
         ;
 #endif
-    //id %= IMAGE_FILE_NUM_CACHED;
     sprintf(filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, id);
 }
 
@@ -1107,69 +1106,6 @@ out:
 #endif
 
 #if 0
-static int send_package(int sock, uint8_t *buf)
-{
-    int ret = 0;
-    int len = 0;
-    SendStatus pkg;
-    struct timespec outtime;
-
-    if(sock < 0)
-    {
-        printf("sock error\n");
-        return -1;
-    }
-
-    ptr_queue_node header;
-    header.buf = buf;
-    header.len = PTR_QUEUE_BUF_SIZE;
-
-    //fail
-    if(ptr_queue_pop(g_send_q_p, &header, &ptr_queue_lock)){
-        
-        printf("queue no mesg\n");
-        goto out;
-    }
-    memcpy(&pkg, &header.pkg, sizeof(header.pkg));
-
-    WSI_DEBUG("header len = %d\n", header.len);
-    //printbuf(header.buf, header.len);
-    if(pkg.ack_status == MSG_ACK_READY){// no need ack
-        printf("no need ack!\n");
-        package_write(sock, header.buf, header.len);
-        goto out;
-    }
-    if(pkg.ack_status == MSG_ACK_WAITING){
-        printf("ack waiting!\n");
-        package_write(sock, header.buf, header.len);
-        pkg.send_repeat++;
-
-        //waiting ack
-        pthread_mutex_lock(&recv_ack_mutex);
-        while(1)
-        {
-            clock_gettime(CLOCK_REALTIME, &outtime);
-            outtime.tv_sec += 2;
-            pthread_cond_timedwait(&recv_ack_cond, &recv_ack_mutex, &outtime);
-            if(recv_ack == NOTICE_MSG){
-                recv_ack= WAIT_MSG;//clear
-                printf("recv send ack..\n");
-                break;
-            }else{
-                printf("recv ack timeout! cnt = %d\n", pkg.send_repeat);
-                if(pkg.send_repeat >= 3){//第一次发送
-                    printf("send three times..\n");
-                    g_pkg_status_p->mm_data_trans_waiting = 0;
-                    break;
-                }
-            }
-        }
-        pthread_mutex_unlock(&recv_ack_mutex);
-    }
-
-out:
-    return 0;
-}
 #else
 static int send_package(int sock, uint8_t *buf)
 {
@@ -1608,7 +1544,6 @@ static int32_t send_mm_req_ack(SBProtHeader *pHeader, int len)
         //先应答请求，视频录制完成后在主动发送
 
         mm_id = MY_HTONL(mm_ptr->id);
-        //mm_id = MY_HTONL(mm_ptr->id) % IMAGE_FILE_NUM_CACHED;
         mm_type = mm_ptr->type;
         ret = find_local_image_name(mm_type, mm_id,  g_pkg_status_p->filepath, &filesize);
         if(!ret){//media found
@@ -1674,9 +1609,8 @@ static int recv_ack_and_send_image(SBProtHeader *pHeader, int32_t len)
                 printf("transmit one file over!\n");
 
                 id = MY_HTONL(g_pkg_status_p->mm.id);
-                //id = MY_HTONL(g_pkg_status_p->mm.id) % IMAGE_FILE_NUM_CACHED;
-                delete_mm_resource(id);
-                clear_old_media(id);
+                //delete_mm_resource(id);
+                //clear_old_media(id);
                 //display_mm_resource();
             }else{
                 sample_send_image(pHeader->device_id);
