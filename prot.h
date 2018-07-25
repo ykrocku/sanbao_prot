@@ -53,9 +53,16 @@
 #ifdef PROTOCOL_USING_BIG_ENDIAN
 #define MY_HTONL(x)     htonl(x)
 #define MY_HTONS(x)     htons(x)
+
+#define MY_NTOHL(x)     ntohl(x)
+#define MY_NTOHS(x)     ntohs(x)
+
 #else
 #define MY_HTONL(x)     (x)
 #define MY_HTONS(x)     (x)
+#define MY_NTOHL(x)     (x)
+#define MY_NTOHS(x)     (x)
+
 #endif
 
 

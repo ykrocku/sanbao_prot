@@ -1458,7 +1458,7 @@ int find_local_image_name(uint8_t type, uint32_t id, char *filepath, uint32_t *f
     //查找本地多媒体文件
     if(find_mm_resource(id, &node))
     {
-        printf("find id[0x%x] fail!\n", id);
+        printf("find id[%d] fail!\n", id);
         return -1;
     }
 #if 0
@@ -1538,12 +1538,12 @@ static int32_t send_mm_req_ack(SBProtHeader *pHeader, int len)
             return -1;
         }
         mm_ptr = (SBMmHeader *)(pHeader + 1);
-        printf("req mm_type = 0x%x\n", mm_ptr->type);
-        printf("req mm_id = 0x%08x\n", MY_HTONL(mm_ptr->id));
-        //先应答请求，视频录制完成后在主动发送
 
-        mm_id = MY_HTONL(mm_ptr->id);
+        mm_id = MY_NTOHL(mm_ptr->id);
         mm_type = mm_ptr->type;
+        printf("req mm_type = %d\n", mm_type);
+        printf("req mm_id = %08d\n", mm_id);
+
         ret = find_local_image_name(mm_type, mm_id,  g_pkg_status_p->filepath, &filesize);
         if(!ret){//media found
             //send ack
@@ -1552,9 +1552,9 @@ static int32_t send_mm_req_ack(SBProtHeader *pHeader, int len)
 
             //记录当前包的信息, 发送应答
             g_pkg_status_p->mm.type = mm_type;
-            g_pkg_status_p->mm.id = mm_ptr->id;
+            g_pkg_status_p->mm.id = mm_id;
             g_pkg_status_p->mm.packet_index = 0;
-            g_pkg_status_p->mm.packet_total_num = MY_HTONS((filesize + IMAGE_SIZE_PER_PACKET - 1)/IMAGE_SIZE_PER_PACKET);
+            g_pkg_status_p->mm.packet_total_num = (filesize + IMAGE_SIZE_PER_PACKET - 1)/IMAGE_SIZE_PER_PACKET;
 
             //send first package
             printf("send first package!\n");
@@ -1594,16 +1594,15 @@ static int recv_ack_and_send_image(SBProtHeader *pHeader, int32_t len)
         return -1;
     }else{
         WSI_DEBUG("send pkg index = 0x%08x, recv ack index = 0x%08x\n",\
-                MY_HTONS(g_pkg_status_p->mm.packet_index), MY_HTONS(mmack.packet_index));
+                g_pkg_status_p->mm.packet_index, MY_NTOHS(mmack.packet_index));
+
         //recv ack index is correct
-        if(MY_HTONS(g_pkg_status_p->mm.packet_index) == \
-                (MY_HTONS(mmack.packet_index) + 1)){
+        if(g_pkg_status_p->mm.packet_index == MY_NTOHS(mmack.packet_index) + 1){
             //改变发送包，接收ACK状态为ready
             notice_ack_msg();
 
             //最后一个ACK
-            if(MY_HTONS(g_pkg_status_p->mm.packet_total_num) == \
-                    MY_HTONS(g_pkg_status_p->mm.packet_index)){
+            if(g_pkg_status_p->mm.packet_total_num == g_pkg_status_p->mm.packet_index){
                 g_pkg_status_p->mm_data_trans_waiting = 0;
                 printf("transmit one file over!\n");
 
@@ -1630,6 +1629,7 @@ static int32_t sample_send_image(uint8_t devid)
     uint8_t *txbuf=NULL;
     uint32_t datalen=0;
     uint32_t txbuflen=0;
+    MmPacketIndex trans_mm;
 
     size_t filesize = 0;
     FILE *fp = NULL;
@@ -1641,47 +1641,44 @@ static int32_t sample_send_image(uint8_t devid)
             sizeof(SBProtHeader) + sizeof(MmAckInfo) + 64)*2;
 
     data = (uint8_t *)malloc(datalen);
-    if(!data)
-    {
+    if(!data){
         perror("send image malloc");
         retval = 1;
         goto out;
     }
     txbuf = (uint8_t *)malloc(txbuflen);
-    if(!txbuf)
-    {
+    if(!txbuf){
         perror("send image malloc");
         retval = 1;
         goto out;
     }
 
     pSend = (SBProtHeader *) txbuf;
-
-    mmid_to_filename(MY_HTONL(g_pkg_status_p->mm.id), g_pkg_status_p->mm.type, g_pkg_status_p->filepath);
-
+    mmid_to_filename(g_pkg_status_p->mm.id, g_pkg_status_p->mm.type, g_pkg_status_p->filepath);
     fp = fopen(g_pkg_status_p->filepath, "rb");
-    if(fp ==NULL)
-    {
+    if(fp ==NULL){
         printf("open %s fail\n", g_pkg_status_p->filepath);
         retval = -1;
         goto out;
     }
+    trans_mm.type = g_pkg_status_p->mm.type;
+    trans_mm.id = MY_HTONL(g_pkg_status_p->mm.id);
+    trans_mm.packet_index = MY_HTONS(g_pkg_status_p->mm.packet_index);
+    trans_mm.packet_total_num = MY_HTONS(g_pkg_status_p->mm.packet_total_num);
 
-    memcpy(data, &g_pkg_status_p->mm, sizeof(g_pkg_status_p->mm));
-    offset = MY_HTONS(g_pkg_status_p->mm.packet_index) * IMAGE_SIZE_PER_PACKET;
+    memcpy(data, &trans_mm, sizeof(trans_mm));
+    offset = g_pkg_status_p->mm.packet_index * IMAGE_SIZE_PER_PACKET;
     fseek(fp, offset, SEEK_SET);
     ret = fread(data + sizeof(g_pkg_status_p->mm), 1, IMAGE_SIZE_PER_PACKET, fp);
     fclose(fp);
-    if(ret>0)
-    {
+    if(ret>0){
         message_queue_send(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_UPLOAD_MM_DATA, \
                 data, (sizeof(g_pkg_status_p->mm) + ret));
-        WSI_DEBUG("send...[%d/%d]\n", MY_HTONS(g_pkg_status_p->mm.packet_total_num),\
-                MY_HTONS(g_pkg_status_p->mm.packet_index));
-        g_pkg_status_p->mm.packet_index = MY_HTONS(MY_HTONS(g_pkg_status_p->mm.packet_index) + 1);
-    }
-    else//end and clear
-    {
+        //printbuf(data, 64);
+        WSI_DEBUG("send...[%d/%d]\n", g_pkg_status_p->mm.packet_total_num,\
+                g_pkg_status_p->mm.packet_index);
+        g_pkg_status_p->mm.packet_index += 1; 
+    }else{//end and clear
         printf("read file ret <=0\n");
         perror("error: read image file:");
     }
@@ -1739,8 +1736,8 @@ void recv_para_setting(SBProtHeader *pHeader, int32_t len)
             memcpy(&recv_adas_para, pHeader+1, sizeof(recv_adas_para));
 
             //大端传输
-            recv_adas_para.auto_photo_time_period = MY_HTONS(recv_adas_para.auto_photo_time_period);
-            recv_adas_para.auto_photo_distance_period = MY_HTONS(recv_adas_para.auto_photo_distance_period);
+            recv_adas_para.auto_photo_time_period = MY_NTOHS(recv_adas_para.auto_photo_time_period);
+            recv_adas_para.auto_photo_distance_period = MY_NTOHS(recv_adas_para.auto_photo_distance_period);
             write_dev_para(&recv_adas_para, SAMPLE_DEVICE_ID_ADAS);
 
             printf("recv adas para...\n");
@@ -1754,13 +1751,11 @@ void recv_para_setting(SBProtHeader *pHeader, int32_t len)
         if(len == sizeof(SBProtHeader) + 1 + sizeof(recv_dms_para)){
             memcpy(&recv_dms_para, pHeader+1, sizeof(recv_dms_para));
 
-
-
             //大端传输
-            recv_dms_para.auto_photo_time_period = MY_HTONS(recv_dms_para.auto_photo_time_period);
-            recv_dms_para.auto_photo_distance_period = MY_HTONS(recv_dms_para.auto_photo_distance_period);
-            recv_dms_para.Smoke_TimeIntervalThreshold = MY_HTONS(recv_dms_para.Smoke_TimeIntervalThreshold);
-            recv_dms_para.Call_TimeIntervalThreshold = MY_HTONS(recv_dms_para.Call_TimeIntervalThreshold);
+            recv_dms_para.auto_photo_time_period = MY_NTOHS(recv_dms_para.auto_photo_time_period);
+            recv_dms_para.auto_photo_distance_period = MY_NTOHS(recv_dms_para.auto_photo_distance_period);
+            recv_dms_para.Smoke_TimeIntervalThreshold = MY_NTOHS(recv_dms_para.Smoke_TimeIntervalThreshold);
+            recv_dms_para.Call_TimeIntervalThreshold = MY_NTOHS(recv_dms_para.Call_TimeIntervalThreshold);
 
             printf("recv dms para...\n");
             print_dms_para(&recv_dms_para);
@@ -1958,8 +1953,8 @@ int recv_upgrade_file(SBProtHeader *pHeader, int32_t len)
     else if(message_id == UPGRADE_CMD_TRANS) //recv file
     {
         memcpy(&file_trans, pchar+1, sizeof(file_trans));
-        packet_num = MY_HTONS(file_trans.packet_num);
-        packet_index = MY_HTONS(file_trans.packet_index);
+        packet_num = MY_NTOHS(file_trans.packet_num);
+        packet_index = MY_NTOHS(file_trans.packet_index);
 
         if(packet_index == 0)
         {
@@ -1976,8 +1971,8 @@ int recv_upgrade_file(SBProtHeader *pHeader, int32_t len)
         else //recv file
         {
             memcpy(&file_trans, pchar+1, sizeof(file_trans));
-            packet_num = MY_HTONS(file_trans.packet_num);
-            packet_index = MY_HTONS(file_trans.packet_index);
+            packet_num = MY_NTOHS(file_trans.packet_num);
+            packet_index = MY_NTOHS(file_trans.packet_index);
 
             datalen = len - (sizeof(SBProtHeader) + 1 + 5);
             printf("recv [%d]/[%d], datalen = %d\n", packet_num, packet_index, datalen);
@@ -2139,23 +2134,20 @@ void bond_net_device(int sock)
 	}
 }
 
-static int try_connect()
+static int socket_init()
 {
 #define HOST_SERVER_PORT (8888)
 
     int sock;
     int32_t ret = 0;
     int enable = 1;
-    //const char *server_ip = "192.168.100.100";
-    const char *server_ip = g_configini.serverip;
-    struct sockaddr_in host_serv_addr;
     socklen_t optlen;
     int bufsize = 0;
 
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         printf("Create socket failed %s\n", strerror(errno));
-        return -2;
+        return -1;
     }
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable));
 
@@ -2191,6 +2183,16 @@ static int try_connect()
     printf("get recv buf size = %d\n", bufsize);
     getsockopt(sock, SOL_SOCKET, SO_SNDBUF, &bufsize, &optlen);
     printf("get send buf size = %d\n", bufsize);
+    
+    return sock;
+}
+
+int try_connect(int sock)
+{
+    int ret=0;
+    struct sockaddr_in host_serv_addr;
+    //const char *server_ip = "192.168.100.100";
+    const char *server_ip = g_configini.serverip;
 
     memset(&host_serv_addr, 0, sizeof(host_serv_addr));
     host_serv_addr.sin_family = AF_INET;
@@ -2200,26 +2202,16 @@ static int try_connect()
     ret = inet_aton(server_ip, &host_serv_addr.sin_addr);
     if (0 == ret) {
         printf("inet_aton failed %d %s\n", ret, strerror(errno));
-        return -2;
+        return -1;
     }
-
     bond_net_device(sock);
-    while(1)
-    {
-
-        printf("try connect!\n");
-        if( 0 == connect(sock, (struct sockaddr *)&host_serv_addr, sizeof(host_serv_addr)))
-        {
-            printf("connect ok!\n");
-            return sock;
-        }
-        else
-        {
-            sleep(1);
-            //printf("try connect!\n");
-        }
+    ret = connect(sock, (struct sockaddr *)&host_serv_addr, sizeof(host_serv_addr));
+    if(ret){
+        perror("connect:");
     }
+    return ret;
 }
+
 #define TCP_READ_BUF_SIZE (64*1024)
 #define RECV_HOST_DATA_BUF_SIZE (128*1024)
 void parse_cmd(uint8_t *buf, uint8_t *msgbuf)
@@ -2338,84 +2330,93 @@ void *pthread_tcp_recv(void *para)
     }
 
 connect_again:
-    hostsock = try_connect();
-    if(hostsock < 0)
-        goto connect_again;
-
+    hostsock = socket_init();
+    if(hostsock < 0){
+        goto out;
+    }
+    while (!force_exit) {
+        if(try_connect(hostsock)){
+            sleep(1);
+            printf("try connect!\n");
+            continue;
+        }else{
+            printf("connected!\n");
+        }
 #if defined ENABLE_ADAS
-    send_work_status(SAMPLE_DEVICE_ID_ADAS);
+        send_work_status(SAMPLE_DEVICE_ID_ADAS);
 #elif defined ENABLE_DMS
-    send_work_status(SAMPLE_DEVICE_ID_DMS);
+        send_work_status(SAMPLE_DEVICE_ID_DMS);
 #endif
 
-    while (!force_exit) {
+        while(1){
 #if 1
-        ret = read(hostsock, readbuf, TCP_READ_BUF_SIZE);
-        if (ret < 0) {
-            printf("read failed %d %s\n", ret, strerror(errno));
-            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK){
-                usleep(10000);
-                continue;
-            }
-        }else if (ret == 0) {
-            printf("tcp disconnect!\n");
-            if(force_exit) {
-                break;
-            }
-            close(hostsock);
-            hostsock = -1;
-            goto connect_again;
-        }else{//write to buf
-            //MY_DEBUG("recv raw cmd, tcprecvcnt = %d:\n", tcprecvcnt++);
-            //printbuf(readbuf, ret);
-            i=0;
-            while(ret--){
-                parse_cmd(&readbuf[i++], msgbuf);
-            }
-        }
-#else
-        fd_set rfds;
-        struct timeval tv;
-        int retval;
-
-        FD_ZERO(&rfds);
-        FD_SET(hostsock, &rfds);
-
-        /* Wait up to five seconds. */
-        tv.tv_sec = 1;
-        tv.tv_usec = 0;
-        retval = select(hostsock+1, &rfds, NULL, NULL, &tv);
-        if (retval == -1 ){
-            if(errno != EINTR){
-                perror("select()");
+            ret = read(hostsock, readbuf, TCP_READ_BUF_SIZE);
+            if (ret < 0) {
+                printf("read failed %d %s\n", ret, strerror(errno));
+                if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK){
+                    usleep(10000);
+                    continue;
+                }else{
+                    //break;
+                    goto connect_again;
+                }
+            }else if (ret == 0) {
                 close(hostsock);
-                hostsock = -1;
+                printf("tcp disconnect! sock = %d\n",hostsock);
+                //hostsock = -1;
                 goto connect_again;
+                //break;
+            }else{//write to buf
+                //MY_DEBUG("recv raw cmd, tcprecvcnt = %d:\n", tcprecvcnt++);
+                //printbuf(readbuf, ret);
+                i=0;
+                while(ret--){
+                    parse_cmd(&readbuf[i++], msgbuf);
+                }
             }
-        }else if (retval){
-            if(FD_ISSET(hostsock, &rfds)){
-                retval = read(hostsock, readbuf, TCP_READ_BUF_SIZE);
-                if (retval < 0) {
-                    printf("read failed %d %s\n", retval, strerror(errno));
-                    if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK){
-                        usleep(10000);
-                    }else if (retval == 0) {
-                        close(hostsock);
-                        hostsock = -1;
-                        goto connect_again;
-                    }else{
-                        i=0;
-                        while(ret--){
-                            parse_cmd(&readbuf[i++], msgbuf);
+#else
+            fd_set rfds;
+            struct timeval tv;
+            int retval;
+            FD_ZERO(&rfds);
+            FD_SET(hostsock, &rfds);
+
+            /* Wait up to five seconds. */
+            tv.tv_sec = 1;
+            tv.tv_usec = 0;
+            retval = select(hostsock+1, &rfds, NULL, NULL, &tv);
+            if (retval == -1 ){
+                if(errno != EINTR){
+                    perror("select()");
+                    close(hostsock);
+                    hostsock = -1;
+                    goto connect_again;
+                }
+            }else if (retval){
+                if(FD_ISSET(hostsock, &rfds)){
+                    retval = read(hostsock, readbuf, TCP_READ_BUF_SIZE);
+                    if (retval < 0) {
+                        printf("read failed %d %s\n", retval, strerror(errno));
+                        if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK){
+                            usleep(10000);
+                        }else if (retval == 0) {
+                            close(hostsock);
+                            hostsock = -1;
+                            goto connect_again;
+                        }else{
+                            i=0;
+                            while(ret--){
+                                parse_cmd(&readbuf[i++], msgbuf);
+                            }
                         }
                     }
                 }
+            }else{
+                printf("No data within five seconds.\n");
             }
-        }else{
-            printf("No data within five seconds.\n");
-        }
 
 #endif
+        }
     }
 out:
     printf("%s exit!\n", __FUNCTION__);
