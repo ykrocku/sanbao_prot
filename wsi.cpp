@@ -812,9 +812,19 @@ static const struct lws_protocols protocols[] = {
     { NULL, NULL, 0, 0 } /* end */
 };
 
+
+void notice_tcp_send_exit();
+void pthread_tcp_recv_exit();
+void pthread_exit_notice(void)
+{
+    pthread_tcp_recv_exit();
+    notice_tcp_send_exit();
+}
+
 void sighandler(int sig)
 {
     force_exit = 1;
+    pthread_exit_notice();
     //exit(0);
 }
 #if 0
@@ -904,35 +914,6 @@ void can_send_init(void)
     halio.Init(NULL, 0, true);
 }
 
-extern int req_flag;
-extern pthread_mutex_t  req_mutex;
-extern pthread_cond_t   req_cond;
-
-extern int tcp_recv_data;
-extern pthread_mutex_t  tcp_recv_mutex;
-extern pthread_cond_t   tcp_recv_cond;
-
-extern int save_mp4;
-extern pthread_mutex_t  save_mp4_mutex;
-extern pthread_cond_t   save_mp4_cond;
-
-void pthread_exit_notice(void)
-{
-        pthread_mutex_lock(&req_mutex);
-        req_flag = EXIT_MSG;
-        pthread_cond_signal(&req_cond);
-        pthread_mutex_unlock(&req_mutex);
-
-        pthread_mutex_lock(&tcp_recv_mutex);
-        tcp_recv_data = EXIT_MSG;
-        pthread_cond_signal(&tcp_recv_cond);
-        pthread_mutex_unlock(&tcp_recv_mutex);
-
-        pthread_mutex_lock(&tcp_recv_mutex);
-        tcp_recv_data = EXIT_MSG;
-        pthread_cond_signal(&tcp_recv_cond);
-        pthread_mutex_unlock(&tcp_recv_mutex);
-}
 
 #define GETOPT_OPT_STR  "hvV::C:"
 static void usage(const char *exe_name)
@@ -1096,15 +1077,6 @@ int local_config_init()
     return 0;
 }
 
-#include <sys/sysinfo.h>
-int32_t get_uptime(void)
-{
-    struct sysinfo sInfo;
-    sysinfo(&sInfo);
-    
-    printf("get up time %ld\n", sInfo.uptime);
-    return sInfo.uptime;
-}
 
 #define VERSION "version 1.0.0"
 int main(int argc, char **argv)
@@ -1114,9 +1086,6 @@ int main(int argc, char **argv)
     int opt;
 
     printf("compile time %s %s\n", __DATE__, __TIME__);
-
-    get_uptime();
-
 #if 1
     while ((opt = getopt(argc, (char * const *)argv, GETOPT_OPT_STR)) != -1) {
         switch(opt) {
@@ -1152,43 +1121,30 @@ int main(int argc, char **argv)
     }
 
     //can_send_init();
-
-    if(pthread_create(&pth[0], NULL, pthread_websocket_client, NULL))
-    {
+    if(pthread_create(&pth[0], NULL, pthread_websocket_client, NULL)){
         printf("pthread_create fail!\n");
         return -1;
     }
-    if(pthread_create(&pth[1], NULL, pthread_tcp_recv, NULL))
-    {
+    if(pthread_create(&pth[1], NULL, pthread_tcp_recv, NULL)){
         printf("pthread_create fail!\n");
         return -1;
     }
-    if(pthread_create(&pth[2], NULL, pthread_encode_jpeg, NULL))
-    {
+    if(pthread_create(&pth[2], NULL, pthread_tcp_send, NULL)){
         printf("pthread_create fail!\n");
         return -1;
     }
-    if(pthread_create(&pth[4], NULL, pthread_save_media, NULL))
-    {
+    if(pthread_create(&pth[3], NULL, pthread_encode_jpeg, NULL)){
         printf("pthread_create fail!\n");
         return -1;
     }
-    if(pthread_create(&pth[5], NULL, pthread_snap_shot, NULL))
-    {
+    if(pthread_create(&pth[4], NULL, pthread_save_media, NULL)){
         printf("pthread_create fail!\n");
         return -1;
     }
-    if(pthread_create(&pth[7], NULL, pthread_tcp_send, NULL))
-    {
+    if(pthread_create(&pth[5], NULL, pthread_snap_shot, NULL)){
         printf("pthread_create fail!\n");
         return -1;
     }
-#if 1
-    while(!force_exit)
-    {
-        sleep(1);
-    }
-#endif
     pthread_join(pth[0], NULL);
     printf("join %d\n", i++);
     pthread_join(pth[1], NULL);
@@ -1200,10 +1156,6 @@ int main(int argc, char **argv)
     pthread_join(pth[4], NULL);
     printf("join %d\n", i++);
     pthread_join(pth[5], NULL);
-    printf("join %d\n", i++);
-    pthread_join(pth[6], NULL);
-    printf("join %d\n", i++);
-    pthread_join(pth[7], NULL);
     printf("join %d\n", i++);
     return 0;
 }

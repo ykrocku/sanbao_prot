@@ -121,7 +121,8 @@ RBFrame* request_jpeg_frame(CRingBuf* pRB, uint32_t repeat_times)
         pFrame = reinterpret_cast<RBFrame*>(pRB->RequestReadFrame(&frameLen));
         if (!CRB_VALID_ADDRESS(pFrame)) {
             fprintf(stderr, "Error: RequestReadFrame failed\n");
-            usleep(10000);
+            //usleep(10000);
+            usleep(20000);
             pFrame = nullptr;
         }else{
             break;
@@ -411,7 +412,6 @@ void write_one_jpeg(InfoForStore *mm, RBFrame* pFrame, int index)
     //sprintf(filepath,"%s%08d.jpg", SNAP_SHOT_JPEG_PATH,mm->photo_id[index]);
     sprintf(filepath,"%s%08d", SNAP_SHOT_JPEG_PATH,mm->photo_id[index]);
 
-
     fprintf(stdout, "Saving image file...%s\n", filepath);
     int rc = write_file(filepath, pFrame->data, pFrame->dataLen);
     if (rc == 0) {
@@ -474,13 +474,13 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, uint32_t jpg_time)
     uint32_t wait_time = 0;
 
     printf("%s enter!\n", __FUNCTION__);
-
     if(!mm->video_enable){
         result = -1;
         goto out;
     }
     /**********************get END frame***********************/
     wait_time = mm->video_time*1000000 - jpg_time;
+    printf("jpt_time = %d, wait_time = %d\n", jpg_time, wait_time);
     usleep(wait_time);
     pRB->SeekIndexByTime(0);
     pFrame = request_jpeg_frame(pRB, 10);
@@ -563,20 +563,15 @@ void record_mm_info(CRingBuf* pRB, InfoForStore info)
 int get_mm_type(char *file_type, uint8_t *val)
 {
 
-    if(!strncmp("jpg", file_type, strlen("jpg")))
-    {
+    if(!strncmp("jpg", file_type, strlen("jpg"))){
         *val = MM_PHOTO;
     }
-    else if(!strncmp("wav", file_type, strlen("wav")))
-    {
+    else if(!strncmp("wav", file_type, strlen("wav"))){
         *val = MM_AUDIO;
     }
-    else if(!strncmp("mp4", file_type, strlen("mp4")))
-    {
+    else if(!strncmp("mp4", file_type, strlen("mp4"))){
         *val = MM_VIDEO;
-    }
-    else
-    {
+    }else{
         printf("unknow mm file type: %s\n", file_type);
         return -1;
     }
@@ -733,7 +728,7 @@ void *pthread_save_media(void *p)
     int index = 0;
     InfoForStore mm;
     CRingBuf* pr[WARN_TYPE_NUM];
-    CRingBuf* ptest;
+    CRingBuf* panother;
     Closure<void>* cls[WARN_TYPE_NUM];
     char user_name[CUSTOMER_NUM][20]={
         "customer_FCW_mp4","customer_LDW_mp4","customer_HW_mp4","customer_PCW_mp4",
@@ -759,9 +754,9 @@ void *pthread_save_media(void *p)
     }
 
 #if defined ENABLE_ADAS 
-    ptest = new CRingBuf("adas_get_dms", "dms_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
+    panother = new CRingBuf("adas_get_dms", "dms_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
 #elif defined ENABLE_DMS
-    ptest = new CRingBuf("dms_get_adas", "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
+    panother = new CRingBuf("dms_get_adas", "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
 #endif
 
     pool.SetMinThreads(8);
@@ -770,58 +765,14 @@ void *pthread_save_media(void *p)
     printf("max pthread = %d\n", pool.GetMaxThreads());
     printf("GetIdleTime = %d\n", pool.GetIdleTime());
 
-    //sleep(3);
-    //sleep(20);
-    while(1)
-    {
+    while (!force_exit) {
         //read_pthread_num(i);
-#if 1       
-
-#if 0
-        pthread_mutex_lock(&save_mp4_mutex);
-        while(!save_mp4)
-            pthread_cond_wait(&save_mp4_cond, &save_mp4_mutex);
-        if(save_mp4 == NOTICE_MSG)
-            save_mp4 = WAIT_MSG;
-        pthread_mutex_unlock(&save_mp4_mutex);
-
-        if(IS_EXIT_MSG(save_mp4))
-            break;
-#endif
         if(pull_mm_queue(&mm))
         {
             usleep(10000);
             // sleep(1);
             continue;
         }
-
-#ifdef ENABLE_DMS
-        //printf("photo num: 0x%x\n", mm.photo_num);
-        //produce_dms_image(&mm);
-
-        // continue;
-#endif
-
-#else//debug
-
-        mm.video_time = 4;
-        mm.warn_type = 1;
-        mm.video_enable = 1;
-        mm.photo_enable = 1;
-
-        mm.photo_time_period = 4;
-        mm.photo_num = 3;
-        mm.photo_id[0] = 1;
-        mm.photo_id[1] = 2;
-        mm.photo_id[2] = 3;
-        mm.video_id[0] = 4;
-
-        //if(cnt >= 2)
-        //    sleep(2);
-
-        //if(cnt >= 4)
-        //    sleep(2000000);
-#endif
 
 #if 0
         printf("warn type: 0x%x, period0x%x\n", mm.warn_type, mm.photo_time_period);
@@ -842,11 +793,13 @@ void *pthread_save_media(void *p)
             i++;
         }else{
             printf("store another video!\n");
-            cls[i] = NewClosure(record_mm_info, ptest, mm);
+            cls[i] = NewClosure(record_mm_info, panother, mm);
             pool.AddTask(cls[i]);
             i++;
         }
     }
+
+    printf("%s break\n", __FUNCTION__);
     //for(i=0; i<WARN_TYPE_NUM; i++)
     for(i=0; i<CUSTOMER_NUM; i++)
     {
@@ -860,9 +813,9 @@ void *pthread_save_media(void *p)
     }
 
 #if defined ENABLE_ADAS 
-    delete ptest;
+    delete panother;
 #elif defined ENABLE_DMS
-    delete ptest;
+    delete panother;
 #endif
     pthread_exit(NULL);
 }

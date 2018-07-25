@@ -66,13 +66,6 @@ void push_mm_queue(InfoForStore *mm)
     header.buf = NULL;
     header.len = 0;
 
-#if 0
-    pthread_mutex_lock(&save_mp4_mutex);
-    save_mp4 = 1;
-    pthread_cond_signal(&save_mp4_cond);
-    pthread_mutex_unlock(&save_mp4_mutex);
-#endif
-
     memcpy(&header.mm, mm, sizeof(*mm));
 
     ptr_queue_push(g_image_queue_p, &header, &photo_queue_lock);
@@ -1178,6 +1171,13 @@ out:
 }
 #endif
 
+
+void notice_tcp_send_exit()
+{
+    sem_post(&send_data);
+}
+
+
 void *pthread_tcp_send(void *para)
 {
     uint8_t *writebuf = NULL;
@@ -1192,8 +1192,7 @@ void *pthread_tcp_send(void *para)
         goto out;
     }
 
-    while(1)
-    {
+    while (!force_exit) {
         printf("sem waiting...\n");
         sem_wait(&send_data);
         //send_pkg_to_host(hostsock, writebuf);
@@ -1586,7 +1585,7 @@ static int recv_ack_and_send_image(SBProtHeader *pHeader, int32_t len)
 {
     SendStatus pkg;
     MmAckInfo mmack;
-    uint32_t id;
+    //uint32_t id;
 
     //WSI_DEBUG("recv ack...........!\n");
     memcpy(&mmack, pHeader+1, sizeof(mmack));
@@ -1608,7 +1607,7 @@ static int recv_ack_and_send_image(SBProtHeader *pHeader, int32_t len)
                 g_pkg_status_p->mm_data_trans_waiting = 0;
                 printf("transmit one file over!\n");
 
-                id = MY_HTONL(g_pkg_status_p->mm.id);
+                //id = MY_HTONL(g_pkg_status_p->mm.id);
                 //delete_mm_resource(id);
                 //clear_old_media(id);
                 //display_mm_resource();
@@ -2308,6 +2307,13 @@ Nwrite(int fd, const char *buf, size_t count, int prot)
 }
 #endif
 
+
+
+void pthread_tcp_recv_exit()
+{
+    close(hostsock);
+}
+
 void *pthread_tcp_recv(void *para)
 {
     int32_t ret = 0;
@@ -2343,6 +2349,7 @@ connect_again:
 #endif
 
     while (!force_exit) {
+#if 1
         ret = read(hostsock, readbuf, TCP_READ_BUF_SIZE);
         if (ret < 0) {
             printf("read failed %d %s\n", ret, strerror(errno));
@@ -2351,6 +2358,10 @@ connect_again:
                 continue;
             }
         }else if (ret == 0) {
+            printf("tcp disconnect!\n");
+            if(force_exit) {
+                break;
+            }
             close(hostsock);
             hostsock = -1;
             goto connect_again;
@@ -2362,8 +2373,52 @@ connect_again:
                 parse_cmd(&readbuf[i++], msgbuf);
             }
         }
+#else
+        fd_set rfds;
+        struct timeval tv;
+        int retval;
+
+        FD_ZERO(&rfds);
+        FD_SET(hostsock, &rfds);
+
+        /* Wait up to five seconds. */
+        tv.tv_sec = 1;
+        tv.tv_usec = 0;
+        retval = select(hostsock+1, &rfds, NULL, NULL, &tv);
+        if (retval == -1 ){
+            if(errno != EINTR){
+                perror("select()");
+                close(hostsock);
+                hostsock = -1;
+                goto connect_again;
+            }
+        }else if (retval){
+            if(FD_ISSET(hostsock, &rfds)){
+                retval = read(hostsock, readbuf, TCP_READ_BUF_SIZE);
+                if (retval < 0) {
+                    printf("read failed %d %s\n", retval, strerror(errno));
+                    if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK){
+                        usleep(10000);
+                    }else if (retval == 0) {
+                        close(hostsock);
+                        hostsock = -1;
+                        goto connect_again;
+                    }else{
+                        i=0;
+                        while(ret--){
+                            parse_cmd(&readbuf[i++], msgbuf);
+                        }
+                    }
+                }
+            }
+        }else{
+            printf("No data within five seconds.\n");
+        }
+
+#endif
     }
 out:
+    printf("%s exit!\n", __FUNCTION__);
     if(readbuf)
         free(readbuf);
     if(msgbuf)
@@ -2488,10 +2543,11 @@ void *pthread_snap_shot(void *p)
                 }
                 mileage_last = rt_data.mileage; //单位是0.1km
             }else{
-                sleep(1);
+                //sleep(1);
+                usleep(200000);
             }
         }else{
-            sleep(2);
+            usleep(200000);
         }
     }
     pthread_exit(NULL);
@@ -2507,32 +2563,28 @@ void *pthread_snap_shot(void *p)
 #define SNAP_NAME           "SNAP"
 char *warning_type_to_str(uint8_t type)
 {
-    static char name[20];
-
-    strcpy(name, "default");
+    static char s_name[20];
+    strcpy(s_name, "default");
     switch(type)
     {
         case SB_WARN_TYPE_FCW:
-            return strcpy(name, FCW_NAME);
+            return strcpy(s_name, FCW_NAME);
         case SB_WARN_TYPE_LDW:
-            return strcpy(name, LDW_NAME);
+            return strcpy(s_name, LDW_NAME);
         case SB_WARN_TYPE_HW:
-            return strcpy(name, HW_NAME);
+            return strcpy(s_name, HW_NAME);
         case SB_WARN_TYPE_PCW:
-            return strcpy(name, PCW_NAME);
+            return strcpy(s_name, PCW_NAME);
         case SB_WARN_TYPE_FLC:
-            return strcpy(name, FLC_NAME);
+            return strcpy(s_name, FLC_NAME);
         case SB_WARN_TYPE_TSRW:
-            return strcpy(name, TSRW_NAME);
+            return strcpy(s_name, TSRW_NAME);
         case SB_WARN_TYPE_TSR:
-            return strcpy(name, TSR_NAME);
+            return strcpy(s_name, TSR_NAME);
         case SB_WARN_TYPE_SNAP:
-            return strcpy(name, SNAP_NAME);
-
-            // case SB_WARN_TYPE_TIMER_SNAP:
-            //   return strcpy(name, "TIMER_SNAP");
+            return strcpy(s_name, SNAP_NAME);
         default:
-            return name;
+            return s_name;
     }
 }
 
