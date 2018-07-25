@@ -49,7 +49,8 @@ using namespace std;
 
 extern volatile int force_exit;
 
-#define  ADAS_JPEG_SIZE (16* 1024 * 1024)
+#define  ADAS_JPEG_SIZE (32* 1024 * 1024)
+#define  DMS_JPEG_SIZE (16* 1024 * 1024)
 
 void print_frame(const char * name, RBFrame* pFrame)
 {
@@ -373,7 +374,7 @@ void *pthread_encode_jpeg(void *p)
     ma_api_open_camera(MA_CAMERA_IDX_ADAS);
     ma_api_open_camera(MA_CAMERA_IDX_DRIVER);
     CRingBuf* pRb = new CRingBuf("dms_encode_jpeg", rb_name, rb_size, CRB_PERSONALITY_READER, true);
-    CRingBuf* pwjpg = new CRingBuf("dms_producer", "dms_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_WRITER);
+    CRingBuf* pwjpg = new CRingBuf("dms_producer", "dms_jpg", DMS_JPEG_SIZE, CRB_PERSONALITY_WRITER);
 #endif
 
     if(!pwjpg || !pRb){
@@ -749,12 +750,12 @@ void *pthread_save_media(void *p)
         pr[i] = new CRingBuf(user_name[i], "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
 #elif defined ENABLE_DMS
         printf("name:%s\n", dms_user_name[i]);
-        pr[i] = new CRingBuf(dms_user_name[i], "dms_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
+        pr[i] = new CRingBuf(dms_user_name[i], "dms_jpg", DMS_JPEG_SIZE, CRB_PERSONALITY_READER);
 #endif
     }
 
 #if defined ENABLE_ADAS 
-    panother = new CRingBuf("adas_get_dms", "dms_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
+    panother = new CRingBuf("adas_get_dms", "dms_jpg", DMS_JPEG_SIZE, CRB_PERSONALITY_READER);
 #elif defined ENABLE_DMS
     panother = new CRingBuf("dms_get_adas", "adas_jpg", ADAS_JPEG_SIZE, CRB_PERSONALITY_READER);
 #endif
