@@ -585,16 +585,26 @@ enum demo_protocols {
     DEMO_PROTOCOL_COUNT
 };
 
+
+#if defined ENABLE_ADAS 
 enum Subscribe_Msg {
     MESSAGE_INDEX_MIN,
     MESSAGE_CAN700_INDEX,
     MESSAGE_CAN760_INDEX,
+
+    /* always last */
+    MESSAGE_INDEX_MAX
+};
+#elif defined ENABLE_DMS
+enum Subscribe_Msg {
+    MESSAGE_INDEX_MIN,
 
     MESSAGE_CANDMS_INDEX,
 
     /* always last */
     MESSAGE_INDEX_MAX
 };
+#endif
 
 /*********for debug**********/
 #if 0 
