@@ -484,7 +484,7 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, uint32_t jpg_time)
     wait_time = mm->video_time*1000000 - jpg_time;
     printf("jpt_time = %d, wait_time = %d\n", jpg_time, wait_time);
     usleep(wait_time);
-    pRB->SeekIndexByTime(0);
+    pRB->SeekIndexByTime(1);
     pFrame = request_jpeg_frame(pRB, 10);
     if(pFrame == nullptr){
         printf("Get frame saving file fail!\n");
@@ -555,14 +555,43 @@ out:
     return;
 }
 
+#define ADAS_CAMERA 0
+#define DMS_CAMERA 1
+
+
+void record_video_media(const char *user, char camera_dev, InfoForStore info)
+{
+    uint32_t jpeg_time = 0;
+    char mp4filepath[100];
+    int32_t seektime = 0;
+    int32_t videotime = 0;
+
+    seektime = (0 - info.video_time);
+    videotime = (2*info.video_time);
+    
+    info.video_time = 3; //debug
+    sprintf(mp4filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, info.video_id[0]);
+    if(camera_dev == ADAS_CAMERA){
+        ma_api_record_write_mp4(MA_CAMERA_IDX_ADAS, user, mp4filepath, seektime, videotime);
+    }
+    else if(camera_dev == DMS_CAMERA){
+        printf("record: user = %s, file:%s, seek=%d, time=%d\n", user, mp4filepath, seektime, videotime);
+        ma_api_record_write_mp4(MA_CAMERA_IDX_DRIVER, user, mp4filepath, seektime, videotime);
+    }
+}
+
+
 //修改为同时获取jpg 和mp4 
-void record_mm_info(CRingBuf* pRB, InfoForStore info)
+void record_mm_info(CRingBuf* pRB, const char *user, char camera_dev, InfoForStore info)
 {
     uint32_t jpeg_time = 0;
 
     jpeg_time = store_warn_jpeg(pRB, &info);
-    store_one_mp4(pRB, &info, jpeg_time);
+
+    //store_one_mp4(pRB, &info, jpeg_time);
+    record_video_media(user, camera_dev, info);
 }
+
 
 int get_mm_type(char *file_type, uint8_t *val)
 {
@@ -758,20 +787,38 @@ int32_t open_dms_camera(char *name)
 
 
 
+void test_record_video()
+{
+
+    char dms_rbname[50];
+    ma_api_jpeg_enc_configure(MA_CAMERA_IDX_DRIVER, 704, 576, 30, 50);
+    //ma_api_jpeg_enc_configure(MA_CAMERA_IDX_DRIVER, 640, 360, 15, 50);
+    ma_api_jpeg_enc_start(MA_CAMERA_IDX_DRIVER);
+    //ma_api_jpeg_enc_stop(MA_CAMERA_IDX_DRIVER);
+    dms_rb_size = open_dms_camera(dms_rbname);
+
+
+    ma_api_record_configure(MA_CAMERA_IDX_DRIVER, 704, 576, 1*1024*1024);
+    ma_api_record_start(MA_CAMERA_IDX_DRIVER);
+    ma_api_record_write_mp4(MA_CAMERA_IDX_DRIVER, "xiao", "/data/snap/dms/0001", -5, 10);
+}
+
+
+
 void *pthread_save_media(void *p)
 {
 #define CUSTOMER_NUM   8 
     int cnt = 0;
     uint32_t i = 0;
-    int32_t rb_size = 0;
+    int32_t adas_rb_size = 0;
+    int32_t dms_rb_size = 0;
     int index = 0;
     InfoForStore mm;
     CRingBuf* pr[WARN_TYPE_NUM];
-    CRingBuf* panother;
-    char adas_name[50];
-    char dms_name[50];
+    char adas_rbname[50];
+    char dms_rbname[50];
     Closure<void>* cls[WARN_TYPE_NUM];
-    char user_name[CUSTOMER_NUM][20]={
+    char adas_user_name[CUSTOMER_NUM][20]={
         "customer_FCW_mp4","customer_LDW_mp4","customer_HW_mp4","customer_PCW_mp4",
         "customer_FLC_mp4","customer_TSRW_mp4","customer_TSR_mp4","customer_SNAP_mp4",
     };
@@ -781,35 +828,45 @@ void *pthread_save_media(void *p)
         "DMS_ABNORMAL_WARN","DMS_SANPSHOT_EVENT","DMS_DRIVER_CHANGE","DMS_RESV",
     };
 
+    char adas_record_name[CUSTOMER_NUM][20]={
+        "record_FCW","record_LDW","record_HW","record_PCW",
+        "record_FLC","record_TSRW","record_TSR","record_SNAP",
+    };
+    char dms_record_name[CUSTOMER_NUM][30]={
+        "record_FATIGUE","record_CALLING","record_SMOKING","record_DISTRACT",
+        "record_ABNORMAL","record_SANPSHOT_EVENT","record_DRIVER_CHANGE","record_RESV",
+    };
 #if defined ENABLE_ADAS 
     ma_api_jpeg_enc_configure(MA_CAMERA_IDX_ADAS, 704, 576, 30, 50);
     //ma_api_jpeg_enc_configure(MA_CAMERA_IDX_ADAS, 640, 360, 15, 50);
     ma_api_jpeg_enc_start(MA_CAMERA_IDX_ADAS);
     //ma_api_jpeg_enc_stop(MA_CAMERA_IDX_ADAS);
+    adas_rb_size = open_adas_camera(adas_rbname);
+
+    ma_api_record_configure(MA_CAMERA_IDX_ADAS, 704, 576, 1*1024*1024);
+    ma_api_record_start(MA_CAMERA_IDX_ADAS);
+    //ma_api_record_stop(MA_CAMERA_IDX_ADAS);
 #elif defined ENABLE_DMS 
     ma_api_jpeg_enc_configure(MA_CAMERA_IDX_DRIVER, 704, 576, 30, 50);
     //ma_api_jpeg_enc_configure(MA_CAMERA_IDX_DRIVER, 640, 360, 15, 50);
     ma_api_jpeg_enc_start(MA_CAMERA_IDX_DRIVER);
     //ma_api_jpeg_enc_stop(MA_CAMERA_IDX_DRIVER);
+    dms_rb_size = open_dms_camera(dms_rbname);
+
+    ma_api_record_configure(MA_CAMERA_IDX_DRIVER, 704, 576, 1*1024*1024);
+    ma_api_record_start(MA_CAMERA_IDX_DRIVER);
+    //ma_api_record_stop(MA_CAMERA_IDX_DRIVER);
 #endif
-    rb_size = open_adas_camera(adas_name);
-    rb_size = open_dms_camera(dms_name);
 
     for(i=0; i<CUSTOMER_NUM; i++){
 #if defined ENABLE_ADAS 
-        printf("name:%s\n", user_name[i]);
-        pr[i] = new CRingBuf(user_name[i], adas_name, rb_size, CRB_PERSONALITY_READER);
+        printf("name:%s\n", adas_user_name[i]);
+        pr[i] = new CRingBuf(adas_user_name[i], adas_rbname, adas_rb_size, CRB_PERSONALITY_READER);
 #elif defined ENABLE_DMS
         printf("name:%s\n", dms_user_name[i]);
-        pr[i] = new CRingBuf(dms_user_name[i], dms_name, rb_size, CRB_PERSONALITY_READER);
+        pr[i] = new CRingBuf(dms_user_name[i], dms_rbname, dms_rb_size, CRB_PERSONALITY_READER);
 #endif
     }
-
-#if defined ENABLE_ADAS 
-    panother = new CRingBuf("adas_get_dms", dms_name, rb_size, CRB_PERSONALITY_READER);
-#elif defined ENABLE_DMS
-    panother = new CRingBuf("dms_get_adas", adas_name, rb_size, CRB_PERSONALITY_READER);
-#endif
 
     pool.SetMinThreads(8);
     //pool.SetMaxThreads(4);
@@ -825,28 +882,29 @@ void *pthread_save_media(void *p)
             // sleep(1);
             continue;
         }
-#if 0
-        printf("warn type: 0x%x, period0x%x\n", mm.warn_type, mm.photo_time_period);
-        printf("mm type: 0x%x, mmid: 0x%x\n", mm.mm_type, mm.mm_id[0]);
-        printf("video_time: 0x%x, num: 0x%x\n", mm.video_time, mm.photo_num);
-#endif
-#if 0
-        if(read_pthread_num(i) >= CUSTOMER_NUM)
-        {
-            printf("threadpool busy!");
-            continue;
-        }
-#endif
         i = i % 8;
+
         if(!mm.get_another_camera_video){
-            cls[i] = NewClosure(record_mm_info, pr[i], mm);
+#if 1
+#if defined ENABLE_ADAS 
+            cls[i] = NewClosure(record_mm_info, pr[i], adas_record_name[i], ADAS_CAMERA, mm);
+#elif defined ENABLE_DMS
+            cls[i] = NewClosure(record_mm_info, pr[i], dms_record_name[i], DMS_CAMERA, mm);
+#endif
             pool.AddTask(cls[i]);
             i++;
+#endif
         }else{
+#if 1
             printf("store another video!\n");
-            cls[i] = NewClosure(record_mm_info, panother, mm);
+#if defined ENABLE_ADAS 
+            cls[i] = NewClosure(record_video_media,"another_camera", DMS_CAMERA, mm);
+#elif defined ENABLE_DMS
+            cls[i] = NewClosure(record_video_media,"another_camera", ADAS_CAMERA, mm);
+#endif
             pool.AddTask(cls[i]);
             i++;
+#endif
         }
     }
 
@@ -855,7 +913,7 @@ void *pthread_save_media(void *p)
     for(i=0; i<CUSTOMER_NUM; i++)
     {
 #if defined ENABLE_ADAS 
-        printf("name:%s\n", user_name[i]);
+        printf("name:%s\n", adas_user_name[i]);
         delete pr[i];
 #elif defined ENABLE_DMS
         printf("name:%s\n", dms_user_name[i]);
@@ -863,11 +921,6 @@ void *pthread_save_media(void *p)
 #endif
     }
 
-#if defined ENABLE_ADAS 
-    delete panother;
-#elif defined ENABLE_DMS
-    delete panother;
-#endif
     pthread_exit(NULL);
 }
 
