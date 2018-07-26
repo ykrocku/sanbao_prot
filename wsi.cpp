@@ -1143,10 +1143,12 @@ int main(int argc, char **argv)
         printf("pthread_create fail!\n");
         return -1;
     }
+#if 0
     if(pthread_create(&pth[3], NULL, pthread_encode_jpeg, NULL)){
         printf("pthread_create fail!\n");
         return -1;
     }
+#endif
     if(pthread_create(&pth[4], NULL, pthread_save_media, NULL)){
         printf("pthread_create fail!\n");
         return -1;
@@ -1161,8 +1163,10 @@ int main(int argc, char **argv)
     printf("join %d\n", i++);
     pthread_join(pth[2], NULL);
     printf("join %d\n", i++);
+#if 0
     pthread_join(pth[3], NULL);
     printf("join %d\n", i++);
+#endif
     pthread_join(pth[4], NULL);
     printf("join %d\n", i++);
     pthread_join(pth[5], NULL);
