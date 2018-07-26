@@ -479,7 +479,7 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, uint32_t jpg_time)
         goto out;
     }
 
-    //mm->video_time = 3;
+    mm->video_time = 3;
     /**********************get END frame***********************/
     wait_time = mm->video_time*1000000 - jpg_time;
     printf("jpt_time = %d, wait_time = %d\n", jpg_time, wait_time);
