@@ -457,7 +457,6 @@ uint32_t store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
 
     return take_time;
 }
-
 void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, uint32_t jpg_time)
 {
 #define ENCODE_FRAME_SPEED_MAX 65
@@ -479,6 +478,8 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, uint32_t jpg_time)
         result = -1;
         goto out;
     }
+
+    //mm->video_time = 3;
     /**********************get END frame***********************/
     wait_time = mm->video_time*1000000 - jpg_time;
     printf("jpt_time = %d, wait_time = %d\n", jpg_time, wait_time);
@@ -522,8 +523,10 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, uint32_t jpg_time)
 #else
         MjpegWriter mp4(ofs, fps, pFrame->video.VWidth, pFrame->video.VHeight);
 #endif
+
         fprintf(stdout, "Saving image file...%s, fps = %d\n", mp4filepath, fps);
         while(framecnt--){
+            //printf("framecnt = %d\n", framecnt);
             pFrame = request_jpeg_frame(pRB, 10);
             if(pFrame == nullptr){
                 result = -1;
@@ -723,30 +726,38 @@ extern pthread_cond_t   save_mp4_cond;
 
 
 
-int32_t open_camera()
+int32_t open_adas_camera(char *name)
 {
     int32_t rb_size = 0;
-#if defined ENABLE_ADAS 
-    const char *rb_name = ma_api_get_rb_name(MA_RB_TYPE_DRIVER_JPG);
-    printf("get rb_name: %s\n", rb_name);
-    rb_size = ma_api_get_rb_size(MA_RB_TYPE_DRIVER_JPG);
-    printf("get rb_size: %d\n", rb_size);
-    ma_api_open_camera(MA_CAMERA_IDX_ADAS);
-    printf("ma_api_open_camera MA_CAMERA_IDX_ADAS\n");
-    ma_api_open_camera(MA_CAMERA_IDX_DRIVER);
-    printf("ma_api_open_camera MA_CAMERA_IDX_DRIVER\n");
-#else
+
     const char *rb_name = ma_api_get_rb_name(MA_RB_TYPE_ADAS_JPG);
     printf("get rb_name: %s\n", rb_name);
     rb_size = ma_api_get_rb_size(MA_RB_TYPE_ADAS_JPG);
     printf("get rb_size: %d\n", rb_size);
+    strcpy(name, rb_name);
+
     ma_api_open_camera(MA_CAMERA_IDX_ADAS);
-    ma_api_open_camera(MA_CAMERA_IDX_DRIVER);
-#endif
+    //ma_api_open_camera(MA_CAMERA_IDX_DRIVER);
 
     return rb_size;
-
 }
+int32_t open_dms_camera(char *name)
+{
+    int32_t rb_size = 0;
+    const char *rb_name = ma_api_get_rb_name(MA_RB_TYPE_DRIVER_JPG);
+    printf("get rb_name: %s\n", rb_name);
+    rb_size = ma_api_get_rb_size(MA_RB_TYPE_DRIVER_JPG);
+    printf("get rb_size: %d\n", rb_size);
+    strcpy(name, rb_name);
+
+    //ma_api_open_camera(MA_CAMERA_IDX_ADAS);
+    ma_api_open_camera(MA_CAMERA_IDX_DRIVER);
+
+    return rb_size;
+}
+
+
+
 void *pthread_save_media(void *p)
 {
 #define CUSTOMER_NUM   8 
@@ -757,6 +768,8 @@ void *pthread_save_media(void *p)
     InfoForStore mm;
     CRingBuf* pr[WARN_TYPE_NUM];
     CRingBuf* panother;
+    char adas_name[50];
+    char dms_name[50];
     Closure<void>* cls[WARN_TYPE_NUM];
     char user_name[CUSTOMER_NUM][20]={
         "customer_FCW_mp4","customer_LDW_mp4","customer_HW_mp4","customer_PCW_mp4",
@@ -769,32 +782,33 @@ void *pthread_save_media(void *p)
     };
 
 #if defined ENABLE_ADAS 
-
-    ma_api_jpeg_enc_configure(MA_CAMERA_IDX_ADAS, 576, 704, 15, 50);
+    ma_api_jpeg_enc_configure(MA_CAMERA_IDX_ADAS, 704, 576, 30, 50);
+    //ma_api_jpeg_enc_configure(MA_CAMERA_IDX_ADAS, 640, 360, 15, 50);
     ma_api_jpeg_enc_start(MA_CAMERA_IDX_ADAS);
     //ma_api_jpeg_enc_stop(MA_CAMERA_IDX_ADAS);
 #elif defined ENABLE_DMS 
-    ma_api_jpeg_enc_configure(MA_CAMERA_IDX_DRIVER, 576, 704, 15, 50);
+    ma_api_jpeg_enc_configure(MA_CAMERA_IDX_DRIVER, 704, 576, 30, 50);
+    //ma_api_jpeg_enc_configure(MA_CAMERA_IDX_DRIVER, 640, 360, 15, 50);
     ma_api_jpeg_enc_start(MA_CAMERA_IDX_DRIVER);
     //ma_api_jpeg_enc_stop(MA_CAMERA_IDX_DRIVER);
 #endif
-    rb_size = open_camera();
-    for(i=0; i<CUSTOMER_NUM; i++)
-    {
+    rb_size = open_adas_camera(adas_name);
+    rb_size = open_dms_camera(dms_name);
 
+    for(i=0; i<CUSTOMER_NUM; i++){
 #if defined ENABLE_ADAS 
         printf("name:%s\n", user_name[i]);
-        pr[i] = new CRingBuf(user_name[i], "adas_jpg", rb_size, CRB_PERSONALITY_READER);
+        pr[i] = new CRingBuf(user_name[i], adas_name, rb_size, CRB_PERSONALITY_READER);
 #elif defined ENABLE_DMS
         printf("name:%s\n", dms_user_name[i]);
-        pr[i] = new CRingBuf(dms_user_name[i], "dms_jpg", rb_size, CRB_PERSONALITY_READER);
+        pr[i] = new CRingBuf(dms_user_name[i], dms_name, rb_size, CRB_PERSONALITY_READER);
 #endif
     }
 
 #if defined ENABLE_ADAS 
-    panother = new CRingBuf("adas_get_dms", "dms_jpg", rb_size, CRB_PERSONALITY_READER);
+    panother = new CRingBuf("adas_get_dms", dms_name, rb_size, CRB_PERSONALITY_READER);
 #elif defined ENABLE_DMS
-    panother = new CRingBuf("dms_get_adas", "adas_jpg", rb_size, CRB_PERSONALITY_READER);
+    panother = new CRingBuf("dms_get_adas", adas_name, rb_size, CRB_PERSONALITY_READER);
 #endif
 
     pool.SetMinThreads(8);
