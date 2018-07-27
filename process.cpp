@@ -1451,44 +1451,19 @@ int deal_wsi_adas_can760(WsiFrame *sourcecan)
 
 
 
-int find_local_image_name(uint8_t type, uint32_t id, char *filepath, uint32_t *filesize)
+int find_local_image_name(uint8_t type, uint32_t id, char *filepath)
 {
     MmInfo_node node;
-
+#if 0
     //查找本地多媒体文件
     if(find_mm_resource(id, &node))
     {
         printf("find id[%d] fail!\n", id);
         return -1;
     }
-#if 0
-    if(node.mm_type != type)
-    {
-        printf("find id[0x%x] fail, type error!\n", id);
-        return -1;
-    }
 #endif
-
-#if 0
-    if(type == MM_PHOTO)
-        sprintf(filepath,"%s%s-%08d.jpg", SNAP_SHOT_JPEG_PATH, warning_type_to_str(node.warn_type), id);
-    else if(type == MM_AUDIO)
-        sprintf(filepath,"%s%s-%08d.wav", SNAP_SHOT_JPEG_PATH, warning_type_to_str(node.warn_type), id);
-    else if(type == MM_VIDEO)
-        sprintf(filepath,"%s%s-%08d.mp4", SNAP_SHOT_JPEG_PATH, warning_type_to_str(node.warn_type), id);
-    else
-    {
-        printf("mm type not valid, val=%d\n", type);
-        return -1;
-    }
-#endif
-
     mmid_to_filename(id, type, filepath);
-
-    if((*filesize = GetFileSize(filepath)) < 0)
-        return -1;
-
-    return 0;
+    return GetFileSize(filepath);
 }
 
 int GetFileSize(char *filename)
@@ -1500,7 +1475,7 @@ int GetFileSize(char *filename)
     fp = fopen(filename, "rb");
     if(fp == NULL)
     {
-        printf("open %s fail\n", filename);
+        printf("open %s fail...\n", filename);
         return -1;
     }
     else
@@ -1521,7 +1496,7 @@ static int32_t send_mm_req_ack(SBProtHeader *pHeader, int len)
 {
     uint32_t mm_id = 0;
     uint8_t mm_type = 0;
-    uint32_t filesize = 0;
+    int32_t filesize = 0;
     SBMmHeader *mm_ptr = NULL;
     SBMmHeader2 send_mm;
     int ret = 0;
@@ -1544,8 +1519,9 @@ static int32_t send_mm_req_ack(SBProtHeader *pHeader, int len)
         printf("req mm_type = %d\n", mm_type);
         printf("req mm_id = %08d\n", mm_id);
 
-        ret = find_local_image_name(mm_type, mm_id,  g_pkg_status_p->filepath, &filesize);
-        if(!ret){//media found
+        filesize = find_local_image_name(mm_type, mm_id,  g_pkg_status_p->filepath);
+        if(filesize > 0){//media found
+            printf("find file ok!\n");
             //send ack
             message_queue_send(pHeader,pHeader->device_id, SAMPLE_CMD_REQ_MM_DATA, NULL, 0);
             g_pkg_status_p->mm_data_trans_waiting = 1;
@@ -1559,6 +1535,8 @@ static int32_t send_mm_req_ack(SBProtHeader *pHeader, int len)
             //send first package
             printf("send first package!\n");
             sample_send_image(pHeader->device_id);
+        }else{
+            printf("find file fail!\n");
         }
     }else{
         printf("current package is not valid!\n");
@@ -1585,7 +1563,7 @@ static int recv_ack_and_send_image(SBProtHeader *pHeader, int32_t len)
 {
     SendStatus pkg;
     MmAckInfo mmack;
-    //uint32_t id;
+    uint32_t id;
 
     //WSI_DEBUG("recv ack...........!\n");
     memcpy(&mmack, pHeader+1, sizeof(mmack));
@@ -1606,8 +1584,8 @@ static int recv_ack_and_send_image(SBProtHeader *pHeader, int32_t len)
                 g_pkg_status_p->mm_data_trans_waiting = 0;
                 printf("transmit one file over!\n");
 
-                //id = MY_HTONL(g_pkg_status_p->mm.id);
-                //delete_mm_resource(id);
+                id = g_pkg_status_p->mm.id;
+                delete_mm_resource(id);
                 //clear_old_media(id);
                 //display_mm_resource();
             }else{

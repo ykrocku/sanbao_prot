@@ -203,11 +203,20 @@ int32_t find_mm_resource(uint32_t id, MmInfo_node *m)
     return ret;
 }
 
+
+void delete_file(uint32_t id)
+{
+    char filepath[100];
+    sprintf(filepath, "%s%08d",SNAP_SHOT_JPEG_PATH,id);
+    printf("rm jpeg %s\n", filepath);
+    remove(filepath);
+}
+
+
 int32_t delete_mm_resource(uint32_t id)
 {
     list<MmInfo_node>::iterator it;  
     int ret = -1;
-    char filepath[100];
 
     pthread_mutex_lock(&mm_resource_lock);
     for(it=mmlist.begin();it!=mmlist.end();it++)  
@@ -218,18 +227,14 @@ int32_t delete_mm_resource(uint32_t id)
         {
             if(it->mm_type == MM_PHOTO)
             {
-                sprintf(filepath, "%s%08d",SNAP_SHOT_JPEG_PATH,id);
-                printf("rm jpeg %s\n", filepath);
-                remove(filepath);
+                //delete_file(id);
                 it = mmlist.erase(it);  
                 ret = 0;
                 break;
             }
             if(it->mm_type == MM_VIDEO)
             {
-                sprintf(filepath,"%s%08d",SNAP_SHOT_JPEG_PATH,id);
-                printf("rm mp4 %s\n", filepath);
-                remove(filepath);
+                //delete_file(id);
                 it = mmlist.erase(it);  
                 ret = 0;
                 break;
