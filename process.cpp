@@ -627,13 +627,14 @@ int filter_alert_by_time(time_t *last, unsigned int secs)
 {
     struct timespec tv;
 
-#ifndef FILTER_ALERT_BY_SPEED
+#ifndef FILTER_ALERT_BY_TIME
     return 1;
 #endif
 
 	clock_gettime(CLOCK_MONOTONIC, &tv);
     if (tv.tv_sec - (*last) < secs){
-        
+     
+        printf("filter alert by time!");
         printf("last = %ld, now = %ld\n", *last, tv.tv_sec);
         return 0;
     }
@@ -1433,17 +1434,23 @@ int deal_wsi_adas_can760(WsiFrame *sourcecan)
     //printbuf(sourcecan->warning, 8);
     memcpy(&carinfo, sourcecan->warning, sizeof(carinfo));
 #if 0
-    //			uploadmsg.high = carinfo.
-    //			uploadmsg.altitude = carinfo. //MY_HTONS(altitude)
-    //			uploadmsg.longitude= carinfo. //MY_HTONS(longitude)
-    //			uploadmsg.car_status.acc = 
-    uploadmsg->car_status.left_signal = carinfo.left_signal;
-    uploadmsg->car_status.right_signal = carinfo.right_signal;
-
-    if(carinfo.wipers_aval)
-        uploadmsg->car_status.wipers = carinfo.wipers;
-    uploadmsg->car_status.brakes = carinfo.brakes;
-    //			uploadmsg.car_status.insert = 
+#if 0
+    printf("carinfo.brakes= %d\n",carinfo.brakes);
+    printf("carinfo.left_signal= %d\n",carinfo.left_signal);
+    printf("carinfo.right_signal= %d\n",carinfo.right_signal);
+    printf("carinfo.wipers= %d\n",carinfo.wipers);
+    printf("carinfo.low_beam= %d\n",carinfo.low_beam);
+    printf("carinfo.high_beam= %d\n",carinfo.high_beam);
+    printf("carinfo.byte0_resv0= %d\n",carinfo.byte0_resv0);
+    printf("carinfo.byte0_resv1= %d\n",carinfo.byte0_resv1);
+    printf("carinfo.byte1_resv0= %d\n",carinfo.byte1_resv0);
+    printf("carinfo.wipers_aval= %d\n",carinfo.wipers_aval);
+    printf("carinfo.low_beam_avavl= %d\n",carinfo.low_beam_aval);
+    printf("carinfo.high_beam_aval= %d\n",carinfo.high_beam_aval);
+    printf("carinfo.byte1_resv1= %d\n",carinfo.byte1_resv1);
+#endif
+    printf("carinfo.speed_aval= %d\n",carinfo.speed_aval);
+    printf("carinfo.speed= %d\n",carinfo.speed);
 #endif
     return 0;
 }

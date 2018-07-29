@@ -588,8 +588,6 @@ typedef struct __WsiFrame{
 
 
 
-
-
 /*********************local config file****************************/
 typedef struct __LocalConfig {
 
@@ -599,6 +597,11 @@ typedef struct __LocalConfig {
     char clientip[32];
     uint16_t clientport;
     char netdev_name[32];
+
+
+    char jpeg_coder_fps; // 帧率设置
+    int  dms_alert_filter_period; //报警过滤时间
+    int  adas_alert_filter_period; //报警过滤时间
 
 
 } __attribute__((packed)) LocalConfig;
