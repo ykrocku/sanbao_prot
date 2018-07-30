@@ -112,6 +112,7 @@ std::vector<uint8_t> jpeg_encode(uint8_t* data,\
     return jpg_vec;
 }
 
+
 RBFrame* request_jpeg_frame(CRingBuf* pRB, uint32_t repeat_times)
 {
     RBFrame* pFrame = nullptr;
@@ -140,7 +141,7 @@ std::string GetTimestamp() {
     time(&rawtime);
     
     //convert to CST
-    rawtime += 8*3600;
+    //rawtime += 8*3600;
 
     timeinfo = localtime(&rawtime);
     strftime(buffer, sizeof buffer, "%Y-%m-%d %H:%M:%S", timeinfo);
@@ -410,8 +411,7 @@ void write_one_jpeg(InfoForStore *mm, RBFrame* pFrame, int index)
     char filepath[100];
     MmInfo_node node;
 
-    //sprintf(filepath,"%s%08d.jpg", SNAP_SHOT_JPEG_PATH,mm->photo_id[index]);
-    sprintf(filepath,"%s%08d", SNAP_SHOT_JPEG_PATH,mm->photo_id[index]);
+    mmid_to_filename(mm->photo_id[index], 0, filepath);
 
     fprintf(stdout, "Saving image file...%s\n", filepath);
     int rc = write_file(filepath, pFrame->data, pFrame->dataLen);
@@ -434,6 +434,7 @@ uint32_t store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
     int jpeg_index = 0;
     uint32_t interval= 0; //usleep
     uint32_t take_time = 0;
+    int64_t old_pts = 0;
     
     printf("%s enter!\n", __FUNCTION__);
 
@@ -441,18 +442,24 @@ uint32_t store_warn_jpeg(CRingBuf* pRB, InfoForStore *mm)
         return take_time;
     }
     interval = mm->photo_time_period*100*1000; //单位是100ms
-    while(jpeg_index < mm->photo_num)
-    {
+    printf("interval time = %d\n", interval);
+    do{
         pRB->SeekIndexByTime(0);
-        pFrame = request_jpeg_frame(pRB, 10);
+        pFrame = request_jpeg_frame(pRB, 0);
         if(pFrame == nullptr)
             continue;
 
-        usleep(interval);
-        print_frame("jpeg", pFrame);
-        write_one_jpeg(mm, pFrame, jpeg_index++);
-        pRB->CommitRead();
-    }
+        //pts 单位是us
+        if(pFrame->pts >(old_pts + interval)){
+            print_frame("jpeg", pFrame);
+            write_one_jpeg(mm, pFrame, jpeg_index++);
+            pRB->CommitRead();
+            old_pts = pFrame->pts;
+        }else{
+            usleep(100000);
+        }
+
+    }while(jpeg_index < mm->photo_num);
     take_time = interval * (mm->photo_num -1);
 
     return take_time;
@@ -514,7 +521,7 @@ void store_one_mp4(CRingBuf* pRB, InfoForStore *mm, uint32_t jpg_time)
 
     //do{}while(0);解决goto 中间有初始化变量问题。
     do{
-        sprintf(mp4filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, mm->video_id[0]);
+        mmid_to_filename(mm->video_id[0], 0, mp4filepath);
         std::ofstream ofs(mp4filepath, std::ofstream::out | std::ofstream::binary);
 #define VIDEO_MP4
 #ifdef VIDEO_MP4
@@ -567,23 +574,28 @@ void record_video_media(const char *user, char camera_dev, InfoForStore info)
     int32_t seektime = 0;
     int32_t videotime = 0;
     int ret = 0;
+    char logbuf[256];
 
     //info.video_time = 2; //debug
     seektime = (0 - info.video_time);
     videotime = (2*info.video_time);
     
-    sprintf(mp4filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, info.video_id[0]);
-    //sprintf(mp4filepath,"%s%08d", "/data/", info.video_id[0]);
+    mmid_to_filename(info.video_id[0], 0, mp4filepath);
     if(camera_dev == ADAS_CAMERA){
         //ret = ma_api_record_write_mp4(MA_CAMERA_IDX_ADAS, "zhao", "/data/snap/dms/0002", -2, 4);
         ret = ma_api_record_write_mp4(MA_CAMERA_IDX_ADAS, user, mp4filepath, seektime, videotime);
         printf("adas ret = %d, user = %s, file:%s, seek=%d, time=%d\n",ret, user, mp4filepath, seektime, videotime);
+
+        snprintf(logbuf, sizeof(logbuf), "adas write ret =%d, user=%s, file:%s, seek=%d, time=%d",ret, user, mp4filepath, seektime, videotime);
+        data_log(logbuf);
     }
     else if(camera_dev == DMS_CAMERA){
         //ret = ma_api_record_write_mp4(MA_CAMERA_IDX_DRIVER, "xiao", "/data/0001", -2, 4);
         ret = ma_api_record_write_mp4(MA_CAMERA_IDX_DRIVER, user, mp4filepath, seektime, videotime);
         //ret = ma_api_record_write_mp4(MA_CAMERA_IDX_DRIVER, "zhaoabcdefg", mp4filepath, seektime, videotime);
         printf("ret = %d, user = %s, file:%s, seek=%d, time=%d\n",ret, user, mp4filepath, seektime, videotime);
+        snprintf(logbuf, sizeof(logbuf), "dms write ret = %d, user = %s, file:%s, seek=%d, time=%d",ret, user, mp4filepath, seektime, videotime);
+        data_log(logbuf);
     }
 
 #if 0
@@ -599,10 +611,7 @@ void record_video_media(const char *user, char camera_dev, InfoForStore info)
 //修改为同时获取jpg 和mp4 
 void record_mm_info(CRingBuf* pRB, const char *user, char camera_dev, InfoForStore info)
 {
-    uint32_t jpeg_time = 0;
-
-    jpeg_time = store_warn_jpeg(pRB, &info);
-
+    store_warn_jpeg(pRB, &info);
     //store_one_mp4(pRB, &info, jpeg_time);
     record_video_media(user, camera_dev, info);
 }
@@ -768,8 +777,6 @@ extern int save_mp4;
 extern pthread_mutex_t  save_mp4_mutex;
 extern pthread_cond_t   save_mp4_cond;
 
-
-
 int32_t open_adas_camera(char *name)
 {
     int32_t rb_size = 0;
@@ -800,8 +807,6 @@ int32_t open_dms_camera(char *name)
     return rb_size;
 }
 
-
-
 void test_record_video()
 {
     int32_t ret = 0;
@@ -830,6 +835,7 @@ void *pthread_save_media(void *p)
     int32_t adas_rb_size = 0;
     int32_t dms_rb_size = 0;
     int index = 0;
+    int another_index = 0;
     InfoForStore mm;
     CRingBuf* pr[WARN_TYPE_NUM];
     char adas_rbname[50];
@@ -854,16 +860,17 @@ void *pthread_save_media(void *p)
         "dms_rd1","dms_rd2","dms_rd3","dms_rd4",
         "dms_rd5","dms_rd6","dms_rd7","dms_rd8",
     };
+    char another_camera_user[CUSTOMER_NUM][30]={
+        "another1","another2","another3","another4",
+        "another5","another6","another7","another8",
+    };
 
-    
 
     //test_record_video();
     //sleep(10000);
 
-
-
 #if defined ENABLE_ADAS 
-    ma_api_jpeg_enc_configure(MA_CAMERA_IDX_ADAS, 704, 576, 30, 50);
+    ma_api_jpeg_enc_configure(MA_CAMERA_IDX_ADAS, 704, 576, 5, 50);
     //ma_api_jpeg_enc_configure(MA_CAMERA_IDX_ADAS, 640, 360, 15, 50);
     ma_api_jpeg_enc_start(MA_CAMERA_IDX_ADAS);
     //ma_api_jpeg_enc_stop(MA_CAMERA_IDX_ADAS);
@@ -873,7 +880,7 @@ void *pthread_save_media(void *p)
     ma_api_record_start(MA_CAMERA_IDX_ADAS);
     //ma_api_record_stop(MA_CAMERA_IDX_ADAS);
 #elif defined ENABLE_DMS 
-    ma_api_jpeg_enc_configure(MA_CAMERA_IDX_DRIVER, 704, 576, 30, 50);
+    ma_api_jpeg_enc_configure(MA_CAMERA_IDX_DRIVER, 704, 576, 5, 50);
     //ma_api_jpeg_enc_configure(MA_CAMERA_IDX_DRIVER, 640, 360, 15, 50);
     ma_api_jpeg_enc_start(MA_CAMERA_IDX_DRIVER);
     //ma_api_jpeg_enc_stop(MA_CAMERA_IDX_DRIVER);
@@ -921,13 +928,15 @@ void *pthread_save_media(void *p)
             i++;
         }else{
             printf("store another video!\n");
+            another_index %= 3;
 #if defined ENABLE_ADAS 
-            cls[i] = NewClosure(record_video_media,"another", DMS_CAMERA, mm);
+            cls[i] = NewClosure(record_video_media,another_camera_user[another_index], DMS_CAMERA, mm);
 #elif defined ENABLE_DMS
-            cls[i] = NewClosure(record_video_media,"another", ADAS_CAMERA, mm);
+            cls[i] = NewClosure(record_video_media,another_camera_user[another_index], ADAS_CAMERA, mm);
 #endif
             pool.AddTask(cls[i]);
             i++;
+            another_index ++;
         }
     }
 

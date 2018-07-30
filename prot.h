@@ -7,20 +7,25 @@
 //#define ENABLE_ADAS
 //#define ENABLE_DMS
 
+
+
+#define SAVE_MEDIA_NUM_MAX 100
+#define SAVE_ANOTHER_CAMERA_VIDEO
+//#define USE_CAN760_MESSAGE
+
 /***********enable filter***********/
 #define FILTER_ALERT_BY_SPEED
 #define FILTER_ALERT_BY_TIME
 
 /******set filter time 30 sec******/
-#define FILTER_ADAS_ALERT_SET_TIME 30u
-#define FILTER_DMS_ALERT_SET_TIME 30u
+#define FILTER_ADAS_ALERT_SET_TIME 10u
+#define FILTER_DMS_ALERT_SET_TIME 10u
+
 
 #define EXIT_MSG      2
 #define NOTICE_MSG    1
 #define WAIT_MSG      0
 #define IS_EXIT_MSG(flag)   (flag == EXIT_MSG)
-
-#define IMAGE_FILE_NUM_CACHED    10
 
 #if defined ENABLE_ADAS
 #define DO_DELETE_SNAP_SHOT_FILES "rm -r /data/snap/adas/*"
@@ -98,7 +103,7 @@
 
 #define SB_WARN_STATUS_BEGIN (0x1)
 #define SB_WARN_STATUS_END   (0x2)
-#define SB_WARN_STATUS_EVENT (0x0)
+#define SB_WARN_STATUS_NONE (0x0)
 
 #define WARN_TYPE_NUM       (8)
 #define SB_WARN_TYPE_FCW     (0x1)
@@ -222,7 +227,7 @@ typedef struct __ModuleStatus{
 
 typedef struct __AdasWarnFrame {
     uint32_t	warning_id;
-    uint8_t		start_flag;
+    uint8_t		status_flag;
     uint8_t		sound_type;
     uint8_t		forward_car_speed;
     uint8_t		forward_car_distance;
@@ -674,5 +679,7 @@ void adas_para_check(AdasParaSetting *para);
 void get_latitude_info(char *buffer, int len);
 void deal_wsi_dms_info( WsiFrame *can);
 void deal_wsi_dms_info2( DmsCan779 *can);
+
+void mmid_to_filename(uint32_t id, uint8_t type, char *filepath);
 
 #endif

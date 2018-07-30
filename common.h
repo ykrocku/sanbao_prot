@@ -92,4 +92,7 @@ void insert_mm_resouce(MmInfo_node m);
 void printbuf(void *buf, int len);
 int timeout_trigger(struct timespec *tv, int sec);
 
+void *data_log_init(const char *filename, bool truncate);
+void data_log(const char *log);
+
 #endif

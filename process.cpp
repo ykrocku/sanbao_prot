@@ -121,11 +121,11 @@ void get_local_time(uint8_t get_time[6])
     struct tm *p = &a;
     time_t rawtime = 0;   
 
-    rawtime += 8*3600;
     rawtime = time(NULL);
+    //rawtime += 8*3600;
 
     p = localtime(&rawtime);
-    get_time[0] = p->tm_year;
+    get_time[0] = (p->tm_year+1900)%100;
     get_time[1] = p->tm_mon+1;
     get_time[2] = p->tm_mday;
     get_time[3] = p->tm_hour;
@@ -156,6 +156,12 @@ int clear_media()
 }
 
 
+#if defined ENABLE_ADAS
+    #define PROT_LOG_NAME "/data/adasprot.log"
+#elif defined ENABLE_DMS
+    #define PROT_LOG_NAME "/data/dmsprot.log"
+#endif
+
 int global_var_init()
 {
 
@@ -176,6 +182,9 @@ int global_var_init()
         return -1;
     }
     //read_local_file_to_list();
+
+    data_log_init(PROT_LOG_NAME, false);
+
     return 0;
 }
 
@@ -232,6 +241,29 @@ void RealTimeDdata_process(RealTimeData *data, int mode)
     
     //printf("get car speed: %d\n", data->car_speed);
 }
+
+
+void can760_message_process(CAN760Info *data, int mode)
+{
+    static CAN760Info msg;
+    static pthread_mutex_t can760_lock = PTHREAD_MUTEX_INITIALIZER;
+
+    pthread_mutex_lock(&can760_lock);
+    if(mode == WRITE_REAL_TIME_MSG)
+    {
+        memcpy(&msg, data, sizeof(CAN760Info));
+    }
+    else if(mode == READ_REAL_TIME_MSG)
+    {
+        memcpy(data, &msg, sizeof(CAN760Info));
+    }
+    pthread_mutex_unlock(&can760_lock);
+    
+    //printf("get car speed: %d\n", data->car_speed);
+}
+
+
+
 
 void get_latitude_info(char *buffer, int len)
 {
@@ -487,6 +519,17 @@ static int32_t message_queue_send(SBProtHeader *pHeader, uint8_t devid, uint8_t 
     return msg_len;
 }
 
+
+//填写报警信息的一些实时数据
+void using_can760_msg(AdasWarnFrame *uploadmsg)
+{
+    CAN760Info carinfo;
+    can760_message_process(&carinfo, READ_REAL_TIME_MSG);
+    uploadmsg->car_speed = carinfo.speed;
+    printf("using can760 speed = %d\n", carinfo.speed);
+}
+
+
 //填写报警信息的一些实时数据
 void get_real_time_msg(AdasWarnFrame *uploadmsg)
 {
@@ -501,7 +544,16 @@ void get_real_time_msg(AdasWarnFrame *uploadmsg)
 
     memcpy(uploadmsg->time, tmp.time, sizeof(uploadmsg->time));
     memcpy(&uploadmsg->car_status, &tmp.car_status, sizeof(uploadmsg->car_status));
+
+#if defined ENABLE_ADAS
+#ifdef USE_CAN760_MESSAGE
+    using_can760_msg(uploadmsg);
+#endif
+#endif
 }
+
+
+
 void get_adas_Info_for_store(uint8_t type, InfoForStore *mm_store)
 {
     AdasParaSetting para;
@@ -634,8 +686,7 @@ int filter_alert_by_time(time_t *last, unsigned int secs)
 	clock_gettime(CLOCK_MONOTONIC, &tv);
     if (tv.tv_sec - (*last) < secs){
      
-        printf("filter alert by time!");
-        printf("last = %ld, now = %ld\n", *last, tv.tv_sec);
+        printf("filter alert by time(%dsec), last = %ld, now = %ld\n", secs, *last, tv.tv_sec);
         return 0;
     }
 
@@ -648,17 +699,27 @@ int filter_alert_by_speed()
 {
     RealTimeData tmp;
     AdasParaSetting para;
+    CAN760Info carinfo;
 
+   // return 1;
 #ifndef FILTER_ALERT_BY_SPEED
     return 1;
 #endif
 
     read_dev_para(&para, SAMPLE_DEVICE_ID_ADAS);
+
     RealTimeDdata_process(&tmp, READ_REAL_TIME_MSG);
+
+#if defined ENABLE_ADAS
+#ifdef USE_CAN760_MESSAGE
+    can760_message_process(&carinfo, READ_REAL_TIME_MSG);
+    tmp.car_speed = carinfo.speed;
+#endif
+#endif
 
     if(tmp.car_speed <= para.warning_speed_val)
     {
-        printf("filter low speed (%d) alert!\n", tmp.car_speed);
+        printf("alert filter by speed(%d),cur_speed(%d)!\n", para.warning_speed_val, tmp.car_speed);
         return 0;
     }
 
@@ -668,17 +729,7 @@ int filter_alert_by_speed()
 
 void mmid_to_filename(uint32_t id, uint8_t type, char *filepath)
 {
-#if 0
-    if(type == MM_PHOTO)
-        sprintf(filepath,"%s%08d.jpg", SNAP_SHOT_JPEG_PATH, id);
-    else if(type == MM_AUDIO)
-        sprintf(filepath,"%s%08d.wav", SNAP_SHOT_JPEG_PATH, id);
-    else if(type == MM_VIDEO)
-        sprintf(filepath,"%s%08d.mp4", SNAP_SHOT_JPEG_PATH, id);
-    else
-        ;
-#endif
-    sprintf(filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, id);
+    sprintf(filepath,"%s%010u", SNAP_SHOT_JPEG_PATH, id);
 }
 
 
@@ -690,30 +741,45 @@ void filter_media_num(InfoForStore *mm)
 {
     char filepath[100];
     int i;
-#define MEDIA_NUM_MAX 100
     if(mm->photo_enable){
         for(i=0; i<mm->photo_num; i++){
-            if(mm->photo_id[i] > MEDIA_NUM_MAX){
-                sprintf(filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, mm->photo_id[i]-MEDIA_NUM_MAX);
+            if(mm->photo_id[i] > SAVE_MEDIA_NUM_MAX){
+                mmid_to_filename(mm->photo_id[i]-SAVE_MEDIA_NUM_MAX, 0, filepath);
                 printf("delete old media:%s\n", filepath);
                 remove(filepath);
             }
         }
     }
     if(mm->video_enable){
-        if( mm->video_id[0] > MEDIA_NUM_MAX){
-            sprintf(filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, mm->video_id[0]-MEDIA_NUM_MAX);
+        if( mm->video_id[0] > SAVE_MEDIA_NUM_MAX){
+            mmid_to_filename(mm->video_id[0]-SAVE_MEDIA_NUM_MAX, 0, filepath);
             printf("delete old media:%s\n", filepath);
             remove(filepath);
         }
     }
 }
 
+void record_alert_log(uint8_t time[6], int type)
+{
+    char logbuf[256];
+    //write log
+    snprintf(logbuf, sizeof(logbuf), "[%d-%d-%d %d:%d:%d] warn_type:%d",\
+            time[0],\
+            time[1],\
+            time[2],\
+            time[3],\
+            time[4],\
+            time[5],\
+            type); 
+    data_log(logbuf);
+    
+}
+
 /*********************************
 * func: build adas warning package
 * return: framelen
 *********************************/
-int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
+int build_adas_warn_frame(int type, char status_flag, AdasWarnFrame *uploadmsg)
 {
     int i=0;
     InfoForStore mm;
@@ -724,11 +790,18 @@ int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
     get_adas_Info_for_store(type, &mm);
 
     get_local_time(uploadmsg->time);
+    record_alert_log(uploadmsg->time, type);
 
+    uploadmsg->status_flag = status_flag;
     uploadmsg->warning_id = MY_HTONL(get_next_id(WARNING_ID_MODE, NULL, 0));
     uploadmsg->sound_type = type;
     uploadmsg->mm_num = 0;
     get_real_time_msg(uploadmsg);
+
+    if(status_flag == SB_WARN_STATUS_END){
+        goto out;
+    }
+    
 
     switch(type)
     {
@@ -756,7 +829,7 @@ int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
             mm.get_another_camera_video= 0;
             filter_media_num(&mm);
             push_mm_queue(&mm);
-#if 1
+#if defined SAVE_ANOTHER_CAMERA_VIDEO
             //add dms video
             if(mm.video_enable){
                 mm.video_enable = 1; 
@@ -796,6 +869,7 @@ int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
         default:
             break;
     }
+out:
     return (sizeof(*uploadmsg) + uploadmsg->mm_num*sizeof(SBMmHeader));
 }
 
@@ -803,7 +877,7 @@ int build_adas_warn_frame(int type, AdasWarnFrame *uploadmsg)
 * func: build dms warning package
 * return: framelen
 *********************************/
-int build_dms_warn_frame(int type, DsmWarnFrame *uploadmsg)
+int build_dms_warn_frame(int type, char status_flag, DsmWarnFrame *uploadmsg)
 {
     int i=0;
     InfoForStore mm;
@@ -814,11 +888,13 @@ int build_dms_warn_frame(int type, DsmWarnFrame *uploadmsg)
     memset(&mm, 0, sizeof(mm));
     get_dms_Info_for_store(type, &mm);
 
+    uploadmsg->status_flag = status_flag;
     uploadmsg->warning_id = MY_HTONL(get_next_id(WARNING_ID_MODE, NULL, 0));
     uploadmsg->sound_type = type;
     uploadmsg->mm_num = 0;
 
     get_local_time(uploadmsg->time);
+    record_alert_log(uploadmsg->time, type);
 
     RealTimeDdata_process(&tmp, READ_REAL_TIME_MSG);
     uploadmsg->altitude = tmp.altitude;
@@ -827,6 +903,10 @@ int build_dms_warn_frame(int type, DsmWarnFrame *uploadmsg)
     uploadmsg->car_speed = tmp.car_speed;
     memcpy(uploadmsg->time, tmp.time, sizeof(uploadmsg->time));
     memcpy(&uploadmsg->car_status, &tmp.car_status, sizeof(uploadmsg->car_status));
+
+    if(status_flag == SB_WARN_STATUS_END){
+        goto out;
+    }
 
     switch(type)
     {
@@ -860,8 +940,9 @@ int build_dms_warn_frame(int type, DsmWarnFrame *uploadmsg)
             
             WSI_DEBUG("num2 = %d\n", uploadmsg->mm_num);
 
+#if defined SAVE_ANOTHER_CAMERA_VIDEO
+            //add  video
             if(mm.video_enable){
-                //add  video
                 mm.video_enable = 1; 
                 mm.photo_enable = 0; 
                 if(mm.video_enable){
@@ -875,6 +956,7 @@ int build_dms_warn_frame(int type, DsmWarnFrame *uploadmsg)
                 push_mm_queue(&mm);
                 WSI_DEBUG("num3 = %d\n", uploadmsg->mm_num);
             }
+#endif
             break;
 
         case DMS_DRIVER_CHANGE:
@@ -898,6 +980,7 @@ int build_dms_warn_frame(int type, DsmWarnFrame *uploadmsg)
         default:
             break;
     }
+out:
     return (sizeof(*uploadmsg) + uploadmsg->mm_num*sizeof(SBMmHeader));
 }
 
@@ -905,6 +988,7 @@ int build_dms_warn_frame(int type, DsmWarnFrame *uploadmsg)
 void deal_wsi_dms_info(WsiFrame *can)
 {
 #if 1
+    char status_flag = SB_WARN_STATUS_NONE;
     DmsAlertInfo msg;
     uint32_t playloadlen = 0;
     uint8_t msgbuf[512];
@@ -930,23 +1014,20 @@ void deal_wsi_dms_info(WsiFrame *can)
     printf("topic: %s\n", can->topic);
     printbuf(can->warning, sizeof(can->warning));
 #endif
+    //printbuf(can->warning, sizeof(can->warning));
 
     memcpy(&msg, can->warning, sizeof(can->warning));
 
-    for(i=0; i<sizeof(can->warning); i++)
-    {
+    for(i=0; i<sizeof(can->warning); i++){
         dms_alert[i] = can->warning[i] & dms_alert_mask[i];
     }
 
     //filter the same alert
-    if(!memcmp(dms_alert, dms_alert_last, sizeof(dms_alert)))
-    {
+    if(!memcmp(dms_alert, dms_alert_last, sizeof(dms_alert))){
         //printf("alert is the same!\n");
         goto out;
     }
 
-    if(!filter_alert_by_speed())
-        goto out;
 
 #if 0
     printf("msg.alert_eye_close1 %d\n", msg.alert_eye_close1);
@@ -959,49 +1040,51 @@ void deal_wsi_dms_info(WsiFrame *can)
     printf("msg.alert_bow %d\n", msg.alert_bow);
 #endif
 
+    //按照优先级检查
     if(msg.alert_eye_close1 || msg.alert_eye_close2 || msg.alert_yawn || msg.alert_bow){
         alert_type = DMS_FATIGUE_WARN;
-        if(!filter_alert_by_time(&dms_fatigue_warn, FILTER_DMS_ALERT_SET_TIME))
-        {
-      //      printf("dms filter alert by time!");
+        if(!filter_alert_by_time(&dms_fatigue_warn, FILTER_DMS_ALERT_SET_TIME)){
             goto out;
         }
+        if(!filter_alert_by_speed())
+            goto out;
     }else if (msg.alert_look_around ){
         alert_type = DMS_DISTRACT_WARN;
-        if(!filter_alert_by_time(&dms_distract_warn, FILTER_DMS_ALERT_SET_TIME))
-        {
-        //    printf("dms filter alert by time!");
+        if(!filter_alert_by_time(&dms_distract_warn, FILTER_DMS_ALERT_SET_TIME)){
             goto out;
         }
+        if(!filter_alert_by_speed())
+            goto out;
     }else if(msg.alert_phone){
         alert_type = DMS_CALLING_WARN;
-        if(!filter_alert_by_time(&dms_calling_warn, FILTER_DMS_ALERT_SET_TIME))
-        {
-          //  printf("dms filter alert by time!");
+        if(!filter_alert_by_time(&dms_calling_warn, FILTER_DMS_ALERT_SET_TIME)){
             goto out;
         }
+        if(!filter_alert_by_speed())
+            goto out;
     }else if(msg.alert_smoking){
         alert_type = DMS_SMOKING_WARN;
-        if(!filter_alert_by_time(&dms_smoking_warn, FILTER_DMS_ALERT_SET_TIME))
-        {
-            //printf("dms filter alert by time!");
+        if(!filter_alert_by_time(&dms_smoking_warn, FILTER_DMS_ALERT_SET_TIME)){
             goto out;
         }
+        if(!filter_alert_by_speed())
+            goto out;
     }else if(msg.alert_absence){
         alert_type = DMS_ABNORMAL_WARN;
-        if(!filter_alert_by_time(&dms_abnormal_warn, FILTER_DMS_ALERT_SET_TIME))
-        {
-            //printf("dms filter alert by time!");
+        //status_flag = SB_WARN_STATUS_BEGIN;
+        if(!filter_alert_by_time(&dms_abnormal_warn, FILTER_DMS_ALERT_SET_TIME)){
             goto out;
         }
+        if(!filter_alert_by_speed())
+            goto out;
     }else
         goto out;
 
 #if 1
-    playloadlen = build_dms_warn_frame(alert_type, uploadmsg);
+    playloadlen = build_dms_warn_frame(alert_type, status_flag, uploadmsg);
     printf("send dms alert %d!\n", alert_type);
     printf("dms alert frame len = %ld\n", sizeof(*uploadmsg));
-    printbuf((uint8_t *)uploadmsg, playloadlen);
+    //printbuf((uint8_t *)uploadmsg, playloadlen);
     message_queue_send(pSend, \
             SAMPLE_DEVICE_ID_DMS,\
             SAMPLE_CMD_WARNING_REPORT,\
@@ -1082,7 +1165,7 @@ void deal_wsi_dms_info2(dms_can_779 *msg)
     }else
         goto out;
 
-    playloadlen = build_dms_warn_frame(alert_type, uploadmsg);
+    playloadlen = build_dms_warn_frame(alert_type, status_flag, uploadmsg);
     WSI_DEBUG("send dms alert %d!\n", alert_type);
     WSI_DEBUG("dms alert frame len = %ld\n", sizeof(*uploadmsg));
     printbuf((uint8_t *)uploadmsg, playloadlen);
@@ -1233,7 +1316,7 @@ int do_snap_shot()
 
 #if defined ENABLE_DMS
     DsmWarnFrame *uploadmsg = (DsmWarnFrame *)&msgbuf[0];
-    playloadlen = build_dms_warn_frame(DMS_SANPSHOT_EVENT, uploadmsg);
+    playloadlen = build_dms_warn_frame(DMS_SANPSHOT_EVENT, SB_WARN_STATUS_NONE, uploadmsg);
     message_queue_send(pSend, \
             SAMPLE_DEVICE_ID_DMS,\
             SAMPLE_CMD_WARNING_REPORT,\
@@ -1242,7 +1325,7 @@ int do_snap_shot()
 
 #elif defined ENABLE_ADAS
     AdasWarnFrame *uploadmsg = (AdasWarnFrame *)&msgbuf[0];
-    playloadlen = build_adas_warn_frame(SB_WARN_TYPE_SNAP, uploadmsg);
+    playloadlen = build_adas_warn_frame(SB_WARN_TYPE_SNAP, SB_WARN_STATUS_NONE, uploadmsg);
     printf("sanp len = %d\n", playloadlen);
     message_queue_send(pSend, \
             SAMPLE_DEVICE_ID_ADAS,\
@@ -1289,17 +1372,31 @@ int deal_wsi_adas_can700(WsiFrame *sourcecan)
     static time_t hw_alert = 0;
     static time_t fcw_alert = 0;
     static time_t ldw_alert = 0;
+    char logbuf[256];
 
     uint32_t i = 0;
     uint8_t all_warning_masks[sizeof(MECANWarningMessage)] = {
         0x00, 0x00, 0x01, 0x00,
-        0xFF, 0x00, 0x00, 0x03};
+        0x0E, 0x00, 0x00, 0x03};
     uint8_t trigger_warning_masks[sizeof(MECANWarningMessage)] = {
         0x00, 0x00, 0x00, 0x00,
-        0xFF, 0x00, 0x00, 0x00};
+        0x0E, 0x00, 0x00, 0x00};
     uint8_t all_warning_data[sizeof(MECANWarningMessage)] = {0};
     uint8_t trigger_data[sizeof(MECANWarningMessage)] = {0};
 
+#if 0
+        snprintf(logbuf, sizeof(logbuf), "%x %x %x %x %x %x %x %x",\
+                sourcecan->warning[0],\
+                sourcecan->warning[1],\
+                sourcecan->warning[2],\
+                sourcecan->warning[3],\
+                sourcecan->warning[4],\
+                sourcecan->warning[5],\
+                sourcecan->warning[6],\
+                sourcecan->warning[7],\
+                sourcecan->warning[8]);  
+        data_log(logbuf);
+#endif
         //printbuf(sourcecan->warning, 8);
         memcpy(&can, sourcecan->warning, sizeof(sourcecan->warning));
 
@@ -1309,61 +1406,47 @@ int deal_wsi_adas_can700(WsiFrame *sourcecan)
         }
 
         if (0 == memcmp(all_warning_data, &g_last_warning_data, sizeof(g_last_warning_data))) {
-            //printf("can exit!\n");
             return 0;
         }
 
         //filter alert
         if(!filter_alert_by_speed())
             goto out;
-#if 1
-        if( (g_last_warning_data.headway_warning_level != can.headway_warning_level) || \
-                (0 != memcmp(trigger_data, &g_last_trigger_warning, sizeof(g_last_trigger_warning)) && 0 != trigger_data[4]) )
-        {
-            //printf("warning happened.........................\n");
-            memset(msgbuf, 0, sizeof(msgbuf));
-            //set_BCD_time(uploadmsg, sourcecan->time);
-        }
-#endif
+
         //LDW and FCW event
         if (0 != memcmp(trigger_data, &g_last_trigger_warning, sizeof(g_last_trigger_warning)) && 0 != trigger_data[4]) {
-            printf("------LDW/FCW event-----------\n");
             if (can.left_ldw || can.right_ldw) {
-                if(!filter_alert_by_time(&ldw_alert, FILTER_ADAS_ALERT_SET_TIME))
-                {
-                    printf("ldw filter alert by time!");
-                    goto out;
+                printf("------LDW event-----------\n");
+                if(!filter_alert_by_time(&ldw_alert, FILTER_ADAS_ALERT_SET_TIME)){
+                    printf("ldw filter alert by time!\n");
+                }else{
+                    memset(uploadmsg, 0, sizeof(*uploadmsg));
+                    playloadlen = build_adas_warn_frame(SB_WARN_TYPE_LDW,SB_WARN_STATUS_NONE, uploadmsg);
+
+                    if(can.left_ldw)
+                        uploadmsg->ldw_type = SOUND_TYPE_LLDW;
+                    if(can.right_ldw)
+                        uploadmsg->ldw_type = SOUND_TYPE_RLDW;
+
+                    WSI_DEBUG("send LDW alert message!\n");
+                    message_queue_send(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
+                            (uint8_t *)uploadmsg, \
+                            playloadlen);
                 }
-
-                memset(uploadmsg, 0, sizeof(*uploadmsg));
-                playloadlen = build_adas_warn_frame(SB_WARN_TYPE_LDW, uploadmsg);
-                uploadmsg->start_flag = SB_WARN_STATUS_EVENT;
-
-                if(can.left_ldw)
-                    uploadmsg->ldw_type = SOUND_TYPE_LLDW;
-                if(can.right_ldw)
-                    uploadmsg->ldw_type = SOUND_TYPE_RLDW;
-
-                WSI_DEBUG("send LDW alert message!\n");
-                message_queue_send(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
-                        (uint8_t *)uploadmsg, \
-                        playloadlen);
             }
             if (can.fcw_on) {
-                if(!filter_alert_by_time(&fcw_alert, FILTER_ADAS_ALERT_SET_TIME))
-                {
-                    printf("ldw filter alert by time!");
-                    goto out;
+                printf("------FCW event-----------\n");
+                if(!filter_alert_by_time(&fcw_alert, FILTER_ADAS_ALERT_SET_TIME)){
+                    printf("ldw filter alert by time!\n");
+                }else{
+                    playloadlen = build_adas_warn_frame(SB_WARN_TYPE_FCW,SB_WARN_STATUS_NONE, uploadmsg);
+                    uploadmsg->sound_type = SB_WARN_TYPE_FCW;
+
+                    WSI_DEBUG("send FCW alert message!\n");
+                    message_queue_send(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
+                            (uint8_t *)uploadmsg, \
+                            playloadlen);
                 }
-
-                playloadlen = build_adas_warn_frame(SB_WARN_TYPE_FCW, uploadmsg);
-                uploadmsg->start_flag = SB_WARN_STATUS_EVENT;
-                uploadmsg->sound_type = SB_WARN_TYPE_FCW;
-
-                WSI_DEBUG("send FCW alert message!\n");
-                message_queue_send(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
-                        (uint8_t *)uploadmsg, \
-                        playloadlen);
             }
         }
         //Headway
@@ -1371,47 +1454,31 @@ int deal_wsi_adas_can700(WsiFrame *sourcecan)
             printf("------Headway event-----------\n");
             printf("headway_warning_level:%d\n", can.headway_warning_level);
             //printf("headway_measurement:%d\n", can.headway_measurement);
-
-            if (HW_LEVEL_RED_CAR == can.headway_warning_level) {
-
-                if(!filter_alert_by_time(&hw_alert, FILTER_ADAS_ALERT_SET_TIME))
-                {
-                    printf("ldw filter alert by time!");
-                    goto out;
-                }
-
-                playloadlen = build_adas_warn_frame(SB_WARN_TYPE_HW, uploadmsg);
-                //uploadmsg->start_flag = SB_WARN_STATUS_BEGIN;
-                uploadmsg->start_flag = SB_WARN_STATUS_EVENT;
-                uploadmsg->sound_type = SB_WARN_TYPE_HW;
-
-                WSI_DEBUG("send HW alert message!\n");
-                message_queue_send(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
-                        (uint8_t *)uploadmsg, \
-                        playloadlen);
-
-            }
-
 #if 0
             if (HW_LEVEL_RED_CAR == can.headway_warning_level) {
-                playloadlen = build_adas_warn_frame(SB_WARN_TYPE_HW, uploadmsg);
-                //uploadmsg->start_flag = SB_WARN_STATUS_BEGIN;
-                uploadmsg->start_flag = SB_WARN_STATUS_EVENT;
-                uploadmsg->sound_type = SB_WARN_TYPE_HW;
-
-                WSI_DEBUG("send HW alert message!\n");
+                if(!filter_alert_by_time(&hw_alert, FILTER_ADAS_ALERT_SET_TIME)){
+                    printf("ldw filter alert by time!\n");
+                }else{
+                    playloadlen = build_adas_warn_frame(SB_WARN_TYPE_HW,SB_WARN_STATUS_NONE, uploadmsg);
+                    //uploadmsg->status_flag = SB_WARN_STATUS_BEGIN;
+                    uploadmsg->sound_type = SB_WARN_TYPE_HW;
+                    WSI_DEBUG("send HW alert message!\n");
+                    message_queue_send(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
+                            (uint8_t *)uploadmsg, \
+                            playloadlen);
+                }
+            }
+#else
+            if (HW_LEVEL_RED_CAR == can.headway_warning_level) {
+                playloadlen = build_adas_warn_frame(SB_WARN_TYPE_HW, SB_WARN_STATUS_BEGIN, uploadmsg);
+                WSI_DEBUG("send HW alert start message!\n");
                 message_queue_send(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
                         (uint8_t *)uploadmsg, \
                         playloadlen);
-
             } else if (HW_LEVEL_RED_CAR == \
                     g_last_warning_data.headway_warning_level) {
-                playloadlen = build_adas_warn_frame(SB_WARN_TYPE_HW, uploadmsg);
-                //uploadmsg->start_flag = SB_WARN_STATUS_END;
-                uploadmsg->start_flag = SB_WARN_STATUS_EVENT;
-                uploadmsg->sound_type = SB_WARN_TYPE_HW;
-
-                WSI_DEBUG("send HW alert2 message!\n");
+                playloadlen = build_adas_warn_frame(SB_WARN_TYPE_HW, SB_WARN_STATUS_END, uploadmsg);
+                WSI_DEBUG("send HW alert end message!\n");
                 message_queue_send(pSend,SAMPLE_DEVICE_ID_ADAS, SAMPLE_CMD_WARNING_REPORT,\
                         (uint8_t *)uploadmsg,\
                         playloadlen);
@@ -1428,11 +1495,11 @@ out:
 
 int deal_wsi_adas_can760(WsiFrame *sourcecan)
 {
-
     CAN760Info carinfo;
     //printf("760 come.........................\n");
     //printbuf(sourcecan->warning, 8);
     memcpy(&carinfo, sourcecan->warning, sizeof(carinfo));
+    can760_message_process(&carinfo, WRITE_REAL_TIME_MSG);
 #if 0
 #if 0
     printf("carinfo.brakes= %d\n",carinfo.brakes);
@@ -1454,8 +1521,6 @@ int deal_wsi_adas_can760(WsiFrame *sourcecan)
 #endif
     return 0;
 }
-
-
 
 
 int find_local_image_name(uint8_t type, uint32_t id, char *filepath)
@@ -1524,7 +1589,7 @@ static int32_t send_mm_req_ack(SBProtHeader *pHeader, int len)
         mm_id = MY_NTOHL(mm_ptr->id);
         mm_type = mm_ptr->type;
         printf("req mm_type = %d\n", mm_type);
-        printf("req mm_id = %08d\n", mm_id);
+        printf("req mm_id = %10u\n", mm_id);
 
         filesize = find_local_image_name(mm_type, mm_id,  g_pkg_status_p->filepath);
         if(filesize > 0){//media found
@@ -1559,7 +1624,7 @@ void clear_old_media(uint32_t id)
     uint32_t i = 0;
 
     for(i=s_last_id; i<id; i++){
-        sprintf(filepath,"%s%08d", SNAP_SHOT_JPEG_PATH, i);
+        mmid_to_filename(i, 0, filepath);
         printf("delete old media:%s\n", filepath);
         remove(filepath);
     }

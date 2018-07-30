@@ -207,7 +207,8 @@ int32_t find_mm_resource(uint32_t id, MmInfo_node *m)
 void delete_file(uint32_t id)
 {
     char filepath[100];
-    sprintf(filepath, "%s%08d",SNAP_SHOT_JPEG_PATH,id);
+
+    mmid_to_filename(id, 0, filepath);
     printf("rm jpeg %s\n", filepath);
     remove(filepath);
 }
@@ -285,3 +286,69 @@ size_t ReadFile(char *buf, int len, const char *filename)
 
     return size;
 }
+
+
+
+static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+static FILE* log_fp = NULL;
+
+static int create_logfile(const char *filename, bool truncate)
+{
+    if (!filename) {
+        printf("filename is empty\n");
+        exit(1);
+    }
+
+    log_fp = fopen(filename, truncate?"w":"a+");
+    if (log_fp == NULL)
+    {
+        printf("open %s failed %s\n", filename, strerror(errno));
+        exit(2);
+        return -1;
+    }
+    return 0;
+}
+
+void *data_log_init(const char *filename, bool truncate)
+{
+    if (!log_fp)
+        create_logfile(filename, truncate);
+    return log_fp;
+}
+
+#if 0
+#define LOG_TAG "my_data_log"
+#include <utils/CallStack.h>
+using namespace android;
+extern "C" void dump_stack_android(void)
+{
+    CallStack stack;
+    stack.update();
+    stack.log(LOG_TAG);
+}
+#endif
+
+void data_log(const char *log)
+{
+    static int line_count = 0;
+    pthread_mutex_lock(&lock);
+    //dump_stack_android();
+    if (log_fp)
+        fprintf(log_fp, "%s\n",log);
+    else
+        fprintf(stderr, "no log_fp\n");
+    line_count ++;
+    #define FLUSH_THRESHOLD (1)
+    if (FLUSH_THRESHOLD == line_count) {
+        fflush(log_fp);
+        line_count = 0;
+    }
+    pthread_mutex_unlock(&lock);
+}
+
+
+
+
+
+
+
