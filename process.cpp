@@ -717,8 +717,7 @@ int filter_alert_by_speed()
 #endif
 #endif
 
-    if(tmp.car_speed <= para.warning_speed_val)
-    {
+    if(tmp.car_speed <= para.warning_speed_val){
         printf("alert filter by speed(%d),cur_speed(%d)!\n", para.warning_speed_val, tmp.car_speed);
         return 0;
     }
@@ -798,10 +797,11 @@ int build_adas_warn_frame(int type, char status_flag, AdasWarnFrame *uploadmsg)
     uploadmsg->mm_num = 0;
     get_real_time_msg(uploadmsg);
 
-    if(status_flag == SB_WARN_STATUS_END){
+#if 1
+    if(status_flag == SB_WARN_STATUS_BEGIN){
         goto out;
     }
-    
+#endif
 
     switch(type)
     {
@@ -904,10 +904,11 @@ int build_dms_warn_frame(int type, char status_flag, DsmWarnFrame *uploadmsg)
     memcpy(uploadmsg->time, tmp.time, sizeof(uploadmsg->time));
     memcpy(&uploadmsg->car_status, &tmp.car_status, sizeof(uploadmsg->car_status));
 
-    if(status_flag == SB_WARN_STATUS_END){
+#if 1
+    if(status_flag == SB_WARN_STATUS_BEGIN){
         goto out;
     }
-
+#endif
     switch(type)
     {
         case DMS_FATIGUE_WARN:
@@ -1027,8 +1028,6 @@ void deal_wsi_dms_info(WsiFrame *can)
         //printf("alert is the same!\n");
         goto out;
     }
-
-
 #if 0
     printf("msg.alert_eye_close1 %d\n", msg.alert_eye_close1);
     printf("msg.alert_eye_close2 %d\n", msg.alert_eye_close2);
